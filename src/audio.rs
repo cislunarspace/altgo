@@ -25,30 +25,45 @@ impl Buffer {
 
     /// 向缓冲区追加数据。
     pub fn write(&self, chunk: &[u8]) {
-        let mut data = self.data.lock().unwrap();
+        let mut data = self
+            .data
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
         data.extend_from_slice(chunk);
     }
 
     /// 返回当前缓冲区内容的副本。
     pub fn read_all(&self) -> Vec<u8> {
-        self.data.lock().unwrap().clone()
+        self.data
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .clone()
     }
 
     /// 清空缓冲区。
     pub fn reset(&self) {
-        self.data.lock().unwrap().clear();
+        self.data
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .clear();
     }
 
     #[allow(dead_code)]
     /// 返回缓冲区当前字节数。
     pub fn len(&self) -> usize {
-        self.data.lock().unwrap().len()
+        self.data
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .len()
     }
 
     #[allow(dead_code)]
     /// 缓冲区是否为空。
     pub fn is_empty(&self) -> bool {
-        self.data.lock().unwrap().is_empty()
+        self.data
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .is_empty()
     }
 }
 
@@ -103,7 +118,7 @@ pub fn encode_wav(
 }
 
 /// 将 16 位 PCM WAV 数据解码为 `f32` 采样（范围 [-1.0, 1.0]）。
-#[allow(dead_code)]
+#[cfg(test)]
 pub fn decode_wav_to_f32(wav_data: &[u8]) -> Result<Vec<f32>, &'static str> {
     if wav_data.len() < 44 {
         return Err("WAV data too short");

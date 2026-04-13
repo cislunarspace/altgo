@@ -19,6 +19,9 @@ mod recorder;
 mod state_machine;
 mod transcriber;
 
+#[cfg(feature = "gui")]
+mod gui;
+
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -35,6 +38,10 @@ struct Cli {
     /// Print version
     #[arg(short = 'V', long)]
     version: bool,
+
+    /// Launch the GUI
+    #[arg(long)]
+    gui: bool,
 }
 
 /// 语音识别后端的包装枚举，支持 API 和本地两种引擎。
@@ -51,6 +58,19 @@ async fn main() -> anyhow::Result<()> {
     if cli.version {
         println!("altgo {}", env!("CARGO_PKG_VERSION"));
         return Ok(());
+    }
+
+    #[cfg(feature = "gui")]
+    if cli.gui {
+        let state = gui::state::global_state();
+        // Build tray icon before running the GUI event loop.
+        // We need a tao AppHandle, which we get from the native options viewport.
+        return gui::run_gui(state);
+    }
+
+    #[cfg(not(feature = "gui"))]
+    if cli.gui {
+        anyhow::bail!("GUI not available — rebuild with --features gui");
     }
 
     let config_path = cli
@@ -99,8 +119,13 @@ async fn main() -> anyhow::Result<()> {
     };
 
     // Initialize polisher.
-    let polish_level = polisher::PolishLevel::from_str(&cfg.polisher.level)
-        .unwrap_or(polisher::PolishLevel::Medium);
+    let polish_level = polisher::PolishLevel::from_str(&cfg.polisher.level).unwrap_or_else(|_| {
+        tracing::warn!(
+            level = %cfg.polisher.level,
+            "invalid polish level in config, using 'medium'"
+        );
+        polisher::PolishLevel::Medium
+    });
     let formatter = polisher::LLMFormatter::with_max_tokens(
         cfg.polisher.api_key.clone(),
         cfg.polisher.api_base_url.clone(),

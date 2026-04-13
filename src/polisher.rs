@@ -187,7 +187,10 @@ impl LLMFormatter {
 
         let status = resp.status();
         if !status.is_success() {
-            let body = resp.text().await.unwrap_or_default();
+            let body = resp
+                .text()
+                .await
+                .context("failed to read LLM API error body")?;
             return Err(anyhow!("LLM API returned {}: {}", status, body));
         }
 

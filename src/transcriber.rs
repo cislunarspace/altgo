@@ -93,7 +93,10 @@ impl WhisperApi {
 
         let status = resp.status();
         if !status.is_success() {
-            let body = resp.text().await.unwrap_or_default();
+            let body = resp
+                .text()
+                .await
+                .context("failed to read Whisper API error body")?;
             return Err(anyhow!("Whisper API returned {}: {}", status, body));
         }
 
