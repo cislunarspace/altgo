@@ -8,6 +8,8 @@ mod output;
 mod polisher;
 #[allow(dead_code)]
 mod state_machine;
+#[allow(dead_code)]
+mod transcriber;
 
 use clap::Parser;
 
