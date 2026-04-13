@@ -1,7 +1,14 @@
+//! Linux 输出模块。
+//!
+//! 剪切板支持三种后端：`xclip`、`xsel`、`wl-copy`（Wayland）。
+//! 根据 `XDG_SESSION_TYPE` 自动检测可用工具。
+//!
+//! 桌面通知通过 `notify-send` 发送。
+
 use super::truncate_text;
 use std::process::Command;
 
-/// Available clipboard management tools on Linux.
+/// Linux 上可用的剪切板管理工具。
 #[derive(Debug, Clone, Copy)]
 pub enum ClipboardTool {
     XClip,
@@ -19,7 +26,7 @@ impl std::fmt::Display for ClipboardTool {
     }
 }
 
-/// Detect available clipboard tool.
+/// 检测系统上可用的剪切板工具。
 pub fn detect_clipboard_tool() -> Option<ClipboardTool> {
     let session_type = std::env::var("XDG_SESSION_TYPE").unwrap_or_default();
 
@@ -46,9 +53,7 @@ pub fn detect_clipboard_tool() -> Option<ClipboardTool> {
     None
 }
 
-/// Write text to the system clipboard using a 5-second timeout.
-///
-/// Spawns a blocking task to avoid blocking the Tokio runtime.
+/// 将文本写入系统剪切板（异步，5 秒超时）。
 pub async fn write_clipboard(text: &str) -> anyhow::Result<()> {
     let tool = detect_clipboard_tool()
         .ok_or_else(|| anyhow::anyhow!("no clipboard tool found (tried xclip, xsel, wl-copy)"))?;
@@ -58,7 +63,7 @@ pub async fn write_clipboard(text: &str) -> anyhow::Result<()> {
         .map_err(|e| anyhow::anyhow!("clipboard task panicked: {e}"))?
 }
 
-/// Write text using a specific clipboard tool.
+/// 使用指定的剪切板工具写入文本。
 pub fn write_clipboard_with_tool(tool: ClipboardTool, text: &str) -> anyhow::Result<()> {
     let args: Vec<&str> = match tool {
         ClipboardTool::XClip => vec!["-selection", "clipboard"],
@@ -91,7 +96,7 @@ pub fn write_clipboard_with_tool(tool: ClipboardTool, text: &str) -> anyhow::Res
     }
 }
 
-/// Show a desktop notification via notify-send.
+/// 通过 `notify-send` 显示桌面通知。
 pub fn notify(title: &str, body: &str, timeout_ms: u64) -> anyhow::Result<()> {
     let output = Command::new("notify-send")
         .arg("-t")
@@ -113,12 +118,12 @@ pub fn notify(title: &str, body: &str, timeout_ms: u64) -> anyhow::Result<()> {
     }
 }
 
-/// Show "processing speech" notification.
+/// 显示"正在处理语音"通知。
 pub fn notify_processing() -> anyhow::Result<()> {
     notify("altgo", "正在处理语音...", 5000)
 }
 
-/// Show transcription result notification.
+/// 显示语音识别结果通知。
 pub fn notify_result(text: &str, timeout_ms: u64) -> anyhow::Result<()> {
     let truncated = truncate_text(text, 200);
     notify("altgo", &truncated, timeout_ms)

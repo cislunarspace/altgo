@@ -1,17 +1,19 @@
+//! Windows 输出模块。
+//!
+//! 剪切板通过 `clip.exe` 写入（需要 UTF-16LE 编码）。
+//! 通知通过 PowerShell/WPF 创建半透明浮动窗口实现，
+//! 位于屏幕右下角，超时后自动消失。如果 WPF 不可用，
+//! 回退到 MessageBox。
+
 use super::truncate_text;
 use std::process::Command;
 
-/// Write text to the Windows clipboard via `clip.exe`.
-///
-/// `clip.exe` expects UTF-16LE encoded text on stdin.
+/// 通过 `clip.exe` 将文本写入 Windows 剪切板（UTF-16LE 编码）。
 pub async fn write_clipboard(text: &str) -> anyhow::Result<()> {
     let text = text.to_string();
     tokio::task::spawn_blocking(move || {
         // Convert to UTF-16LE (Windows native clipboard encoding).
-        let utf16: Vec<u8> = text
-            .encode_utf16()
-            .flat_map(|u| u.to_le_bytes())
-            .collect();
+        let utf16: Vec<u8> = text.encode_utf16().flat_map(|u| u.to_le_bytes()).collect();
 
         let output = Command::new("clip")
             .stdin(std::process::Stdio::piped())
@@ -39,11 +41,10 @@ pub async fn write_clipboard(text: &str) -> anyhow::Result<()> {
     .map_err(|e| anyhow::anyhow!("clipboard task panicked: {e}"))?
 }
 
-/// Show a floating notification window via PowerShell/WPF.
+/// 通过 PowerShell/WPF 显示浮动通知窗口。
 ///
-/// Creates a small, semi-transparent, borderless window near the bottom-right
-/// of the screen that auto-dismisses after `timeout_ms`.  Falls back to
-/// MessageBox if WPF is unavailable.
+/// 在屏幕右下角创建半透明无边框窗口，超时后自动消失。
+/// 如果 WPF 不可用，回退到 MessageBox。
 pub fn notify(title: &str, body: &str, timeout_ms: u64) -> anyhow::Result<()> {
     let truncated = truncate_text(body, 200);
     let timeout_sec = (timeout_ms as f64) / 1000.0;
@@ -110,14 +111,18 @@ fn format_ps1_script(title: &str, body: &str, timeout_sec: f64) -> String {
     s.push_str("            BorderBrush=\"#44FFFFFF\" BorderThickness=\"1\">\n");
     s.push_str("        <StackPanel>\n");
     s.push_str("            <TextBlock Foreground=\"#CCFFFFFF\"\n");
-    s.push_str("                       FontSize=\"13\" FontWeight=\"SemiBold\" Margin=\"0,0,0,4\"/>\n");
+    s.push_str(
+        "                       FontSize=\"13\" FontWeight=\"SemiBold\" Margin=\"0,0,0,4\"/>\n",
+    );
     s.push_str("            <TextBlock Foreground=\"#AAFFFFFF\"\n");
     s.push_str("                       FontSize=\"12\" TextWrapping=\"Wrap\"/>\n");
     s.push_str("        </StackPanel>\n");
     s.push_str("    </Border>\n");
     s.push_str("</Window>\n");
     s.push_str("\"@\n\n");
-    s.push_str("    $reader = [System.Xml.XmlReader]::Create([System.IO.StringReader]::new($xaml))\n");
+    s.push_str(
+        "    $reader = [System.Xml.XmlReader]::Create([System.IO.StringReader]::new($xaml))\n",
+    );
     s.push_str("    $window = [System.Windows.Markup.XamlReader]::Load($reader)\n\n");
     s.push_str("    # Set text after loading XAML to avoid parsing issues.\n");
     s.push_str("    $window.Content.Child.Children[0].Text = '");
@@ -149,12 +154,12 @@ fn format_ps1_script(title: &str, body: &str, timeout_sec: f64) -> String {
     s
 }
 
-/// Show "processing speech" notification.
+/// 显示"正在处理语音"通知。
 pub fn notify_processing() -> anyhow::Result<()> {
     notify("altgo", "正在处理语音...", 5000)
 }
 
-/// Show transcription result notification.
+/// 显示语音识别结果通知。
 pub fn notify_result(text: &str, timeout_ms: u64) -> anyhow::Result<()> {
     let truncated = truncate_text(text, 200);
     notify("altgo", &truncated, timeout_ms)

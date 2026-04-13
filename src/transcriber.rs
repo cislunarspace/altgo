@@ -1,13 +1,24 @@
+//! 语音识别模块。
+//!
+//! 提供两种语音识别后端：
+//!
+//! - `WhisperApi`：通过 HTTP multipart 请求调用兼容 OpenAI 的 Whisper API
+//! - `LocalWhisper`：通过子进程调用本地 `whisper-cli` 二进制文件
+//!
+//! 两种后端均返回 `TranscribeResult`，包含识别文本和语言信息。
+
 use anyhow::{anyhow, Context};
 use reqwest::Client;
 use serde::Deserialize;
 use std::time::Duration;
 
-/// Result of a transcription.
+/// 语音识别结果。
 #[derive(Debug)]
 #[allow(dead_code)]
 pub struct TranscribeResult {
+    /// 识别出的文本
     pub text: String,
+    /// 检测到的语言代码
     pub language: String,
 }
 
@@ -17,7 +28,9 @@ struct WhisperResponse {
     language: Option<String>,
 }
 
-/// OpenAI Whisper API transcriber.
+/// OpenAI Whisper API 语音识别器。
+///
+/// 通过 HTTP multipart 请求调用兼容 OpenAI 的 Whisper API 端点。
 #[derive(Clone)]
 pub struct WhisperApi {
     api_key: String,
@@ -28,6 +41,7 @@ pub struct WhisperApi {
 }
 
 impl WhisperApi {
+    /// 创建新的 API 语音识别器。
     pub fn new(
         api_key: String,
         api_base_url: String,
@@ -48,6 +62,7 @@ impl WhisperApi {
         }
     }
 
+    /// 通过 API 识别音频数据，返回识别结果。
     pub async fn transcribe(&self, audio_data: &[u8]) -> anyhow::Result<TranscribeResult> {
         if audio_data.is_empty() {
             return Err(anyhow!("empty audio data"));
@@ -94,9 +109,9 @@ impl WhisperApi {
     }
 }
 
-/// Local whisper.cpp transcriber using FFI.
+/// 本地 whisper.cpp 语音识别器。
 ///
-/// This requires whisper.cpp shared libraries to be available at runtime.
+/// 通过子进程调用 `whisper-cli` 二进制文件，避免 FFI 构建复杂性。
 #[derive(Clone)]
 pub struct LocalWhisper {
     model_path: String,
@@ -104,6 +119,10 @@ pub struct LocalWhisper {
 }
 
 impl LocalWhisper {
+    /// 创建新的本地语音识别器。
+    ///
+    /// `model_path`：whisper 模型文件路径
+    /// `language`：语言代码
     pub fn new(model_path: String, language: String) -> Self {
         Self {
             model_path,
@@ -111,11 +130,9 @@ impl LocalWhisper {
         }
     }
 
-    /// Transcribe using the `whisper-cpp` binary as a subprocess.
+    /// 通过本地 `whisper-cli` 子进程识别音频数据。
     ///
-    /// This is a simpler approach than FFI and avoids build complexity.
-    /// The whisper.cpp `main` binary must be built and available in PATH or
-    /// at `whisper.cpp/build/bin/whisper-cli`.
+    /// 音频数据先写入临时文件，然后调用 whisper-cli 进行识别。
     pub async fn transcribe(&self, audio_data: &[u8]) -> anyhow::Result<TranscribeResult> {
         if audio_data.is_empty() {
             return Err(anyhow!("empty audio data"));

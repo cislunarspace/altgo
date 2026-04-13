@@ -1,3 +1,8 @@
+//! Linux 录音器。
+//!
+//! 使用 `parecord` 子进程从默认 PulseAudio 音频源捕获 16 位 PCM 音频（16kHz 单声道）。
+//! 在独立线程中运行，通过共享的 `Buffer` 累积音频数据。
+
 use crate::audio::{self, Buffer};
 use anyhow::Result;
 use std::io::Read;
@@ -5,10 +10,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread::JoinHandle;
 
-/// PulseAudio recorder that captures audio from the default source.
-///
-/// Uses `parecord` subprocess for reliable PulseAudio capture.
-/// Records 16-bit PCM at 16kHz mono.
+/// PulseAudio 录音器，从默认音频源捕获 16 位 PCM 音频（16kHz 单声道）。
 pub struct PulseRecorder {
     sample_rate: u32,
     channels: u32,
@@ -18,6 +20,7 @@ pub struct PulseRecorder {
 }
 
 impl PulseRecorder {
+    /// 创建新的录音器。
     pub fn new(sample_rate: u32, channels: u32) -> Self {
         Self {
             sample_rate,
@@ -28,7 +31,7 @@ impl PulseRecorder {
         }
     }
 
-    /// Start recording from the default PulseAudio source.
+    /// 开始录音。
     pub fn start(&mut self) -> Result<()> {
         if self.recording.load(Ordering::SeqCst) {
             return Err(anyhow::anyhow!("already recording"));
@@ -91,7 +94,7 @@ impl PulseRecorder {
         Ok(())
     }
 
-    /// Stop recording and return WAV-encoded audio data.
+    /// 停止录音并返回 WAV 编码的音频数据。
     pub fn stop(&self) -> Result<Vec<u8>> {
         self.recording.store(false, Ordering::SeqCst);
 

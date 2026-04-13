@@ -1,43 +1,61 @@
+//! 音频模块。
+//!
+//! 提供线程安全的 PCM 音频缓冲区和 WAV 编码/解码功能。
+//!
+//! - `Buffer`：基于 `Mutex<Vec<u8>>` 的线程安全字节缓冲区，用于累积录音数据
+//! - `encode_wav`：将原始 PCM 数据编码为带 44 字节头的 WAV 格式
+//! - `decode_wav_to_f32`：将 16 位 PCM WAV 数据解码为 [-1.0, 1.0] 范围的浮点采样
+
 use std::sync::Mutex;
 
-/// Thread-safe byte buffer for accumulating PCM audio samples.
+/// 线程安全的 PCM 音频字节缓冲区。
+///
+/// 使用 `Mutex<Vec<u8>>` 保护内部数据，支持跨线程并发读写。
 pub struct Buffer {
     data: Mutex<Vec<u8>>,
 }
 
 impl Buffer {
+    /// 创建新的空缓冲区。
     pub fn new() -> Self {
         Self {
             data: Mutex::new(Vec::new()),
         }
     }
 
+    /// 向缓冲区追加数据。
     pub fn write(&self, chunk: &[u8]) {
         let mut data = self.data.lock().unwrap();
         data.extend_from_slice(chunk);
     }
 
-    /// Returns a copy of the current buffer contents.
+    /// 返回当前缓冲区内容的副本。
     pub fn read_all(&self) -> Vec<u8> {
         self.data.lock().unwrap().clone()
     }
 
+    /// 清空缓冲区。
     pub fn reset(&self) {
         self.data.lock().unwrap().clear();
     }
 
     #[allow(dead_code)]
+    /// 返回缓冲区当前字节数。
     pub fn len(&self) -> usize {
         self.data.lock().unwrap().len()
     }
 
     #[allow(dead_code)]
+    /// 缓冲区是否为空。
     pub fn is_empty(&self) -> bool {
         self.data.lock().unwrap().is_empty()
     }
 }
 
-/// Encode raw PCM data into WAV format with a 44-byte header.
+/// 将原始 PCM 数据编码为带 44 字节头的 WAV 格式。
+///
+/// 参数：`pcm_data`（PCM 字节数据）、`sample_rate`（采样率）、
+/// `channels`（声道数）、`bits_per_sample`（位深）。
 pub fn encode_wav(
     pcm_data: &[u8],
     sample_rate: u32,
@@ -84,7 +102,7 @@ pub fn encode_wav(
     Ok(wav)
 }
 
-/// Decode 16-bit PCM WAV data to float32 samples in [-1.0, 1.0].
+/// 将 16 位 PCM WAV 数据解码为 `f32` 采样（范围 [-1.0, 1.0]）。
 #[allow(dead_code)]
 pub fn decode_wav_to_f32(wav_data: &[u8]) -> Result<Vec<f32>, &'static str> {
     if wav_data.len() < 44 {

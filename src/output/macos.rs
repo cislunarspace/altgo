@@ -1,7 +1,11 @@
+//! macOS 输出模块。
+//!
+//! 剪切板通过 `pbcopy` 写入，通知通过 `osascript` 的 `display notification` 发送。
+
 use super::truncate_text;
 use std::process::Command;
 
-/// Write text to the macOS clipboard via `pbcopy`.
+/// 通过 `pbcopy` 将文本写入 macOS 剪切板。
 pub async fn write_clipboard(text: &str) -> anyhow::Result<()> {
     let text = text.to_string();
     tokio::task::spawn_blocking(move || {
@@ -31,7 +35,7 @@ pub async fn write_clipboard(text: &str) -> anyhow::Result<()> {
     .map_err(|e| anyhow::anyhow!("clipboard task panicked: {e}"))?
 }
 
-/// Show a macOS notification via `osascript`.
+/// 通过 `osascript` 显示 macOS 通知。
 pub fn notify(title: &str, body: &str, _timeout_ms: u64) -> anyhow::Result<()> {
     let truncated = truncate_text(body, 200);
     let script = format!(
@@ -55,12 +59,12 @@ pub fn notify(title: &str, body: &str, _timeout_ms: u64) -> anyhow::Result<()> {
     }
 }
 
-/// Show "processing speech" notification.
+/// 显示"正在处理语音"通知。
 pub fn notify_processing() -> anyhow::Result<()> {
     notify("altgo", "正在处理语音...", 5000)
 }
 
-/// Show transcription result notification.
+/// 显示语音识别结果通知。
 pub fn notify_result(text: &str, timeout_ms: u64) -> anyhow::Result<()> {
     let truncated = truncate_text(text, 200);
     notify("altgo", &truncated, timeout_ms)

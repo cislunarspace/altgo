@@ -1,19 +1,34 @@
+//! 文本润色模块。
+//!
+//! 使用 LLM 对语音识别结果进行后期处理，支持 4 个润色级别：
+//!
+//! - `none`：不润色，直接返回原文
+//! - `light`：修复标点和明显错别字
+//! - `medium`：修复标点、错别字和语病，使语句更通顺
+//! - `heavy`：重写为结构清晰、表达准确的文字
+//!
+//! 使用兼容 OpenAI 的聊天 API，支持指数退避重试（最多 3 次）。
+
 use anyhow::{anyhow, Context};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
-/// Polish level controlling how aggressively the LLM rewrites text.
+/// 润色级别，控制 LLM 对文本的改写程度。
 #[derive(Debug, Clone, Copy)]
 pub enum PolishLevel {
+    /// 不润色
     None,
+    /// 轻度润色：修复标点和错别字
     Light,
+    /// 中度润色：修复标点、错别字和语病
     Medium,
+    /// 重度润色：重写为结构清晰的文字
     Heavy,
 }
 
 impl PolishLevel {
-    #[allow(dead_code)]
+    #[cfg(test)]
     fn as_str(self) -> &'static str {
         match self {
             PolishLevel::None => "none",
@@ -71,6 +86,10 @@ struct ChatChoice {
     message: ChatMessage,
 }
 
+/// LLM 文本润色器。
+///
+/// 使用兼容 OpenAI 的聊天 API 对文本进行润色处理，
+/// 支持指数退避重试（最多 3 次）。
 #[derive(Clone)]
 pub struct LLMFormatter {
     api_key: String,
@@ -82,11 +101,13 @@ pub struct LLMFormatter {
 }
 
 impl LLMFormatter {
+    /// 创建新的润色器（使用默认 max_tokens=1024）。
     #[allow(dead_code)]
     pub fn new(api_key: String, api_base_url: String, model: String, timeout: Duration) -> Self {
         Self::with_max_tokens(api_key, api_base_url, model, timeout, 1024)
     }
 
+    /// 创建新的润色器，指定最大 token 数。
     pub fn with_max_tokens(
         api_key: String,
         api_base_url: String,
@@ -108,8 +129,10 @@ impl LLMFormatter {
         }
     }
 
-    /// Polish text using the configured LLM. Returns the original text if
-    /// level is None or if polishing fails.
+    /// 使用 LLM 润色文本。
+    ///
+    /// 如果级别为 `None` 或文本为空，直接返回原文。
+    /// 润色失败时返回错误。
     pub async fn polish(&self, text: &str, level: PolishLevel) -> anyhow::Result<String> {
         if matches!(level, PolishLevel::None) || text.is_empty() {
             return Ok(text.to_string());

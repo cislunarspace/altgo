@@ -1,3 +1,12 @@
+//! Windows 录音器。
+//!
+//! 优先使用 `ffmpeg`（通过 dshow 接口），如果不可用则回退到 `sox`。
+//! 自动解析 dshow 音频设备的替代名称（PnP ASCII 名称），
+//! 以避免中文设备名在 PowerShell→ffmpeg 传递中的编码问题。
+//!
+//! 在独立线程中捕获 16 位 PCM 音频（16kHz 单声道），
+//! 通过共享的 `Buffer` 累积音频数据。
+
 use crate::audio::{self, Buffer};
 use anyhow::Result;
 use std::io::Read;
@@ -5,10 +14,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::thread::JoinHandle;
 
-/// Windows recorder using `ffmpeg` or `sox` for audio capture.
-///
-/// Records 16-bit PCM at 16kHz mono via subprocess.
-/// Requires `ffmpeg` or `sox` to be installed and available in PATH.
+/// Windows 录音器，优先使用 `ffmpeg`（dshow），不可用时回退到 `sox`。
 pub struct WindowsRecorder {
     sample_rate: u32,
     channels: u32,
@@ -17,7 +23,7 @@ pub struct WindowsRecorder {
     done: std::sync::Mutex<Option<JoinHandle<()>>>,
 }
 
-/// Find the ffmpeg binary, searching PATH and common install locations.
+/// 在 PATH 和常见安装位置中查找 ffmpeg 可执行文件。
 fn find_ffmpeg() -> String {
     // Try PATH first via cmd's `where` (more reliable than PowerShell's where).
     if let Ok(output) = std::process::Command::new("cmd")
@@ -65,14 +71,10 @@ fn find_ffmpeg() -> String {
     "ffmpeg".to_string()
 }
 
-/// Resolve the dshow audio device string (e.g. `"audio=@device_..."`).
+/// 解析 dshow 音频设备字符串。
 ///
-/// On many Windows systems `audio=default` does not work because dshow
-/// requires the exact device name.  Chinese device names cannot be passed
-/// reliably through PowerShell→ffmpeg due to encoding issues, so we use
-/// the device's **alternative PnP name** (ASCII-safe `@device_...` string).
-///
-/// Returns `"audio=<alt_name>"` on success, `"audio=default"` on failure.
+/// 由于中文设备名在 PowerShell→ffmpeg 传递中存在编码问题，
+/// 使用设备的 PnP 替代名称（ASCII 安全的 `@device_...` 字符串）。
 fn resolve_audio_device() -> &'static str {
     static DEVICE: OnceLock<String> = OnceLock::new();
     DEVICE.get_or_init(|| {
@@ -142,6 +144,7 @@ fn resolve_audio_device() -> &'static str {
 }
 
 impl WindowsRecorder {
+    /// 创建新的录音器。
     pub fn new(sample_rate: u32, channels: u32) -> Self {
         Self {
             sample_rate,
@@ -152,7 +155,7 @@ impl WindowsRecorder {
         }
     }
 
-    /// Start recording from the default audio input device.
+    /// 开始录音。
     pub fn start(&mut self) -> Result<()> {
         if self.recording.load(Ordering::SeqCst) {
             return Err(anyhow::anyhow!("already recording"));
@@ -258,7 +261,7 @@ impl WindowsRecorder {
         Ok(())
     }
 
-    /// Stop recording and return WAV-encoded audio data.
+    /// 停止录音并返回 WAV 编码的音频数据。
     pub fn stop(&self) -> Result<Vec<u8>> {
         self.recording.store(false, Ordering::SeqCst);
 

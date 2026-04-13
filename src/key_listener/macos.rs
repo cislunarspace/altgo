@@ -1,3 +1,11 @@
+//! macOS 按键监听器。
+//!
+//! 通过内联 Swift 脚本使用 CGEvent tap 监听全局键盘事件。
+//! 需要用户在系统设置 → 隐私与安全性 → 辅助功能中授予权限。
+//!
+//! Swift 脚本创建一个只读的事件监听 tap，将按键事件输出到 stdout，
+//! Rust 端解析 "PRESS <keycode>" / "RELEASE <keycode>" 格式的行。
+
 use super::KeyEvent;
 use anyhow::{Context, Result};
 use std::io::BufRead;
@@ -6,14 +14,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
-/// macOS key listener using `hidutil` for monitoring key events.
+/// macOS 按键监听器。
 ///
-/// On macOS, global key listening requires Accessibility permissions.
-/// Users must grant access in System Settings → Privacy & Security → Accessibility.
-///
-/// This implementation uses a small Swift helper script to tap into key events
-/// via CGEvent, since hidutil alone cannot provide real-time key event monitoring
-/// in the way needed.
+/// 通过内联 Swift 脚本使用 CGEvent tap 监听全局键盘事件。
+/// 需要辅助功能（Accessibility）权限。
 pub struct MacOSListener {
     key_name: String,
     running: Arc<AtomicBool>,
@@ -21,6 +25,7 @@ pub struct MacOSListener {
 }
 
 impl MacOSListener {
+    /// 创建新的 macOS 监听器。
     pub fn new(key_name: &str) -> Result<Self> {
         Ok(Self {
             key_name: key_name.to_string(),
@@ -29,7 +34,7 @@ impl MacOSListener {
         })
     }
 
-    /// Start listening for key events via a Swift CGEvent tap helper.
+    /// 开始监听按键事件，通过 Swift CGEvent tap 实现。
     pub fn start(&mut self) -> Result<mpsc::UnboundedReceiver<KeyEvent>> {
         let keycode = self.resolve_keycode();
 
@@ -56,8 +61,9 @@ impl MacOSListener {
         let target_keycode = keycode?;
         std::thread::spawn(move || {
             let reader = std::io::BufReader::new(stdout);
-            for line in reader.lines().flatten() {
+            for line in reader.lines().map_while(Result::ok) {
                 if !running.load(Ordering::SeqCst) {
+                    tracing::info!("key listener thread stopped by user");
                     break;
                 }
                 // Parse "PRESS <keycode>" or "RELEASE <keycode>" from swift script.
@@ -65,23 +71,31 @@ impl MacOSListener {
                 if let Some(rest) = trimmed.strip_prefix("PRESS ") {
                     if let Ok(code) = rest.parse::<u32>() {
                         if code == target_keycode && tx.send(KeyEvent { pressed: true }).is_err() {
+                            tracing::warn!(
+                                "key event receiver dropped, key listener thread exiting"
+                            );
                             break;
                         }
                     }
                 } else if let Some(rest) = trimmed.strip_prefix("RELEASE ") {
                     if let Ok(code) = rest.parse::<u32>() {
                         if code == target_keycode && tx.send(KeyEvent { pressed: false }).is_err() {
+                            tracing::warn!(
+                                "key event receiver dropped, key listener thread exiting"
+                            );
                             break;
                         }
                     }
                 }
             }
+            tracing::warn!("Swift key listener stdout closed, key listener thread exiting");
         });
 
         self.child = Some(child);
         Ok(rx)
     }
 
+    /// 停止监听。
     pub fn stop(&mut self) {
         self.running.store(false, Ordering::SeqCst);
         if let Some(child) = self.child.as_mut() {

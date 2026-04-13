@@ -1,3 +1,9 @@
+//! macOS 录音器。
+//!
+//! 优先使用 `sox`，如果不可用则回退到 `ffmpeg`（使用 avfoundation 输入）。
+//! 在独立线程中捕获 16 位 PCM 音频（16kHz 单声道），
+//! 通过共享的 `Buffer` 累积音频数据。
+
 use crate::audio::{self, Buffer};
 use anyhow::Result;
 use std::io::Read;
@@ -5,10 +11,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread::JoinHandle;
 
-/// macOS recorder using `sox` (Sound eXchange) or `ffmpeg` for audio capture.
-///
-/// Records 16-bit PCM at 16kHz mono via subprocess.
-/// Requires `sox` to be installed (`brew install sox`).
+/// macOS 录音器，优先使用 `sox`，不可用时回退到 `ffmpeg`。
 pub struct SoxRecorder {
     sample_rate: u32,
     channels: u32,
@@ -18,6 +21,7 @@ pub struct SoxRecorder {
 }
 
 impl SoxRecorder {
+    /// 创建新的录音器。
     pub fn new(sample_rate: u32, channels: u32) -> Self {
         Self {
             sample_rate,
@@ -28,7 +32,7 @@ impl SoxRecorder {
         }
     }
 
-    /// Start recording from the default audio input device.
+    /// 开始录音。
     pub fn start(&mut self) -> Result<()> {
         if self.recording.load(Ordering::SeqCst) {
             return Err(anyhow::anyhow!("already recording"));
@@ -127,7 +131,7 @@ impl SoxRecorder {
         Ok(())
     }
 
-    /// Stop recording and return WAV-encoded audio data.
+    /// 停止录音并返回 WAV 编码的音频数据。
     pub fn stop(&self) -> Result<Vec<u8>> {
         self.recording.store(false, Ordering::SeqCst);
 

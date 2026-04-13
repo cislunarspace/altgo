@@ -1,37 +1,64 @@
+//! 配置加载模块。
+//!
+//! 从 TOML 文件加载 altgo 配置，所有字段均通过 `serde(default)` 提供默认值，
+//! 因此部分配置文件也可以正常工作。
+//!
+//! API 密钥支持通过环境变量覆盖：
+//! - `ALTGO_TRANSCRIBER_API_KEY` — 覆盖语音识别 API 密钥
+//! - `ALTGO_POLISHER_API_KEY` — 覆盖文本润色 API 密钥
+//!
+//! 默认配置路径为 `~/.config/altgo/altgo.toml`（Linux/macOS）
+//! 或 `%APPDATA%/altgo/altgo.toml`（Windows）。
+
 use anyhow::{Context, Result};
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+/// altgo 主配置结构体，包含所有子系统的配置。
 #[derive(Debug, Default, Deserialize, Clone)]
 #[serde(default)]
 pub struct Config {
+    /// 按键监听配置
     pub key_listener: KeyListenerConfig,
+    /// 录音配置
     pub recorder: RecorderConfig,
+    /// 语音识别配置
     pub transcriber: TranscriberConfig,
+    /// 文本润色配置
     pub polisher: PolisherConfig,
+    /// 输出（剪切板/通知）配置
     pub output: OutputConfig,
+    /// 日志配置
     pub logging: LoggingConfig,
 }
 
+/// 按键监听配置。
 #[derive(Debug, Deserialize, Clone)]
 #[serde(default)]
 pub struct KeyListenerConfig {
+    /// 监听的按键名称（如 `ISO_Level3_Shift`、`Alt_R`）
     pub key_name: String,
+    /// 长按阈值（毫秒），超过此时间视为长按录音
     pub long_press_threshold_ms: u64,
+    /// 双击间隔（毫秒），两次点击在此时间窗口内视为双击
     pub double_click_interval_ms: u64,
+    /// 防抖窗口（毫秒），过滤 Windows 中文输入法导致的按键抖动
     pub debounce_window_ms: u64,
 }
 
 impl KeyListenerConfig {
+    /// 将长按阈值转换为 `Duration`。
     pub fn long_press_threshold(&self) -> Duration {
         Duration::from_millis(self.long_press_threshold_ms)
     }
 
+    /// 将双击间隔转换为 `Duration`。
     pub fn double_click_interval(&self) -> Duration {
         Duration::from_millis(self.double_click_interval_ms)
     }
 
+    /// 将防抖窗口转换为 `Duration`。
     pub fn debounce_window(&self) -> Duration {
         Duration::from_millis(self.debounce_window_ms)
     }
@@ -48,10 +75,13 @@ impl Default for KeyListenerConfig {
     }
 }
 
+/// 录音配置。
 #[derive(Debug, Deserialize, Clone)]
 #[serde(default)]
 pub struct RecorderConfig {
+    /// 采样率（Hz），默认 16000
     pub sample_rate: u32,
+    /// 声道数，默认 1（单声道）
     pub channels: u32,
 }
 
@@ -64,18 +94,26 @@ impl Default for RecorderConfig {
     }
 }
 
+/// 语音识别配置。
 #[derive(Debug, Deserialize, Clone)]
 #[serde(default)]
 pub struct TranscriberConfig {
+    /// 引擎类型：`"local"`（本地 whisper.cpp）或 `"api"`（Whisper API）
     pub engine: String,
+    /// API 密钥（可通过 `ALTGO_TRANSCRIBER_API_KEY` 环境变量覆盖）
     pub api_key: String,
+    /// API 基础 URL
     pub api_base_url: String,
+    /// 模型名称（API 模式）或模型文件路径（本地模式）
     pub model: String,
+    /// 语言代码（如 `"zh"`、`"en"`）
     pub language: String,
+    /// 请求超时时间（秒）
     pub timeout_seconds: u64,
 }
 
 impl TranscriberConfig {
+    /// 将超时秒数转换为 `Duration`。
     pub fn timeout(&self) -> Duration {
         Duration::from_secs(self.timeout_seconds)
     }
@@ -94,19 +132,28 @@ impl Default for TranscriberConfig {
     }
 }
 
+/// 文本润色配置。
 #[derive(Debug, Deserialize, Clone)]
 #[serde(default)]
 pub struct PolisherConfig {
+    /// 引擎类型（目前仅 `"openai"` 兼容接口）
     pub engine: String,
+    /// API 密钥（可通过 `ALTGO_POLISHER_API_KEY` 环境变量覆盖）
     pub api_key: String,
+    /// API 基础 URL
     pub api_base_url: String,
+    /// 模型名称（如 `"gpt-3.5-turbo"`、`"deepseek-chat"`）
     pub model: String,
+    /// 润色级别：`"none"`、`"light"`、`"medium"`、`"heavy"`
     pub level: String,
+    /// 请求超时时间（秒）
     pub timeout_seconds: u64,
+    /// 最大生成 token 数
     pub max_tokens: u32,
 }
 
 impl PolisherConfig {
+    /// 将超时秒数转换为 `Duration`。
     pub fn timeout(&self) -> Duration {
         Duration::from_secs(self.timeout_seconds)
     }
@@ -126,10 +173,13 @@ impl Default for PolisherConfig {
     }
 }
 
+/// 输出配置。
 #[derive(Debug, Deserialize, Clone)]
 #[serde(default)]
 pub struct OutputConfig {
+    /// 是否启用桌面通知
     pub enable_notify: bool,
+    /// 通知显示时长（毫秒）
     pub notify_timeout_ms: u64,
 }
 
@@ -142,9 +192,11 @@ impl Default for OutputConfig {
     }
 }
 
+/// 日志配置。
 #[derive(Debug, Deserialize, Clone)]
 #[serde(default)]
 pub struct LoggingConfig {
+    /// 日志级别（如 `"info"`、`"debug"`、`"warn"`）
     pub level: String,
 }
 
@@ -157,6 +209,9 @@ impl Default for LoggingConfig {
 }
 
 impl Config {
+    /// 从指定路径加载配置文件。如果文件不存在，返回默认配置。
+    /// 环境变量 `ALTGO_TRANSCRIBER_API_KEY` 和 `ALTGO_POLISHER_API_KEY`
+    /// 会覆盖配置文件中的对应字段。
     pub fn load(path: &Path) -> Result<Self> {
         let mut cfg = if path.exists() {
             let content = std::fs::read_to_string(path)
@@ -177,6 +232,7 @@ impl Config {
         Ok(cfg)
     }
 
+    /// 返回默认配置文件路径（`~/.config/altgo/altgo.toml`）。
     pub fn default_config_path() -> PathBuf {
         dirs::config_dir()
             .unwrap_or_else(|| PathBuf::from("."))

@@ -1,3 +1,10 @@
+//! Windows 按键监听器。
+//!
+//! 使用 PowerShell 脚本调用 `GetAsyncKeyState` 进行按键状态轮询（约 50ms 间隔）。
+//! 通过内联 C# P/Invoke 声明访问 user32.dll，无需 COM 或 Win32 API 绑定。
+//!
+//! 将常见的按键名称（如 `ISO_Level3_Shift`、`Alt_R`）映射到 Windows 虚拟键码。
+
 use super::KeyEvent;
 use anyhow::{Context, Result};
 use std::io::BufRead;
@@ -6,10 +13,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
-/// Windows key listener using a PowerShell script with GetAsyncKeyState polling.
+/// Windows 按键监听器。
 ///
-/// Polls at ~50ms intervals for the target key state changes.
-/// This is a simple approach that doesn't require COM or Win32 API bindings.
+/// 使用 PowerShell + `GetAsyncKeyState` 进行按键状态轮询（约 50ms 间隔）。
 pub struct WindowsListener {
     key_name: String,
     running: Arc<AtomicBool>,
@@ -17,6 +23,7 @@ pub struct WindowsListener {
 }
 
 impl WindowsListener {
+    /// 创建新的 Windows 监听器，验证 PowerShell 是否可用。
     pub fn new(key_name: &str) -> Result<Self> {
         // Verify PowerShell is available.
         Command::new("powershell")
@@ -34,7 +41,7 @@ impl WindowsListener {
         })
     }
 
-    /// Start listening for key events via PowerShell polling.
+    /// 开始监听按键事件，通过 PowerShell 轮询实现。
     pub fn start(&mut self) -> Result<mpsc::UnboundedReceiver<KeyEvent>> {
         let vk_code = self.resolve_vkcode()?;
 
@@ -89,6 +96,7 @@ while ($true) {{
             let reader = std::io::BufReader::new(stdout);
             for line in reader.lines().map_while(Result::ok) {
                 if !running.load(Ordering::SeqCst) {
+                    tracing::info!("key listener thread stopped by user");
                     break;
                 }
                 let trimmed = line.trim();
@@ -98,15 +106,18 @@ while ($true) {{
                     _ => continue,
                 };
                 if send_result.is_err() {
+                    tracing::warn!("key event receiver dropped, key listener thread exiting");
                     break;
                 }
             }
+            tracing::warn!("PowerShell key listener stdout closed, key listener thread exiting");
         });
 
         self.child = Some(child);
         Ok(rx)
     }
 
+    /// 停止监听。
     pub fn stop(&mut self) {
         self.running.store(false, Ordering::SeqCst);
         if let Some(child) = self.child.as_mut() {

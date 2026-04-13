@@ -1,3 +1,10 @@
+//! Linux 按键监听器。
+//!
+//! 使用 `xinput test-xi2` 命令捕获全局键盘事件，依赖 XInput2 扩展，
+//! 无需 root 权限即可在所有现代 X11 系统上工作。
+//!
+//! 通过 `xmodmap -pke` 解析按键名称到 keycode 的映射。
+
 use super::KeyEvent;
 use anyhow::{Context, Result};
 use std::io::BufRead;
@@ -6,10 +13,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
-/// X11 key listener using `xinput test-xi2` to capture global key events.
+/// X11 按键监听器，使用 `xinput test-xi2` 捕获全局按键事件。
 ///
-/// This approach works without root and uses the XInput2 extension
-/// which is available on all modern X11 systems.
+/// 无需 root 权限，依赖 XInput2 扩展。
 pub struct X11Listener {
     key_name: String,
     running: Arc<AtomicBool>,
@@ -17,6 +23,7 @@ pub struct X11Listener {
 }
 
 impl X11Listener {
+    /// 创建新的 X11 监听器，验证 `xinput` 是否可用。
     pub fn new(key_name: &str) -> Result<Self> {
         Command::new("xinput")
             .arg("version")
@@ -32,7 +39,7 @@ impl X11Listener {
         })
     }
 
-    /// Start listening for key events. Returns a channel of events.
+    /// 开始监听按键事件，返回事件通道。
     pub fn start(&mut self) -> Result<mpsc::UnboundedReceiver<KeyEvent>> {
         let keycode = self.resolve_keycode()?;
 
@@ -57,12 +64,16 @@ impl X11Listener {
 
             for line in reader.lines() {
                 if !running.load(Ordering::SeqCst) {
+                    tracing::info!("key listener thread stopped by user");
                     break;
                 }
 
                 let line = match line {
                     Ok(l) => l,
-                    Err(_) => break,
+                    Err(e) => {
+                        tracing::warn!(error = %e, "xinput stdout read error, key listener thread exiting");
+                        break;
+                    }
                 };
 
                 let trimmed = line.trim();
@@ -75,6 +86,9 @@ impl X11Listener {
                     if let Some(pressed) = event_type.take() {
                         if let Ok(detail) = detail_str.trim().parse::<u8>() {
                             if detail == keycode && tx.send(KeyEvent { pressed }).is_err() {
+                                tracing::warn!(
+                                    "key event receiver dropped, key listener thread exiting"
+                                );
                                 break;
                             }
                         }
@@ -91,13 +105,14 @@ impl X11Listener {
                     tracing::trace!(line = %trimmed, "unparsed xinput line");
                 }
             }
+            tracing::warn!("xinput stdout closed, key listener thread exiting");
         });
 
         self.child = Some(child);
         Ok(rx)
     }
 
-    /// Stop listening.
+    /// 停止监听。
     pub fn stop(&mut self) {
         self.running.store(false, Ordering::SeqCst);
         if let Some(child) = self.child.as_mut() {

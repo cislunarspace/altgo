@@ -1,15 +1,31 @@
+//! 状态机模块。
+//!
+//! 实现了一个 5 状态的按键状态机，用于区分长按和双击两种录音模式：
+//!
+//! - `Idle`（空闲）→ 等待按键
+//! - `PotentialPress`（潜在按下）→ 按下后等待是否达到长按阈值
+//! - `Recording`（录音中）→ 长按触发，松开即停止
+//! - `WaitSecondClick`（等待第二次点击）→ 短按松开后等待双击
+//! - `ContinuousRecording`（连续录音）→ 双击触发，再次点击停止
+//!
+//! 状态机通过 `tokio::select!` 同时监听按键事件和超时计时器，
+//! 以实现长按阈值和双击间隔的精确控制。
+
 use std::time::{Duration, Instant};
 
-/// Commands emitted by the state machine.
+/// 状态机发出的命令。
 #[derive(Debug, PartialEq, Eq)]
 pub enum Command {
+    /// 开始录音
     StartRecord,
+    /// 停止录音
     StopRecord,
 }
 
-/// Key event from the listener.
+/// 按键事件。
 #[derive(Debug)]
 pub struct KeyEvent {
+    /// 是否为按下事件（`true` 为按下，`false` 为松开）
     pub pressed: bool,
 }
 
@@ -22,16 +38,16 @@ pub(super) enum State {
     ContinuousRecording,
 }
 
-/// Key-press state machine that distinguishes long press from double click.
+/// 按键状态机，区分长按录音和双击连续录音。
 ///
-/// State transitions:
-/// - Idle + press         → PotentialPress (start long-press timer)
-/// - PotentialPress + release before timer → WaitSecondClick
-/// - PotentialPress + timer fires          → Recording (emit StartRecord)
-/// - Recording + release   → Idle (emit StopRecord)
-/// - WaitSecondClick + press               → ContinuousRecording (emit StartRecord)
-/// - WaitSecondClick + timer expires        → Idle (ignored)
-/// - ContinuousRecording + press            → Idle (emit StopRecord)
+/// 状态转换：
+/// - Idle + 按下 → PotentialPress（启动长按计时器）
+/// - PotentialPress + 计时器前松开 → WaitSecondClick
+/// - PotentialPress + 计时器触发 → Recording（发出 StartRecord）
+/// - Recording + 松开 → Idle（发出 StopRecord）
+/// - WaitSecondClick + 按下 → ContinuousRecording（发出 StartRecord）
+/// - WaitSecondClick + 计时器过期 → Idle（忽略）
+/// - ContinuousRecording + 按下 → Idle（发出 StopRecord）
 pub struct Machine {
     state: State,
     long_press_threshold: Duration,
@@ -41,6 +57,10 @@ pub struct Machine {
 }
 
 impl Machine {
+    /// 创建新的状态机实例。
+    ///
+    /// `long_press_threshold`：长按触发阈值
+    /// `double_click_interval`：双击检测时间窗口
     pub fn new(long_press_threshold: Duration, double_click_interval: Duration) -> Self {
         Self {
             state: State::Idle,
@@ -54,9 +74,10 @@ impl Machine {
         }
     }
 
-    /// Process a key event, returning any command to emit.
+    /// 处理按键事件，返回需要发出的命令（如果有）。
     pub fn process(&mut self, event: KeyEvent) -> Option<Command> {
-        match self.state {
+        let old_state = self.state;
+        let cmd = match self.state {
             State::Idle => {
                 if event.pressed {
                     self.state = State::PotentialPress;
@@ -110,10 +131,14 @@ impl Machine {
                     None
                 }
             }
+        };
+        if self.state != old_state {
+            tracing::debug!(?old_state, new_state = ?self.state, "state transition");
         }
+        cmd
     }
 
-    /// Check if any timer-based transition should fire.
+    /// 检查是否需要触发基于计时器的状态转换。
     pub fn poll_timeout(&mut self) -> Option<Command> {
         let now = Instant::now();
 
@@ -121,8 +146,10 @@ impl Machine {
             State::PotentialPress => {
                 if let Some(pt) = self.press_time {
                     if now.duration_since(pt) >= self.long_press_threshold {
+                        let old_state = self.state;
                         self.state = State::Recording;
                         self.press_time = None;
+                        tracing::debug!(?old_state, new_state = ?self.state, "state transition (timeout)");
                         return Some(Command::StartRecord);
                     }
                 }
@@ -131,8 +158,10 @@ impl Machine {
             State::WaitSecondClick => {
                 if let Some(pt) = self.press_time {
                     if now.duration_since(pt) >= self.double_click_interval {
+                        let old_state = self.state;
                         self.state = State::Idle;
                         self.press_time = None;
+                        tracing::debug!(?old_state, new_state = ?self.state, "state transition (timeout)");
                     }
                 }
                 None
@@ -150,9 +179,9 @@ impl Machine {
         }
     }
 
-    /// Run the state machine on a channel of key events.
+    /// 在按键事件通道上运行状态机。
     ///
-    /// Returns a receiver for commands. Terminates when the input channel closes.
+    /// 返回一个命令接收通道。当输入通道关闭时自动终止。
     pub fn run(
         self,
         mut events: tokio::sync::mpsc::UnboundedReceiver<KeyEvent>,
@@ -167,7 +196,10 @@ impl Machine {
                         Some(event) = events.recv() => {
                             if let Some(cmd) = machine.process(event) {
                                 if cmd_tx.send(cmd).await.is_err() {
-                                    tracing::warn!("command receiver dropped, shutting down state machine");
+                                    tracing::warn!(
+                                        state = ?machine.state,
+                                        "command receiver dropped, shutting down state machine"
+                                    );
                                     break;
                                 }
                             }
@@ -175,12 +207,21 @@ impl Machine {
                         _ = tokio::time::sleep_until(deadline.into()) => {
                             if let Some(cmd) = machine.poll_timeout() {
                                 if cmd_tx.send(cmd).await.is_err() {
-                                    tracing::warn!("command receiver dropped, shutting down state machine");
+                                    tracing::warn!(
+                                        state = ?machine.state,
+                                        "command receiver dropped, shutting down state machine"
+                                    );
                                     break;
                                 }
                             }
                         }
-                        else => break,
+                        else => {
+                            tracing::warn!(
+                                state = ?machine.state,
+                                "key event channel closed (deadline branch), shutting down state machine"
+                            );
+                            break;
+                        },
                     }
                 } else {
                     // No deadline pending — wait for next event.
@@ -189,13 +230,20 @@ impl Machine {
                             if let Some(cmd) = machine.process(event) {
                                 if cmd_tx.send(cmd).await.is_err() {
                                     tracing::warn!(
+                                        state = ?machine.state,
                                         "command receiver dropped, shutting down state machine"
                                     );
                                     break;
                                 }
                             }
                         }
-                        None => break,
+                        None => {
+                            tracing::warn!(
+                                state = ?machine.state,
+                                "key event channel closed, shutting down state machine"
+                            );
+                            break;
+                        }
                     }
                 }
             }
