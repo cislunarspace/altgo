@@ -3,9 +3,13 @@ mod audio;
 #[allow(dead_code)]
 mod config;
 #[allow(dead_code)]
+mod key_listener;
+#[allow(dead_code)]
 mod output;
 #[allow(dead_code)]
 mod polisher;
+#[allow(dead_code)]
+mod recorder;
 #[allow(dead_code)]
 mod state_machine;
 #[allow(dead_code)]

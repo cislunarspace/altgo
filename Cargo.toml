@@ -12,7 +12,6 @@ reqwest = { version = "0.12", features = ["json", "multipart"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 clap = { version = "4", features = ["derive"] }
-x11rb = "0.13"
 anyhow = "1"
 dirs = "5"
 tempfile = "3"
