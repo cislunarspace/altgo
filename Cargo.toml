@@ -1,0 +1,20 @@
+[package]
+name = "altgo"
+version = "0.1.0"
+edition = "2021"
+description = "无需打字，言出法随 — Linux 语音转文字工具"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+tokio = { version = "1", features = ["full"] }
+reqwest = { version = "0.12", features = ["json", "multipart"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+clap = { version = "4", features = ["derive"] }
+x11rb = "0.13"
+anyhow = "1"
+dirs = "5"
+
+[dev-dependencies]
+tempfile = "3"

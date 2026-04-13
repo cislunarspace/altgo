@@ -1,0 +1,18 @@
+# Build artifacts
+/target/
+altgo
+
+# whisper.cpp submodule (cloned separately)
+whisper.cpp/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+
+# Claude Code
+.claude/
