@@ -104,6 +104,7 @@ pub struct PolisherConfig {
     pub model: String,
     pub level: String,
     pub timeout_seconds: u64,
+    pub max_tokens: u32,
 }
 
 impl PolisherConfig {
@@ -122,6 +123,7 @@ impl Default for PolisherConfig {
             model: "gpt-3.5-turbo".to_string(),
             level: "medium".to_string(),
             timeout_seconds: 60,
+            max_tokens: 1024,
         }
     }
 }
@@ -259,8 +261,10 @@ level = "debug"
     }
 
     #[test]
+    #[allow(deprecated)]
     fn test_env_override() {
-        // SAFETY: test race is acceptable; env mutation in single-threaded test runner.
+        // std::env::set_var is deprecated in Rust 1.94+ due to thread-safety concerns.
+        // Acceptable here: single-threaded test, no concurrent access.
         std::env::set_var("ALTGO_TRANSCRIBER_API_KEY", "test-trans-key");
         std::env::set_var("ALTGO_POLISHER_API_KEY", "test-polish-key");
 

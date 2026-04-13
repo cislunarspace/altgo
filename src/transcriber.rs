@@ -18,6 +18,7 @@ struct WhisperResponse {
 }
 
 /// OpenAI Whisper API transcriber.
+#[derive(Clone)]
 pub struct WhisperApi {
     api_key: String,
     api_base_url: String,
@@ -96,6 +97,7 @@ impl WhisperApi {
 /// Local whisper.cpp transcriber using FFI.
 ///
 /// This requires whisper.cpp shared libraries to be available at runtime.
+#[derive(Clone)]
 pub struct LocalWhisper {
     model_path: String,
     language: String,
@@ -154,6 +156,12 @@ impl LocalWhisper {
     }
 
     fn find_whisper_binary(&self) -> anyhow::Result<String> {
+        static CACHE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+        if let Some(cached) = CACHE.get() {
+            return Ok(cached.clone());
+        }
+
         // Check common locations.
         let candidates = [
             "whisper-cli",
@@ -168,6 +176,7 @@ impl LocalWhisper {
 
         for candidate in &candidates {
             if std::path::Path::new(candidate).exists() || which_exists(candidate) {
+                let _ = CACHE.set(candidate.to_string());
                 return Ok(candidate.to_string());
             }
         }

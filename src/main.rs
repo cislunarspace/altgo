@@ -12,6 +12,13 @@ use std::sync::Arc;
 
 use clap::Parser;
 
+/// Wrapper enum for either transcription backend.
+#[derive(Clone)]
+enum Transcriber {
+    Api(transcriber::WhisperApi),
+    Local(transcriber::LocalWhisper),
+}
+
 #[derive(Parser)]
 #[command(name = "altgo", about = "无需打字，言出法随 — Linux 语音转文字工具")]
 struct Cli {
@@ -55,26 +62,38 @@ async fn main() -> anyhow::Result<()> {
         recorder::PulseRecorder::new(cfg.recorder.sample_rate, cfg.recorder.channels);
 
     // Initialize transcriber.
-    match cfg.transcriber.engine.as_str() {
+    let transcriber = match cfg.transcriber.engine.as_str() {
         "local" => {
             tracing::info!(
                 model = %cfg.transcriber.model,
                 "using local whisper for transcription"
             );
+            Transcriber::Local(transcriber::LocalWhisper::new(
+                cfg.transcriber.model.clone(),
+                cfg.transcriber.language.clone(),
+            ))
         }
-        _ => {
-            tracing::info!("using Whisper API for transcription");
+        engine => {
+            tracing::info!(engine = engine, "using Whisper API for transcription");
+            Transcriber::Api(transcriber::WhisperApi::new(
+                cfg.transcriber.api_key.clone(),
+                cfg.transcriber.api_base_url.clone(),
+                cfg.transcriber.model.clone(),
+                cfg.transcriber.language.clone(),
+                cfg.transcriber.timeout(),
+            ))
         }
-    }
+    };
 
     // Initialize polisher.
     let polish_level = polisher::PolishLevel::from_str(&cfg.polisher.level)
         .unwrap_or(polisher::PolishLevel::Medium);
-    let formatter = polisher::LLMFormatter::new(
+    let formatter = polisher::LLMFormatter::with_max_tokens(
         cfg.polisher.api_key.clone(),
         cfg.polisher.api_base_url.clone(),
         cfg.polisher.model.clone(),
         cfg.polisher.timeout(),
+        cfg.polisher.max_tokens,
     );
 
     // Start key listener.
@@ -132,9 +151,12 @@ async fn main() -> anyhow::Result<()> {
                 // Spawn processing pipeline.
                 let cfg = Arc::clone(&cfg);
                 let formatter = formatter.clone();
+                let transcriber = transcriber.clone();
 
                 tokio::spawn(async move {
-                    if let Err(e) = process_audio(&cfg, &formatter, &wav_data, polish_level).await {
+                    if let Err(e) =
+                        process_audio(&cfg, &transcriber, &formatter, &wav_data, polish_level).await
+                    {
                         tracing::error!(error = %e, "audio processing failed");
                     }
                 });
@@ -150,29 +172,15 @@ async fn main() -> anyhow::Result<()> {
 /// ASR → Polish → Output pipeline.
 async fn process_audio(
     cfg: &Arc<config::Config>,
+    transcriber: &Transcriber,
     formatter: &polisher::LLMFormatter,
     wav_data: &[u8],
     polish_level: polisher::PolishLevel,
 ) -> anyhow::Result<()> {
     // Step 1: Transcribe.
-    let result = match cfg.transcriber.engine.as_str() {
-        "local" => {
-            let local = transcriber::LocalWhisper::new(
-                cfg.transcriber.model.clone(),
-                cfg.transcriber.language.clone(),
-            );
-            local.transcribe(wav_data).await
-        }
-        _ => {
-            let api = transcriber::WhisperApi::new(
-                cfg.transcriber.api_key.clone(),
-                cfg.transcriber.api_base_url.clone(),
-                cfg.transcriber.model.clone(),
-                cfg.transcriber.language.clone(),
-                cfg.transcriber.timeout(),
-            );
-            api.transcribe(wav_data).await
-        }
+    let result = match transcriber {
+        Transcriber::Local(lw) => lw.transcribe(wav_data).await,
+        Transcriber::Api(api) => api.transcribe(wav_data).await,
     };
 
     let result = result.map_err(|e| {
@@ -199,7 +207,7 @@ async fn process_audio(
     tracing::info!(text = %polished, "polished");
 
     // Step 3: Output.
-    if let Err(e) = output::write_clipboard(&polished) {
+    if let Err(e) = output::write_clipboard(&polished).await {
         tracing::error!(error = %e, "clipboard write failed");
     }
 

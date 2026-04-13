@@ -83,7 +83,14 @@ impl X11Listener {
                                 break;
                             }
                         }
+                    } else {
+                        tracing::debug!(line = %trimmed, "detail line without preceding event type, skipping");
                     }
+                } else if !trimmed.is_empty()
+                    && !trimmed.starts_with("EVENT")
+                    && !trimmed.contains(':')
+                {
+                    tracing::trace!(line = %trimmed, "unparsed xinput line");
                 }
             }
         });

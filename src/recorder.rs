@@ -3,6 +3,7 @@ use anyhow::Result;
 use std::io::Read;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::thread::JoinHandle;
 
 /// PulseAudio recorder that captures audio from the default source.
 ///
@@ -13,7 +14,7 @@ pub struct PulseRecorder {
     channels: u32,
     shared_buffer: Arc<Buffer>,
     recording: Arc<AtomicBool>,
-    done: std::sync::Mutex<Option<std::thread::JoinHandle<()>>>,
+    done: std::sync::Mutex<Option<JoinHandle<()>>>,
 }
 
 impl PulseRecorder {
@@ -105,7 +106,7 @@ impl PulseRecorder {
             return Err(anyhow::anyhow!("no audio data recorded"));
         }
 
-        let wav_data = audio::encode_wav(&pcm_data, self.sample_rate, self.channels as u16, 16);
+        let wav_data = audio::encode_wav(&pcm_data, self.sample_rate, self.channels as u16, 16)?;
         Ok(wav_data)
     }
 }

@@ -78,10 +78,22 @@ pub struct LLMFormatter {
     model: String,
     client: Client,
     max_retries: u32,
+    max_tokens: u32,
 }
 
 impl LLMFormatter {
+    #[allow(dead_code)]
     pub fn new(api_key: String, api_base_url: String, model: String, timeout: Duration) -> Self {
+        Self::with_max_tokens(api_key, api_base_url, model, timeout, 1024)
+    }
+
+    pub fn with_max_tokens(
+        api_key: String,
+        api_base_url: String,
+        model: String,
+        timeout: Duration,
+        max_tokens: u32,
+    ) -> Self {
         let client = Client::builder()
             .timeout(timeout)
             .build()
@@ -92,6 +104,7 @@ impl LLMFormatter {
             model,
             client,
             max_retries: 3,
+            max_tokens,
         }
     }
 
@@ -116,7 +129,7 @@ impl LLMFormatter {
                 },
             ],
             temperature: 0.3,
-            max_tokens: 1024,
+            max_tokens: self.max_tokens,
         };
 
         let mut last_err = None;

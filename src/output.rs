@@ -46,10 +46,15 @@ pub fn detect_clipboard_tool() -> Option<ClipboardTool> {
 }
 
 /// Write text to the system clipboard using a 5-second timeout.
-pub fn write_clipboard(text: &str) -> anyhow::Result<()> {
+///
+/// Spawns a blocking task to avoid blocking the Tokio runtime.
+pub async fn write_clipboard(text: &str) -> anyhow::Result<()> {
     let tool = detect_clipboard_tool()
         .ok_or_else(|| anyhow::anyhow!("no clipboard tool found (tried xclip, xsel, wl-copy)"))?;
-    write_clipboard_with_tool(tool, text)
+    let text = text.to_string();
+    tokio::task::spawn_blocking(move || write_clipboard_with_tool(tool, &text))
+        .await
+        .map_err(|e| anyhow::anyhow!("clipboard task panicked: {e}"))?
 }
 
 /// Write text using a specific clipboard tool.

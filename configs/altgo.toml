@@ -36,6 +36,8 @@ api_base_url = "https://api.deepseek.com"
 model = "deepseek-chat"
 # Polish level: "none", "light", "medium", "heavy".
 level = "medium"
+# Max tokens for LLM response. Increase for long transcriptions.
+max_tokens = 1024
 timeout_seconds = 60
 
 [output]

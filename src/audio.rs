@@ -43,10 +43,16 @@ pub fn encode_wav(
     sample_rate: u32,
     channels: u16,
     bits_per_sample: u16,
-) -> Vec<u8> {
-    assert!(!pcm_data.is_empty(), "PCM data must not be empty");
-    assert!(sample_rate > 0, "Sample rate must be positive");
-    assert!(bits_per_sample > 0, "Bits per sample must be positive");
+) -> anyhow::Result<Vec<u8>> {
+    if pcm_data.is_empty() {
+        return Err(anyhow::anyhow!("PCM data must not be empty"));
+    }
+    if sample_rate == 0 {
+        return Err(anyhow::anyhow!("Sample rate must be positive"));
+    }
+    if bits_per_sample == 0 {
+        return Err(anyhow::anyhow!("Bits per sample must be positive"));
+    }
 
     let byte_rate = sample_rate * channels as u32 * bits_per_sample as u32 / 8;
     let block_align = channels * bits_per_sample / 8;
@@ -75,7 +81,7 @@ pub fn encode_wav(
     wav.extend_from_slice(&data_size.to_le_bytes());
     wav.extend_from_slice(pcm_data);
 
-    wav
+    Ok(wav)
 }
 
 /// Decode 16-bit PCM WAV data to float32 samples in [-1.0, 1.0].
@@ -188,7 +194,7 @@ mod tests {
     #[test]
     fn test_encode_wav_header() {
         let pcm = vec![0u8; 100];
-        let wav = encode_wav(&pcm, 16000, 1, 16);
+        let wav = encode_wav(&pcm, 16000, 1, 16).unwrap();
 
         // RIFF header
         assert_eq!(&wav[0..4], b"RIFF");
@@ -220,7 +226,7 @@ mod tests {
             pcm.extend_from_slice(&s.to_le_bytes());
         }
 
-        let wav = encode_wav(&pcm, 16000, 1, 16);
+        let wav = encode_wav(&pcm, 16000, 1, 16).unwrap();
         let decoded = decode_wav_to_f32(&wav).unwrap();
 
         assert_eq!(decoded.len(), samples.len());
@@ -242,5 +248,15 @@ mod tests {
     fn test_decode_wav_invalid_header() {
         let data = vec![0u8; 100];
         assert!(decode_wav_to_f32(&data).is_err());
+    }
+
+    #[test]
+    fn test_encode_wav_empty_pcm() {
+        assert!(encode_wav(&[], 16000, 1, 16).is_err());
+    }
+
+    #[test]
+    fn test_encode_wav_zero_sample_rate() {
+        assert!(encode_wav(&[0u8; 10], 0, 1, 16).is_err());
     }
 }
