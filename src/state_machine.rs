@@ -14,7 +14,7 @@ pub struct KeyEvent {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum State {
+pub(super) enum State {
     Idle,
     PotentialPress,
     Recording,
@@ -36,6 +36,7 @@ pub struct Machine {
     state: State,
     long_press_threshold: Duration,
     double_click_interval: Duration,
+    min_press_duration: Duration,
     press_time: Option<Instant>,
 }
 
@@ -45,6 +46,10 @@ impl Machine {
             state: State::Idle,
             long_press_threshold,
             double_click_interval,
+            // Minimum time a key must be held before a release is treated as
+            // intentional.  Filters out IME-induced release-press oscillations
+            // on Windows (e.g. Chinese input methods with Right Alt).
+            min_press_duration: Duration::from_millis(100),
             press_time: None,
         }
     }
@@ -62,6 +67,16 @@ impl Machine {
             State::PotentialPress => {
                 if !event.pressed {
                     // Released before long-press threshold.
+                    // Reject if the press was too short — likely IME noise.
+                    if let Some(pt) = self.press_time {
+                        if Instant::now().duration_since(pt) < self.min_press_duration {
+                            // Too quick — treat as spurious IME release.
+                            // Reset press_time so poll_timeout won't fire a stale
+                            // long-press timer for a key that is no longer held.
+                            self.press_time = None;
+                            return None;
+                        }
+                    }
                     self.state = State::WaitSecondClick;
                     self.press_time = Some(Instant::now());
                 }
@@ -228,7 +243,10 @@ mod tests {
         // Press → PotentialPress
         assert_eq!(sm.process(press()), None);
 
-        // Quick release → WaitSecondClick
+        // Hold for at least min_press_duration (100ms) before releasing
+        std::thread::sleep(Duration::from_millis(110));
+
+        // Release → WaitSecondClick
         assert_eq!(sm.process(release()), None);
 
         // Second press quickly → ContinuousRecording
@@ -241,20 +259,21 @@ mod tests {
     #[test]
     fn test_single_click_ignored() {
         let threshold = Duration::from_millis(200);
-        let interval = Duration::from_millis(50);
+        let interval = Duration::from_millis(200);
         let mut sm = Machine::new(threshold, interval);
 
         // Press → PotentialPress
         assert_eq!(sm.process(press()), None);
 
-        // Quick release → WaitSecondClick
+        // Hold for at least min_press_duration before releasing
+        std::thread::sleep(Duration::from_millis(110));
+
+        // Release → WaitSecondClick
         assert_eq!(sm.process(release()), None);
 
-        // Double-click interval expires → Idle
+        // Double-click interval expires → Idle (no command)
         std::thread::sleep(interval + Duration::from_millis(5));
         assert_eq!(sm.poll_timeout(), None);
-
-        // No command was emitted — single click ignored
     }
 
     #[test]
@@ -265,6 +284,7 @@ mod tests {
 
         // Double click → StartRecord
         sm.process(press());
+        std::thread::sleep(Duration::from_millis(110));
         sm.process(release());
         assert_eq!(sm.process(press()), Some(Command::StartRecord));
 
@@ -273,5 +293,26 @@ mod tests {
 
         // Press → StopRecord
         assert_eq!(sm.process(press()), Some(Command::StopRecord));
+    }
+
+    #[test]
+    fn test_spurious_quick_release_rejected() {
+        let threshold = Duration::from_millis(300);
+        let interval = Duration::from_millis(300);
+        let mut sm = Machine::new(threshold, interval);
+
+        // Press → PotentialPress
+        assert_eq!(sm.process(press()), None);
+
+        // Release within 100ms (min_press_duration) → rejected, stays PotentialPress
+        std::thread::sleep(Duration::from_millis(30));
+        assert_eq!(sm.process(release()), None);
+        assert_eq!(sm.state, State::PotentialPress);
+
+        // press_time should be reset so no stale timer fires
+        assert!(sm.press_time.is_none());
+
+        // Without press_time, poll_timeout is a no-op
+        assert_eq!(sm.poll_timeout(), None);
     }
 }

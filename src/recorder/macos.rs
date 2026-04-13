@@ -68,9 +68,35 @@ impl SoxRecorder {
             let mut child = match child {
                 Ok(c) => c,
                 Err(e) => {
-                    tracing::error!(error = %e, "failed to start sox — install with: brew install sox");
-                    recording.store(false, Ordering::SeqCst);
-                    return;
+                    tracing::warn!(error = %e, "sox not found, trying ffmpeg");
+                    match std::process::Command::new("ffmpeg")
+                        .args([
+                            "-f",
+                            "avfoundation",
+                            "-i",
+                            ":default",
+                            "-ar",
+                            &sample_rate.to_string(),
+                            "-ac",
+                            &channels.to_string(),
+                            "-f",
+                            "s16le",
+                            "pipe:1",
+                        ])
+                        .stdout(std::process::Stdio::piped())
+                        .stderr(std::process::Stdio::null())
+                        .spawn()
+                    {
+                        Ok(c) => c,
+                        Err(e) => {
+                            tracing::error!(
+                                error = %e,
+                                "failed to start sox or ffmpeg — install with: brew install sox"
+                            );
+                            recording.store(false, Ordering::SeqCst);
+                            return;
+                        }
+                    }
                 }
             };
 

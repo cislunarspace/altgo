@@ -99,20 +99,64 @@ async fn main() -> anyhow::Result<()> {
     // Start key listener.
     let key_events = listener.start()?;
 
-    // Convert key events for the state machine.
+    // Convert key events for the state machine with debounce.
+    //
+    // On Windows with Chinese IME, Right Alt (VK_RMENU) can oscillate rapidly
+    // between pressed/released due to AltGr handling.  A release event that is
+    // immediately followed by a press within `debounce_window` is suppressed,
+    // preventing the state machine from seeing a spurious press-release-press
+    // sequence that would trigger continuous recording instead of long-press.
     let (key_tx, key_rx) = tokio::sync::mpsc::unbounded_channel();
-    let key_tx = Arc::new(key_tx);
+    let debounce_window = cfg.key_listener.debounce_window();
     tokio::spawn(async move {
-        let key_tx = key_tx;
-        let mut key_events = key_events;
-        while let Some(evt) = key_events.recv().await {
-            if key_tx
-                .send(state_machine::KeyEvent {
-                    pressed: evt.pressed,
-                })
-                .is_err()
-            {
-                break;
+        let mut raw_events = key_events;
+        let mut is_pressed = false;
+        let mut pending_release: Option<std::pin::Pin<Box<tokio::time::Sleep>>> = None;
+
+        loop {
+            tokio::select! {
+                evt = raw_events.recv() => {
+                    match evt {
+                        Some(evt) if evt.pressed => {
+                            // Press cancels any pending release.
+                            pending_release = None;
+                            if !is_pressed {
+                                is_pressed = true;
+                                if key_tx
+                                    .send(state_machine::KeyEvent { pressed: true })
+                                    .is_err()
+                                {
+                                    break;
+                                }
+                            }
+                        }
+                        Some(_) => {
+                            // Release — start debounce timer if not already pending.
+                            if is_pressed && pending_release.is_none() {
+                                pending_release =
+                                    Some(Box::pin(tokio::time::sleep(debounce_window)));
+                            }
+                        }
+                        None => break,
+                    }
+                }
+                // Debounce timer fired — forward the release to the state machine.
+                _ = async {
+                    if let Some(timer) = &mut pending_release {
+                        timer.as_mut().await;
+                    } else {
+                        std::future::pending::<()>().await;
+                    }
+                }, if pending_release.is_some() => {
+                    pending_release = None;
+                    is_pressed = false;
+                    if key_tx
+                        .send(state_machine::KeyEvent { pressed: false })
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
             }
         }
     });

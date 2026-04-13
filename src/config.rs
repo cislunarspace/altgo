@@ -20,17 +20,20 @@ pub struct KeyListenerConfig {
     pub key_name: String,
     pub long_press_threshold_ms: u64,
     pub double_click_interval_ms: u64,
+    pub debounce_window_ms: u64,
 }
 
 impl KeyListenerConfig {
-    #[allow(dead_code)]
     pub fn long_press_threshold(&self) -> Duration {
         Duration::from_millis(self.long_press_threshold_ms)
     }
 
-    #[allow(dead_code)]
     pub fn double_click_interval(&self) -> Duration {
         Duration::from_millis(self.double_click_interval_ms)
+    }
+
+    pub fn debounce_window(&self) -> Duration {
+        Duration::from_millis(self.debounce_window_ms)
     }
 }
 
@@ -40,6 +43,7 @@ impl Default for KeyListenerConfig {
             key_name: "ISO_Level3_Shift".to_string(),
             long_press_threshold_ms: 300,
             double_click_interval_ms: 300,
+            debounce_window_ms: 100,
         }
     }
 }
@@ -49,8 +53,6 @@ impl Default for KeyListenerConfig {
 pub struct RecorderConfig {
     pub sample_rate: u32,
     pub channels: u32,
-    pub bit_depth: u32,
-    pub buffer_size_ms: u64,
 }
 
 impl Default for RecorderConfig {
@@ -58,8 +60,6 @@ impl Default for RecorderConfig {
         Self {
             sample_rate: 16000,
             channels: 1,
-            bit_depth: 16,
-            buffer_size_ms: 100,
         }
     }
 }
@@ -76,7 +76,6 @@ pub struct TranscriberConfig {
 }
 
 impl TranscriberConfig {
-    #[allow(dead_code)]
     pub fn timeout(&self) -> Duration {
         Duration::from_secs(self.timeout_seconds)
     }
@@ -108,7 +107,6 @@ pub struct PolisherConfig {
 }
 
 impl PolisherConfig {
-    #[allow(dead_code)]
     pub fn timeout(&self) -> Duration {
         Duration::from_secs(self.timeout_seconds)
     }
@@ -133,7 +131,6 @@ impl Default for PolisherConfig {
 pub struct OutputConfig {
     pub enable_notify: bool,
     pub notify_timeout_ms: u64,
-    pub clipboard_tool: String,
 }
 
 impl Default for OutputConfig {
@@ -141,7 +138,6 @@ impl Default for OutputConfig {
         Self {
             enable_notify: true,
             notify_timeout_ms: 3000,
-            clipboard_tool: String::new(),
         }
     }
 }
@@ -199,6 +195,7 @@ mod tests {
         let cfg = Config::default();
         assert_eq!(cfg.key_listener.key_name, "ISO_Level3_Shift");
         assert_eq!(cfg.key_listener.long_press_threshold_ms, 300);
+        assert_eq!(cfg.key_listener.debounce_window_ms, 100);
         assert_eq!(cfg.recorder.sample_rate, 16000);
         assert_eq!(cfg.transcriber.engine, "local");
         assert_eq!(cfg.polisher.level, "medium");
@@ -288,6 +285,10 @@ level = "debug"
         assert_eq!(
             cfg.key_listener.double_click_interval(),
             Duration::from_millis(300)
+        );
+        assert_eq!(
+            cfg.key_listener.debounce_window(),
+            Duration::from_millis(100)
         );
     }
 

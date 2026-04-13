@@ -2,7 +2,7 @@ use crate::audio::{self, Buffer};
 use anyhow::Result;
 use std::io::Read;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::thread::JoinHandle;
 
 /// Windows recorder using `ffmpeg` or `sox` for audio capture.
@@ -15,6 +15,130 @@ pub struct WindowsRecorder {
     shared_buffer: Arc<Buffer>,
     recording: Arc<AtomicBool>,
     done: std::sync::Mutex<Option<JoinHandle<()>>>,
+}
+
+/// Find the ffmpeg binary, searching PATH and common install locations.
+fn find_ffmpeg() -> String {
+    // Try PATH first via cmd's `where` (more reliable than PowerShell's where).
+    if let Ok(output) = std::process::Command::new("cmd")
+        .args(["/C", "where", "ffmpeg"])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .output()
+    {
+        let path = String::from_utf8_lossy(&output.stdout);
+        if let Some(first) = path.lines().next() {
+            let p = first.trim();
+            if !p.is_empty() && std::path::Path::new(p).exists() {
+                return p.to_string();
+            }
+        }
+    }
+
+    // Search common winget install location.
+    if let Some(local_app_data) = std::env::var_os("LOCALAPPDATA") {
+        let winget_base = std::path::PathBuf::from(local_app_data)
+            .join("Microsoft")
+            .join("WinGet")
+            .join("Packages");
+        if let Ok(entries) = std::fs::read_dir(&winget_base) {
+            for entry in entries.flatten() {
+                let name = entry.file_name();
+                let name_str = name.to_string_lossy();
+                if name_str.starts_with("Gyan.FFmpeg") {
+                    // Try any version subdirectory.
+                    if let Ok(sub) = std::fs::read_dir(entry.path()) {
+                        for s in sub.flatten() {
+                            let cand = s.path().join("bin").join("ffmpeg.exe");
+                            if cand.exists() {
+                                tracing::debug!(path = %cand.display(), "found ffmpeg");
+                                return cand.to_string_lossy().to_string();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    tracing::warn!("ffmpeg not found in PATH or winget, using bare 'ffmpeg'");
+    "ffmpeg".to_string()
+}
+
+/// Resolve the dshow audio device string (e.g. `"audio=@device_..."`).
+///
+/// On many Windows systems `audio=default` does not work because dshow
+/// requires the exact device name.  Chinese device names cannot be passed
+/// reliably through PowerShell→ffmpeg due to encoding issues, so we use
+/// the device's **alternative PnP name** (ASCII-safe `@device_...` string).
+///
+/// Returns `"audio=<alt_name>"` on success, `"audio=default"` on failure.
+fn resolve_audio_device() -> &'static str {
+    static DEVICE: OnceLock<String> = OnceLock::new();
+    DEVICE.get_or_init(|| {
+        let ffmpeg_path = find_ffmpeg();
+        tracing::info!(ffmpeg = %ffmpeg_path, "resolving dshow audio device");
+
+        // ffmpeg writes device list to stderr.  Capture both stdout and stderr.
+        let output = std::process::Command::new(&ffmpeg_path)
+            .args(["-list_devices", "true", "-f", "dshow", "-i", "dummy"])
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .output();
+
+        let (out, err) = match output {
+            Ok(o) => {
+                let stdout_text = String::from_utf8_lossy(&o.stdout).to_string();
+                let stderr_text = String::from_utf8_lossy(&o.stderr).to_string();
+                tracing::debug!(
+                    stdout_len = stdout_text.len(),
+                    stderr_len = stderr_text.len(),
+                    "ffmpeg device list output received"
+                );
+                (stdout_text, stderr_text)
+            }
+            Err(e) => {
+                tracing::debug!(error = %e, "failed to enumerate dshow devices");
+                return "audio=default".to_string();
+            }
+        };
+
+        // ffmpeg outputs device info to stderr, but some builds use stdout.
+        let combined = if err.contains("(audio)") || err.contains("Alternative name") {
+            err
+        } else {
+            out
+        };
+
+        // Scan for the first audio device and its alternative name.
+        // ffmpeg stderr output looks like:
+        //   "Device Name" (audio)
+        //     Alternative name "@device_cm_...\wave_..."
+        let mut found_audio = false;
+        for line in combined.lines() {
+            if line.contains("(audio)") {
+                found_audio = true;
+                continue;
+            }
+            if found_audio && line.contains("Alternative name") {
+                // Extract the quoted alternative name.
+                if let Some(start) = line.find('"') {
+                    if let Some(end) = line[start + 1..].find('"') {
+                        let alt_name = &line[start + 1..start + 1 + end];
+                        tracing::info!(
+                            device = %alt_name,
+                            "resolved dshow audio device"
+                        );
+                        return format!("audio={alt_name}");
+                    }
+                }
+                found_audio = false;
+            }
+        }
+
+        tracing::warn!("could not resolve dshow audio device, falling back to audio=default");
+        "audio=default".to_string()
+    })
 }
 
 impl WindowsRecorder {
@@ -44,12 +168,14 @@ impl WindowsRecorder {
 
         let handle = std::thread::spawn(move || {
             // Try ffmpeg with dshow, then sox as fallback.
-            let result = std::process::Command::new("ffmpeg")
+            let audio_device = resolve_audio_device();
+            let ffmpeg_path = find_ffmpeg();
+            let result = std::process::Command::new(&ffmpeg_path)
                 .args([
                     "-f",
                     "dshow",
                     "-i",
-                    "audio=default",
+                    audio_device,
                     "-ar",
                     &sample_rate.to_string(),
                     "-ac",

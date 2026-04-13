@@ -1,5 +1,6 @@
 use super::KeyEvent;
 use anyhow::{Context, Result};
+use std::io::BufRead;
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -40,7 +41,7 @@ impl MacOSListener {
 
         // Use a Swift script to monitor key events via CGEvent tap.
         // This requires Accessibility permissions.
-        let script = Self::event_tap_script()?;
+        let script = Self::event_tap_script();
 
         let mut child = Command::new("swift")
             .arg("-e")
@@ -100,26 +101,11 @@ impl MacOSListener {
         }
     }
 
-    fn event_tap_script(&self) -> Result<String> {
-        Ok(r#"
+    fn event_tap_script() -> String {
+        r#"
 import Cocoa
 
 let mask = (1 << CGEventType.keyDown.rawValue) | (1 << CGEventType.keyUp.rawValue)
-
-guard let tap = CGEvent.tapCreate(tap: .cgSessionEventTap,
-                                  place: .headInsertEventTap,
-                                  options: .listenOnly,
-                                  eventsOfInterest: CGEventMask(mask),
-                                  callback: nil,
-                                  userInfo: nil) else {
-    fputs("Failed to create event tap. Grant Accessibility permission.\n", stderr)
-    exit(1)
-}
-
-let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
-let loop_ = CFRunLoopGetCurrent()
-CFRunLoopAddSource(loop_, source, CFRunLoopMode.commonModes.rawValue)
-CGEvent.tapEnable(tap: tap, enable: true)
 
 let callback: CGEventTapCallBack = { _, type, event, _ in
     let keycode = event.getIntegerValueField(.keyboardEventKeycode)
@@ -132,21 +118,24 @@ let callback: CGEventTapCallBack = { _, type, event, _ in
     }
 }
 
-// Re-create tap with callback
-if let tapWithCallback = CGEvent.tapCreate(tap: .cgSessionEventTap,
-                                            place: .headInsertEventTap,
-                                            options: .listenOnly,
-                                            eventsOfInterest: CGEventMask(mask),
-                                            callback: callback,
-                                            userInfo: nil) {
-    let src = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tapWithCallback, 0)
-    CFRunLoopAddSource(loop_, src, CFRunLoopMode.commonModes.rawValue)
-    CGEvent.tapEnable(tap: tapWithCallback, enable: true)
+guard let tap = CGEvent.tapCreate(tap: .cgSessionEventTap,
+                                  place: .headInsertEventTap,
+                                  options: .listenOnly,
+                                  eventsOfInterest: CGEventMask(mask),
+                                  callback: callback,
+                                  userInfo: nil) else {
+    fputs("Failed to create event tap. Grant Accessibility permission.\n", stderr)
+    exit(1)
 }
+
+let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
+let loop_ = CFRunLoopGetCurrent()
+CFRunLoopAddSource(loop_, source, CFRunLoopMode.commonModes.rawValue)
+CGEvent.tapEnable(tap: tap, enable: true)
 
 CFRunLoopRun()
 "#
-        .to_string())
+        .to_string()
     }
 }
 
@@ -155,5 +144,3 @@ impl Drop for MacOSListener {
         self.stop();
     }
 }
-
-use std::io::BufRead;

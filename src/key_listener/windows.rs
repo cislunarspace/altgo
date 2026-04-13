@@ -1,6 +1,6 @@
 use super::KeyEvent;
 use anyhow::{Context, Result};
-use std::io::{BufRead, Write};
+use std::io::BufRead;
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -87,19 +87,18 @@ while ($true) {{
 
         std::thread::spawn(move || {
             let reader = std::io::BufReader::new(stdout);
-            for line in reader.lines().flatten() {
+            for line in reader.lines().map_while(Result::ok) {
                 if !running.load(Ordering::SeqCst) {
                     break;
                 }
                 let trimmed = line.trim();
-                if trimmed == "PRESS" {
-                    if tx.send(KeyEvent { pressed: true }).is_err() {
-                        break;
-                    }
-                } else if trimmed == "RELEASE" {
-                    if tx.send(KeyEvent { pressed: false }).is_err() {
-                        break;
-                    }
+                let send_result = match trimmed {
+                    "PRESS" => tx.send(KeyEvent { pressed: true }),
+                    "RELEASE" => tx.send(KeyEvent { pressed: false }),
+                    _ => continue,
+                };
+                if send_result.is_err() {
+                    break;
                 }
             }
         });

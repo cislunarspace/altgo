@@ -1,44 +1,27 @@
 use super::truncate_text;
 use std::process::Command;
 
-/// Write text to the Windows clipboard via `clip.exe` or PowerShell.
+/// Write text to the Windows clipboard via `clip.exe`.
+///
+/// `clip.exe` expects UTF-16LE encoded text on stdin.
 pub async fn write_clipboard(text: &str) -> anyhow::Result<()> {
     let text = text.to_string();
     tokio::task::spawn_blocking(move || {
-        // Try clip.exe first (available on all Windows).
+        // Convert to UTF-16LE (Windows native clipboard encoding).
+        let utf16: Vec<u8> = text
+            .encode_utf16()
+            .flat_map(|u| u.to_le_bytes())
+            .collect();
+
         let output = Command::new("clip")
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
+            .stderr(std::process::Stdio::piped())
             .spawn()
             .and_then(|mut child| {
-                use std::io::Write;
                 if let Some(mut stdin) = child.stdin.take() {
-                    // clip.exe expects text in the system's OEM code page.
-                    // Use PowerShell for proper UTF-8 support.
-                    let pwsh = Command::new("powershell")
-                        .args(["-NoProfile", "-Command", "Set-Clipboard -Value $input"])
-                        .stdin(std::process::Stdio::piped())
-                        .stdout(std::process::Stdio::null())
-                        .stderr(std::process::Stdio::null())
-                        .spawn();
-                    match pwsh {
-                        Ok(mut ps_child) => {
-                            if let Some(mut stdin) = ps_child.stdin.take() {
-                                let _ = stdin.write_all(text.as_bytes());
-                            }
-                            let result = ps_child.wait_with_output();
-                            // Kill the clip.exe child since we're using PowerShell instead.
-                            let _ = child.kill();
-                            let _ = child.wait();
-                            return result;
-                        }
-                        Err(_) => {
-                            // Fallback: use clip.exe with potential encoding issues.
-                            stdin.write_all(text.as_bytes())?;
-                            return child.wait_with_output();
-                        }
-                    }
+                    use std::io::Write;
+                    let _ = stdin.write_all(&utf16);
                 }
                 child.wait_with_output()
             });
@@ -56,38 +39,114 @@ pub async fn write_clipboard(text: &str) -> anyhow::Result<()> {
     .map_err(|e| anyhow::anyhow!("clipboard task panicked: {e}"))?
 }
 
-/// Show a Windows toast notification via PowerShell.
-pub fn notify(title: &str, body: &str, _timeout_ms: u64) -> anyhow::Result<()> {
+/// Show a floating notification window via PowerShell/WPF.
+///
+/// Creates a small, semi-transparent, borderless window near the bottom-right
+/// of the screen that auto-dismisses after `timeout_ms`.  Falls back to
+/// MessageBox if WPF is unavailable.
+pub fn notify(title: &str, body: &str, timeout_ms: u64) -> anyhow::Result<()> {
     let truncated = truncate_text(body, 200);
+    let timeout_sec = (timeout_ms as f64) / 1000.0;
+
+    // Escape single quotes for PowerShell string interpolation.
     let title_escaped = title.replace('\'', "''");
-    let body_escaped = truncated.replace('\'', "''");
+    let body_escaped = truncated.replace('\n', " ").replace('\'', "''");
 
-    // Try PowerShell BurntToast module first, then fallback to simple MessageBox.
-    let script = format!(
-        r#"
-try {{
-    Import-Module BurntToast -ErrorAction Stop
-    New-BurntToastNotification -Text '{title}', '{body}'
-}} catch {{
-    Add-Type -AssemblyName System.Windows.Forms
-    [System.Windows.Forms.MessageBox]::Show('{body}', '{title}', 'OK', 'Information') | Out-Null
-}}
-"#,
-        title = title_escaped,
-        body = body_escaped
-    );
+    // Write the PowerShell script to a temp file to avoid format! escaping issues
+    // with XAML (hex colors like #CC2D2D2D clash with Rust token parsing).
+    let tmp = tempfile::NamedTempFile::with_suffix(".ps1")?;
+    let script = format_ps1_script(&title_escaped, &body_escaped, timeout_sec);
+    std::fs::write(tmp.path(), script)?;
 
-    let output = Command::new("powershell")
-        .args(["-NoProfile", "-NonInteractive", "-Command", &script])
-        .output();
+    // Spawn in background so it doesn't block the main loop.
+    let child = Command::new("powershell")
+        .args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            &tmp.path().to_string_lossy(),
+        ])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn();
 
-    match output {
-        Ok(_) => Ok(()),
-        Err(_) => {
-            tracing::debug!("PowerShell notification not available");
-            Ok(())
+    match child {
+        Ok(mut child) => {
+            // Move tmp into background thread — it auto-deletes when PowerShell exits.
+            let _ = child.stdin.take();
+            std::thread::spawn(move || {
+                let _ = child.wait();
+                // tmp (NamedTempFile) is dropped here, cleaning up the .ps1 file.
+            });
+        }
+        Err(e) => {
+            tracing::debug!(error = %e, "failed to spawn PowerShell notification");
+            // tmp is dropped here on the main thread, cleaning up immediately.
         }
     }
+    Ok(())
+}
+
+fn format_ps1_script(title: &str, body: &str, timeout_sec: f64) -> String {
+    // Build the script by concatenation to avoid format!/r#"..."# parsing
+    // issues with XAML hex colors like #CC2D2D2D.
+    let mut s = String::new();
+    s.push_str("try {\n");
+    s.push_str("    Add-Type -AssemblyName PresentationFramework\n");
+    s.push_str("    Add-Type -AssemblyName PresentationCore\n");
+    s.push_str("    Add-Type -AssemblyName WindowsBase\n\n");
+    s.push_str("    $xaml = @\"\n");
+    s.push_str("<Window xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\"\n");
+    s.push_str("        xmlns:x=\"http://schemas.microsoft.com/winfx/2006/xaml\"\n");
+    s.push_str("        WindowStyle=\"None\" AllowsTransparency=\"True\"\n");
+    s.push_str("        Background=\"#CC2D2D2D\" Opacity=\"0.92\"\n");
+    s.push_str("        ShowInTaskbar=\"False\" Topmost=\"True\"\n");
+    s.push_str("        SizeToContent=\"Height\" Width=\"320\"\n");
+    s.push_str("        WindowStartupLocation=\"Manual\">\n");
+    s.push_str("    <Border CornerRadius=\"12\" Padding=\"16,12\" Background=\"#CC2D2D2D\"\n");
+    s.push_str("            BorderBrush=\"#44FFFFFF\" BorderThickness=\"1\">\n");
+    s.push_str("        <StackPanel>\n");
+    s.push_str("            <TextBlock Foreground=\"#CCFFFFFF\"\n");
+    s.push_str("                       FontSize=\"13\" FontWeight=\"SemiBold\" Margin=\"0,0,0,4\"/>\n");
+    s.push_str("            <TextBlock Foreground=\"#AAFFFFFF\"\n");
+    s.push_str("                       FontSize=\"12\" TextWrapping=\"Wrap\"/>\n");
+    s.push_str("        </StackPanel>\n");
+    s.push_str("    </Border>\n");
+    s.push_str("</Window>\n");
+    s.push_str("\"@\n\n");
+    s.push_str("    $reader = [System.Xml.XmlReader]::Create([System.IO.StringReader]::new($xaml))\n");
+    s.push_str("    $window = [System.Windows.Markup.XamlReader]::Load($reader)\n\n");
+    s.push_str("    # Set text after loading XAML to avoid parsing issues.\n");
+    s.push_str("    $window.Content.Child.Children[0].Text = '");
+    s.push_str(title);
+    s.push_str("'\n");
+    s.push_str("    $window.Content.Child.Children[1].Text = '");
+    s.push_str(body);
+    s.push_str("'\n\n");
+    s.push_str("    # Position near bottom-right of work area.\n");
+    s.push_str("    $screen = [System.Windows.SystemParameters]::WorkArea\n");
+    s.push_str("    $window.Left = $screen.Right - $window.Width - 24\n");
+    s.push_str("    $window.Top = $screen.Bottom - $window.Height - 24\n\n");
+    s.push_str("    # Auto-dismiss timer.\n");
+    s.push_str("    $timer = New-Object System.Windows.Threading.DispatcherTimer\n");
+    s.push_str("    $timer.Interval = [TimeSpan]::FromSeconds(");
+    s.push_str(&timeout_sec.to_string());
+    s.push_str(")\n");
+    s.push_str("    $timer.Add_Tick({ $window.Close(); $timer.Stop() })\n");
+    s.push_str("    $timer.Start()\n\n");
+    s.push_str("    $window.ShowDialog() | Out-Null\n");
+    s.push_str("} catch {\n");
+    s.push_str("    Add-Type -AssemblyName System.Windows.Forms\n");
+    s.push_str("    [System.Windows.Forms.MessageBox]::Show('");
+    s.push_str(body);
+    s.push_str("', '");
+    s.push_str(title);
+    s.push_str("', 'OK', 'Information') | Out-Null\n");
+    s.push_str("}\n");
+    s
 }
 
 /// Show "processing speech" notification.
