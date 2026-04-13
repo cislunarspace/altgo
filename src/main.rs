@@ -1,4 +1,9 @@
+#[allow(dead_code)]
+mod audio;
+#[allow(dead_code)]
 mod config;
+#[allow(dead_code)]
+mod output;
 #[allow(dead_code)]
 mod state_machine;
 
