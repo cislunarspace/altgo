@@ -26,10 +26,12 @@ impl Buffer {
         self.data.lock().unwrap().clear();
     }
 
+    #[allow(dead_code)]
     pub fn len(&self) -> usize {
         self.data.lock().unwrap().len()
     }
 
+    #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
         self.data.lock().unwrap().is_empty()
     }
@@ -77,6 +79,7 @@ pub fn encode_wav(
 }
 
 /// Decode 16-bit PCM WAV data to float32 samples in [-1.0, 1.0].
+#[allow(dead_code)]
 pub fn decode_wav_to_f32(wav_data: &[u8]) -> Result<Vec<f32>, &'static str> {
     if wav_data.len() < 44 {
         return Err("WAV data too short");

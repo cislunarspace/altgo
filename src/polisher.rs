@@ -13,6 +13,7 @@ pub enum PolishLevel {
 }
 
 impl PolishLevel {
+    #[allow(dead_code)]
     fn as_str(self) -> &'static str {
         match self {
             PolishLevel::None => "none",
@@ -70,6 +71,7 @@ struct ChatChoice {
     message: ChatMessage,
 }
 
+#[derive(Clone)]
 pub struct LLMFormatter {
     api_key: String,
     api_base_url: String,

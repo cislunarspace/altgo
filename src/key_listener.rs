@@ -79,9 +79,7 @@ impl X11Listener {
                 } else if let Some(detail_str) = trimmed.strip_prefix("detail:") {
                     if let Some(pressed) = event_type.take() {
                         if let Ok(detail) = detail_str.trim().parse::<u8>() {
-                            if detail == keycode
-                                && tx.send(KeyEvent { pressed }).is_err()
-                            {
+                            if detail == keycode && tx.send(KeyEvent { pressed }).is_err() {
                                 break;
                             }
                         }

@@ -5,6 +5,7 @@ use std::time::Duration;
 
 /// Result of a transcription.
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct TranscribeResult {
     pub text: String,
     pub language: String,

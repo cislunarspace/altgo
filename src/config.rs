@@ -3,7 +3,7 @@ use serde::Deserialize;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, Clone)]
 #[serde(default)]
 pub struct Config {
     pub key_listener: KeyListenerConfig,
@@ -14,7 +14,7 @@ pub struct Config {
     pub logging: LoggingConfig,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 #[serde(default)]
 pub struct KeyListenerConfig {
     pub key_name: String,
@@ -44,7 +44,7 @@ impl Default for KeyListenerConfig {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 #[serde(default)]
 pub struct RecorderConfig {
     pub sample_rate: u32,
@@ -64,7 +64,7 @@ impl Default for RecorderConfig {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 #[serde(default)]
 pub struct TranscriberConfig {
     pub engine: String,
@@ -95,7 +95,7 @@ impl Default for TranscriberConfig {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 #[serde(default)]
 pub struct PolisherConfig {
     pub engine: String,
@@ -126,7 +126,7 @@ impl Default for PolisherConfig {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 #[serde(default)]
 pub struct OutputConfig {
     pub enable_notify: bool,
@@ -144,7 +144,7 @@ impl Default for OutputConfig {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 #[serde(default)]
 pub struct LoggingConfig {
     pub level: String,

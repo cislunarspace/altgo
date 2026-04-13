@@ -13,6 +13,7 @@ pub struct PulseRecorder {
     channels: u32,
     shared_buffer: Arc<Buffer>,
     recording: Arc<AtomicBool>,
+    done: std::sync::Mutex<Option<std::thread::JoinHandle<()>>>,
 }
 
 impl PulseRecorder {
@@ -22,6 +23,7 @@ impl PulseRecorder {
             channels,
             shared_buffer: Arc::new(Buffer::new()),
             recording: Arc::new(AtomicBool::new(false)),
+            done: std::sync::Mutex::new(None),
         }
     }
 
@@ -39,7 +41,7 @@ impl PulseRecorder {
         let buffer = Arc::clone(&self.shared_buffer);
         let recording = Arc::clone(&self.recording);
 
-        std::thread::spawn(move || {
+        let handle = std::thread::spawn(move || {
             let child = std::process::Command::new("parecord")
                 .args([
                     "--format=s16le",
@@ -84,6 +86,7 @@ impl PulseRecorder {
             let _ = child.wait();
         });
 
+        *self.done.lock().unwrap() = Some(handle);
         Ok(())
     }
 
@@ -91,8 +94,11 @@ impl PulseRecorder {
     pub fn stop(&self) -> Result<Vec<u8>> {
         self.recording.store(false, Ordering::SeqCst);
 
-        // Give the recording thread a moment to finish.
-        std::thread::sleep(std::time::Duration::from_millis(100));
+        // Wait for the recording thread to finish.
+        let handle = self.done.lock().unwrap().take();
+        if let Some(h) = handle {
+            let _ = h.join();
+        }
 
         let pcm_data = self.shared_buffer.read_all();
         if pcm_data.is_empty() {
