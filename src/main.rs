@@ -5,6 +5,8 @@ mod config;
 #[allow(dead_code)]
 mod output;
 #[allow(dead_code)]
+mod polisher;
+#[allow(dead_code)]
 mod state_machine;
 
 use clap::Parser;
