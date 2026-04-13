@@ -1,6 +1,7 @@
+use super::truncate_text;
 use std::process::Command;
 
-/// Available clipboard management tools.
+/// Available clipboard management tools on Linux.
 #[derive(Debug, Clone, Copy)]
 pub enum ClipboardTool {
     XClip,
@@ -102,12 +103,10 @@ pub fn notify(title: &str, body: &str, timeout_ms: u64) -> anyhow::Result<()> {
     match output {
         Ok(out) if out.status.success() => Ok(()),
         Ok(_) => {
-            // notify-send failed, but this is not critical.
             tracing::debug!("notify-send failed, ignoring");
             Ok(())
         }
         Err(_) => {
-            // notify-send not installed — not critical.
             tracing::debug!("notify-send not available");
             Ok(())
         }
@@ -123,19 +122,6 @@ pub fn notify_processing() -> anyhow::Result<()> {
 pub fn notify_result(text: &str, timeout_ms: u64) -> anyhow::Result<()> {
     let truncated = truncate_text(text, 200);
     notify("altgo", &truncated, timeout_ms)
-}
-
-fn truncate_text(text: &str, max_len: usize) -> String {
-    if text.len() <= max_len {
-        return text.to_string();
-    }
-
-    // Find a safe truncation point (don't cut multi-byte chars).
-    let mut end = max_len;
-    while end > 0 && !text.is_char_boundary(end) {
-        end -= 1;
-    }
-    format!("{}...", &text[..end])
 }
 
 /// Check if a command exists in PATH.
@@ -172,7 +158,6 @@ mod tests {
     #[test]
     fn test_truncate_text_multibyte() {
         let result = truncate_text("你好世界再见", 6);
-        // "你好" is 6 bytes, "世" starts at byte 6 but we can't include it at 6 bytes.
         assert!(result.ends_with("..."));
         assert!(result.starts_with("你好"));
     }
@@ -184,7 +169,6 @@ mod tests {
 
     #[test]
     fn test_detect_clipboard_tool() {
-        // Just verify it doesn't panic.
         let tool = detect_clipboard_tool();
         if let Some(t) = tool {
             let s = t.to_string();

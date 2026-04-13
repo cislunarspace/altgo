@@ -21,8 +21,9 @@ engine = "local"
 # For "api" mode: API key and base URL.
 api_key = ""
 api_base_url = "https://api.openai.com"
-# For "api" mode: model name. For "local" mode: path to GGML model file.
-model = "/home/ouyangjiahong/codes/altgo/whisper.cpp/models/ggml-base.bin"
+# For "api" mode: model name (e.g. "whisper-1").
+# For "local" mode: path to GGML model file (e.g. "~/models/ggml-base.bin").
+model = ""
 # Language hint: "zh" for Chinese, "en" for English, etc.
 language = "zh"
 timeout_seconds = 30

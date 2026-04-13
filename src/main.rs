@@ -12,15 +12,8 @@ use std::sync::Arc;
 
 use clap::Parser;
 
-/// Wrapper enum for either transcription backend.
-#[derive(Clone)]
-enum Transcriber {
-    Api(transcriber::WhisperApi),
-    Local(transcriber::LocalWhisper),
-}
-
 #[derive(Parser)]
-#[command(name = "altgo", about = "无需打字，言出法随 — Linux 语音转文字工具")]
+#[command(name = "altgo", about = "无需打字，言出法随 — 跨平台语音转文字工具")]
 struct Cli {
     /// Path to configuration file
     #[arg(short, long)]
@@ -29,6 +22,13 @@ struct Cli {
     /// Print version
     #[arg(short = 'V', long)]
     version: bool,
+}
+
+/// Wrapper enum for either transcription backend.
+#[derive(Clone)]
+enum Transcriber {
+    Api(transcriber::WhisperApi),
+    Local(transcriber::LocalWhisper),
 }
 
 #[tokio::main]
@@ -55,11 +55,11 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!("altgo starting");
 
     // Initialize key listener.
-    let mut listener = key_listener::X11Listener::new(&cfg.key_listener.key_name)?;
+    let mut listener = key_listener::PlatformListener::new(&cfg.key_listener.key_name)?;
 
     // Initialize recorder.
     let mut recorder =
-        recorder::PulseRecorder::new(cfg.recorder.sample_rate, cfg.recorder.channels);
+        recorder::PlatformRecorder::new(cfg.recorder.sample_rate, cfg.recorder.channels);
 
     // Initialize transcriber.
     let transcriber = match cfg.transcriber.engine.as_str() {
@@ -124,7 +124,7 @@ async fn main() -> anyhow::Result<()> {
     );
     let mut commands = sm.run(key_rx);
 
-    tracing::info!("altgo initialized — waiting for right Alt key");
+    tracing::info!("altgo initialized — waiting for trigger key");
 
     // Main event loop.
     while let Some(cmd) = commands.recv().await {

@@ -1,15 +1,10 @@
+use super::KeyEvent;
 use anyhow::{Context, Result};
 use std::io::BufRead;
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio::sync::mpsc;
-
-/// Key event from the listener.
-#[derive(Debug)]
-pub struct KeyEvent {
-    pub pressed: bool,
-}
 
 /// X11 key listener using `xinput test-xi2` to capture global key events.
 ///
@@ -84,7 +79,10 @@ impl X11Listener {
                             }
                         }
                     } else {
-                        tracing::debug!(line = %trimmed, "detail line without preceding event type, skipping");
+                        tracing::debug!(
+                            line = %trimmed,
+                            "detail line without preceding event type, skipping"
+                        );
                     }
                 } else if !trimmed.is_empty()
                     && !trimmed.starts_with("EVENT")
