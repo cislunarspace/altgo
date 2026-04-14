@@ -3,13 +3,13 @@ name = "altgo"
 version = "0.1.0"
 edition = "2021"
 description = "无需打字，言出法随 — 跨平台语音转文字工具"
+homepage = "https://github.com/cislunarspace/altgo"
 
 [package.metadata.deb]
 name = "altgo"
 maintainer = "altgo"
 section = "Utility"
 priority = "optional"
-homepage = "https://github.com/cislunarspace/altgo"
 
 [profile.release]
 # On Windows, link as GUI subsystem to avoid console window.
