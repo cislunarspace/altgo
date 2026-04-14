@@ -46,11 +46,11 @@ impl std::str::FromStr for PolishLevel {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_lowercase().as_str() {
-            "none" => Ok(PolishLevel::None),
-            "light" => Ok(PolishLevel::Light),
-            "medium" => Ok(PolishLevel::Medium),
-            "heavy" => Ok(PolishLevel::Heavy),
+        match s {
+            s if s.eq_ignore_ascii_case("none") => Ok(PolishLevel::None),
+            s if s.eq_ignore_ascii_case("light") => Ok(PolishLevel::Light),
+            s if s.eq_ignore_ascii_case("medium") => Ok(PolishLevel::Medium),
+            s if s.eq_ignore_ascii_case("heavy") => Ok(PolishLevel::Heavy),
             other => Err(format!("unknown polish level: {other}")),
         }
     }
@@ -106,7 +106,12 @@ pub struct LLMFormatter {
 impl LLMFormatter {
     /// 创建新的润色器（使用默认 max_tokens=1024）。
     #[allow(dead_code)]
-    pub fn new(api_key: String, api_base_url: String, model: String, timeout: Duration) -> Self {
+    pub fn new(
+        api_key: String,
+        api_base_url: String,
+        model: String,
+        timeout: Duration,
+    ) -> anyhow::Result<Self> {
         Self::with_max_tokens(api_key, api_base_url, model, timeout, 1024)
     }
 
@@ -117,19 +122,19 @@ impl LLMFormatter {
         model: String,
         timeout: Duration,
         max_tokens: u32,
-    ) -> Self {
+    ) -> anyhow::Result<Self> {
         let client = Client::builder()
             .timeout(timeout)
             .build()
-            .unwrap_or_default();
-        Self {
+            .context("failed to build HTTP client for LLMFormatter")?;
+        Ok(Self {
             api_key,
             api_base_url,
             model,
             client,
             max_retries: 3,
             max_tokens,
-        }
+        })
     }
 
     /// 使用 LLM 润色文本。
@@ -168,6 +173,10 @@ impl LLMFormatter {
             match self.do_request(&body).await {
                 Ok(result) => return Ok(result),
                 Err(e) => {
+                    // Don't retry on auth errors.
+                    if e.to_string().contains("401") || e.to_string().contains("403") {
+                        return Err(e);
+                    }
                     tracing::warn!(attempt, error = %e, "polish request failed");
                     last_err = Some(e);
                 }
@@ -189,6 +198,10 @@ impl LLMFormatter {
             .context("LLM API request failed")?;
 
         let status = resp.status();
+        if status.as_u16() == 429 {
+            // Rate limited — return early so caller can handle retry with Retry-After.
+            return Err(anyhow!("rate limited"));
+        }
         if !status.is_success() {
             let body = resp
                 .text()
@@ -249,7 +262,8 @@ mod tests {
             "http://localhost".to_string(),
             "model".to_string(),
             Duration::from_secs(5),
-        );
+        )
+        .unwrap();
         let result = formatter.polish("hello", PolishLevel::None).await.unwrap();
         assert_eq!(result, "hello");
     }
@@ -261,7 +275,8 @@ mod tests {
             "http://localhost".to_string(),
             "model".to_string(),
             Duration::from_secs(5),
-        );
+        )
+        .unwrap();
         let result = formatter.polish("", PolishLevel::Medium).await.unwrap();
         assert_eq!(result, "");
     }
@@ -294,7 +309,8 @@ mod tests {
             server.url(),
             "deepseek-chat".to_string(),
             Duration::from_secs(5),
-        );
+        )
+        .unwrap();
         let result = formatter
             .polish("原始文本", PolishLevel::Medium)
             .await
@@ -328,7 +344,8 @@ mod tests {
             server.url(),
             "model".to_string(),
             Duration::from_secs(5),
-        );
+        )
+        .unwrap();
         let _ = formatter.polish("test", PolishLevel::Light).await;
         mock.assert_async().await;
     }
@@ -349,7 +366,8 @@ mod tests {
             server.url(),
             "model".to_string(),
             Duration::from_secs(5),
-        );
+        )
+        .unwrap();
         let result = formatter.polish("test", PolishLevel::Medium).await;
         assert!(result.is_err());
     }

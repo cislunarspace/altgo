@@ -89,6 +89,7 @@ async fn main() -> anyhow::Result<()> {
         .unwrap_or_else(config::Config::default_config_path);
 
     let cfg = Arc::new(config::Config::load(&config_path)?);
+    cfg.as_ref().validate()?;
 
     // Initialize logging.
     let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
@@ -99,13 +100,15 @@ async fn main() -> anyhow::Result<()> {
 
     // Initialize key listener.
     let mut listener = key_listener::PlatformListener::new(&cfg.key_listener.key_name)?;
+    #[cfg(target_os = "windows")]
+    listener.set_poll_interval_ms(cfg.key_listener.poll_interval_ms);
 
     // Initialize recorder.
     let mut recorder =
         recorder::PlatformRecorder::new(cfg.recorder.sample_rate, cfg.recorder.channels);
 
     // Initialize transcriber.
-    let transcriber = match cfg.transcriber.engine.as_str() {
+    let transcriber: transcriber::Transcriber = match cfg.transcriber.engine.as_str() {
         "local" => {
             tracing::info!(
                 model = %cfg.transcriber.model,
@@ -124,7 +127,7 @@ async fn main() -> anyhow::Result<()> {
                 cfg.transcriber.model.clone(),
                 cfg.transcriber.language.clone(),
                 cfg.transcriber.timeout(),
-            ))
+            )?)
         }
     };
 
@@ -142,7 +145,7 @@ async fn main() -> anyhow::Result<()> {
         cfg.polisher.model.clone(),
         cfg.polisher.timeout(),
         cfg.polisher.max_tokens,
-    );
+    )?;
 
     // Start key listener.
     let key_events = listener.start()?;

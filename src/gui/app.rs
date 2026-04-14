@@ -71,6 +71,8 @@ impl AltgoApp {
                 level = %self.edit_polisher_level,
                 "invalid polisher level, ignoring save"
             );
+            self.state
+                .set_message(i18n::t("settings.error_invalid_polish_level", self.lang));
             return;
         }
 
@@ -80,6 +82,8 @@ impl AltgoApp {
                 engine = %self.edit_engine,
                 "invalid engine, ignoring save"
             );
+            self.state
+                .set_message(i18n::t("settings.error_invalid_engine", self.lang));
             return;
         }
 
@@ -447,6 +451,17 @@ impl AltgoApp {
             });
 
         ui.add_space(12.0);
+
+        // Show message if one is set.
+        let state = self.state.get();
+        if let Some(msg) = &state.message {
+            ui.label(
+                RichText::new(msg.as_str())
+                    .font(FontId::proportional(12.0))
+                    .color(Color32::RED),
+            );
+        }
+        drop(state);
 
         ui.horizontal(|ui| {
             if ui.button(self.t("settings.save")).clicked() {

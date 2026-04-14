@@ -127,18 +127,20 @@ impl X11Listener {
 
     fn resolve_keycode(&self) -> Result<u8> {
         let keycode_map = XMODMAP_CACHE.get_or_init(|| {
-            let output = match Command::new("xmodmap")
-                .arg("-pke")
-                .output()
-            {
+            let output = match Command::new("xmodmap").arg("-pke").output() {
                 Ok(o) => o,
                 Err(e) => {
-                    tracing::warn!(error = %e, "xmodmap not found or failed, keycode resolution may fail");
+                    tracing::error!(error = %e, "xmodmap not found or failed to run");
                     return std::collections::HashMap::new();
                 }
             };
 
             let stdout = String::from_utf8_lossy(&output.stdout);
+            if stdout.trim().is_empty() {
+                tracing::error!("xmodmap returned empty output");
+                return std::collections::HashMap::new();
+            }
+
             let mut map = std::collections::HashMap::new();
 
             // xmodmap -pke output format: keycode <N> = keysym ...
@@ -157,12 +159,22 @@ impl X11Listener {
                     }
                 }
             }
+            if map.is_empty() {
+                tracing::error!("xmodmap output contained no parseable keycode mappings");
+            }
             map
         });
 
+        if keycode_map.is_empty() {
+            return Err(anyhow::anyhow!(
+                "xmodmap failed to produce keycode mappings — is xmodmap installed and DISPLAY set?"
+            ));
+        }
+
         keycode_map.get(&self.key_name).copied().ok_or_else(|| {
             anyhow::anyhow!(
-                "keycode for '{}' not found in xmodmap output",
+                "keycode for '{}' not found in xmodmap output (key '{}' may not exist on this keyboard layout)",
+                self.key_name,
                 self.key_name
             )
         })

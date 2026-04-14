@@ -148,7 +148,14 @@ impl SoxRecorder {
             .take()
         {
             if let Err(e) = handle.join() {
-                tracing::error!(error = ?e, "recording thread panicked");
+                let msg = if let Some(s) = e.downcast_ref::<&str>() {
+                    s.to_string()
+                } else if let Some(s) = e.downcast_ref::<String>() {
+                    s.clone()
+                } else {
+                    "unknown panic".to_string()
+                };
+                return Err(anyhow::anyhow!("recording thread panicked: {}", msg));
             }
         }
 

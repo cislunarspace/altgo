@@ -15,11 +15,15 @@ pub fn run_gui(state: Arc<SharedState>) -> anyhow::Result<()> {
     // Initialize logging for GUI mode (CLI path does its own init in main.rs).
     let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
-    tracing_subscriber::fmt().with_env_filter(env_filter).init();
+    tracing_subscriber::fmt()
+        .with_env_filter(env_filter)
+        .try_init()
+        .ok(); // ok() to ignore double-init if CLI path already called init()
 
     // Load config once and share between GUI and pipeline.
     let config_path = crate::config::Config::default_config_path();
     let cfg = Arc::new(crate::config::Config::load(&config_path)?);
+    cfg.as_ref().validate()?;
     let lang = i18n::Lang::from_code(&cfg.gui.language);
 
     let state_clone = Arc::clone(&state);
@@ -81,13 +85,15 @@ async fn run_pipeline(
 
     // Initialize key listener.
     let mut listener = crate::key_listener::PlatformListener::new(&cfg.key_listener.key_name)?;
+    #[cfg(target_os = "windows")]
+    listener.set_poll_interval_ms(cfg.key_listener.poll_interval_ms);
 
     // Initialize recorder.
     let mut recorder =
         crate::recorder::PlatformRecorder::new(cfg.recorder.sample_rate, cfg.recorder.channels);
 
     // Initialize transcriber.
-    let transcriber = match cfg.transcriber.engine.as_str() {
+    let transcriber: crate::transcriber::Transcriber = match cfg.transcriber.engine.as_str() {
         "local" => crate::transcriber::Transcriber::Local(crate::transcriber::LocalWhisper::new(
             cfg.transcriber.model.clone(),
             cfg.transcriber.language.clone(),
@@ -98,7 +104,7 @@ async fn run_pipeline(
             cfg.transcriber.model.clone(),
             cfg.transcriber.language.clone(),
             cfg.transcriber.timeout(),
-        )),
+        )?),
     };
 
     // Initialize polisher.
@@ -116,7 +122,7 @@ async fn run_pipeline(
         cfg.polisher.model.clone(),
         cfg.polisher.timeout(),
         cfg.polisher.max_tokens,
-    );
+    )?;
 
     // Start key listener.
     let key_events = listener.start()?;

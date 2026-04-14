@@ -24,7 +24,7 @@ gui = ["egui", "eframe", "once_cell"]
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 toml = "0.8"
-tokio = { version = "1", features = ["full"] }
+tokio = { version = "1", features = ["macros", "sync", "time", "rt-multi-thread", "process"] }
 reqwest = { version = "0.12", features = ["json", "multipart"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

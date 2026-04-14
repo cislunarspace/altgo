@@ -48,18 +48,18 @@ impl WhisperApi {
         model: String,
         language: String,
         timeout: Duration,
-    ) -> Self {
+    ) -> anyhow::Result<Self> {
         let client = Client::builder()
             .timeout(timeout)
             .build()
-            .unwrap_or_default();
-        Self {
+            .context("failed to build HTTP client for WhisperApi")?;
+        Ok(Self {
             api_key,
             api_base_url,
             model,
             language,
             client,
-        }
+        })
     }
 
     /// 通过 API 识别音频数据，返回识别结果。
@@ -147,7 +147,7 @@ impl LocalWhisper {
         std::fs::write(&wav_path, audio_data).context("write temp wav file")?;
 
         // Find whisper-cli binary.
-        let whisper_bin = self.find_whisper_binary()?;
+        let whisper_bin = Self::find_whisper_binary()?;
 
         let mut cmd = tokio::process::Command::new(&whisper_bin);
         cmd.arg("-m")
@@ -175,29 +175,22 @@ impl LocalWhisper {
         })
     }
 
-    fn find_whisper_binary(&self) -> anyhow::Result<String> {
-        static CACHE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    fn find_whisper_binary() -> anyhow::Result<std::path::PathBuf> {
+        static CACHE: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
 
         if let Some(cached) = CACHE.get() {
             return Ok(cached.clone());
         }
 
-        // Check common locations.
-        let candidates = [
-            "whisper-cli",
-            "whisper-cpp",
-            "./whisper.cpp/build/bin/whisper-cli",
-            "./whisper.cpp/bin/whisper-cli",
-            &format!(
-                "{}/whisper.cpp/build/bin/whisper-cli",
-                std::env::current_dir()?.display()
-            ),
-        ];
+        // Check common locations. whisper-cli/whisper-cpp rely on PATH.
+        let candidates = ["whisper-cli", "whisper-cpp"];
 
         for candidate in &candidates {
-            if std::path::Path::new(candidate).exists() || which_exists(candidate) {
-                let _ = CACHE.set(candidate.to_string());
-                return Ok(candidate.to_string());
+            let path = std::path::Path::new(candidate);
+            if path.exists() {
+                let buf = path.to_path_buf();
+                let _ = CACHE.set(buf.clone());
+                return Ok(buf);
             }
         }
 
@@ -205,16 +198,6 @@ impl LocalWhisper {
             "whisper-cli not found — build whisper.cpp and add to PATH"
         ))
     }
-}
-
-fn which_exists(cmd: &str) -> bool {
-    std::process::Command::new("which")
-        .arg(cmd)
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
 }
 
 /// Unified transcription backend — dispatches between API and local engines.
@@ -246,7 +229,8 @@ mod tests {
             "whisper-1".to_string(),
             "zh".to_string(),
             Duration::from_secs(5),
-        );
+        )
+        .unwrap();
         let result = api.transcribe(&[]).await;
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("empty"));
@@ -260,7 +244,8 @@ mod tests {
             "whisper-1".to_string(),
             "zh".to_string(),
             Duration::from_secs(5),
-        );
+        )
+        .unwrap();
         let result = api.transcribe(&[0u8; 44]).await;
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("API key"));
@@ -289,7 +274,8 @@ mod tests {
             "whisper-1".to_string(),
             "zh".to_string(),
             Duration::from_secs(5),
-        );
+        )
+        .unwrap();
         let result = api.transcribe(&[0u8; 44]).await.unwrap();
         assert_eq!(result.text, "你好世界");
         assert_eq!(result.language, "zh");
@@ -312,7 +298,8 @@ mod tests {
             "whisper-1".to_string(),
             "zh".to_string(),
             Duration::from_secs(5),
-        );
+        )
+        .unwrap();
         let result = api.transcribe(&[0u8; 44]).await;
         assert!(result.is_err());
     }

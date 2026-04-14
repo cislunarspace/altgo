@@ -52,6 +52,8 @@ const KEYS: &[&str] = &[
     "settings.gui_language",
     "settings.lang_zh",
     "settings.lang_en",
+    "settings.error_invalid_polish_level",
+    "settings.error_invalid_engine",
     // Tray
     "tray.show",
     "tray.settings",
@@ -152,6 +154,8 @@ fn t_zh(key: &'static str) -> &'static str {
         "settings.gui_language" => "界面语言:",
         "settings.lang_zh" => "中文",
         "settings.lang_en" => "English",
+        "settings.error_invalid_polish_level" => "无效的润色级别",
+        "settings.error_invalid_engine" => "无效的引擎",
 
         // Tray
         "tray.show" => "显示窗口",
@@ -224,6 +228,8 @@ fn t_en(key: &'static str) -> &'static str {
         "settings.gui_language" => "UI Language:",
         "settings.lang_zh" => "中文",
         "settings.lang_en" => "English",
+        "settings.error_invalid_polish_level" => "Invalid polish level",
+        "settings.error_invalid_engine" => "Invalid engine",
 
         // Tray
         "tray.show" => "Show Window",

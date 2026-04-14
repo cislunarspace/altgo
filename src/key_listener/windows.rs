@@ -17,11 +17,12 @@ use tokio::sync::mpsc;
 // Windows flag to prevent subprocess from creating a console window.
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
-/// Windows 按键监听器。
+/// Windows 按键监听器.
 ///
-/// 使用 PowerShell + `GetAsyncKeyState` 进行按键状态轮询（约 50ms 间隔）。
+/// 使用 PowerShell + `GetAsyncKeyState` 进行按键状态轮询。
 pub struct WindowsListener {
     key_name: String,
+    poll_interval_ms: u64,
     running: Arc<AtomicBool>,
     child: Option<Child>,
 }
@@ -40,9 +41,15 @@ impl WindowsListener {
 
         Ok(Self {
             key_name: key_name.to_string(),
+            poll_interval_ms: 50, // default, can be set before start()
             running: Arc::new(AtomicBool::new(false)),
             child: None,
         })
+    }
+
+    /// Set the poll interval in milliseconds.
+    pub fn set_poll_interval_ms(&mut self, ms: u64) {
+        self.poll_interval_ms = ms;
     }
 
     /// 开始监听按键事件，通过 PowerShell 轮询实现。
@@ -56,8 +63,7 @@ impl WindowsListener {
         running.store(true, Ordering::SeqCst);
 
         let script = format!(
-            r#"
-Add-Type -TypeDefinition @"
+            r#"Add-Type -TypeDefinition @"
 using System;
 using System.Runtime.InteropServices;
 public class KeyState {{
@@ -78,9 +84,10 @@ while ($true) {{
         [Console]::Out.Flush()
     }}
     $wasDown = $isDown
-    Start-Sleep -Milliseconds 50
-}}
-"#
+    Start-Sleep -Milliseconds {poll_interval_ms}
+}}"#,
+            vk_code = vk_code,
+            poll_interval_ms = self.poll_interval_ms
         );
 
         let mut child = Command::new("powershell")

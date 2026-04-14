@@ -47,6 +47,8 @@ pub struct KeyListenerConfig {
     pub double_click_interval_ms: u64,
     /// 防抖窗口（毫秒），过滤 Windows 中文输入法导致的按键抖动
     pub debounce_window_ms: u64,
+    /// Windows 轮询间隔（毫秒）
+    pub poll_interval_ms: u64,
 }
 
 impl KeyListenerConfig {
@@ -73,6 +75,7 @@ impl Default for KeyListenerConfig {
             long_press_threshold_ms: 300,
             double_click_interval_ms: 300,
             debounce_window_ms: 100,
+            poll_interval_ms: 50,
         }
     }
 }
@@ -250,6 +253,23 @@ impl Config {
         Ok(cfg)
     }
 
+    /// Validate the loaded configuration.
+    /// Call this after `load()` to check API keys are present when using API engines.
+    pub fn validate(&self) -> Result<()> {
+        if self.transcriber.engine == "api" && self.transcriber.api_key.trim().is_empty() {
+            anyhow::bail!(
+                "transcriber engine is 'api' but ALTGO_TRANSCRIBER_API_KEY is not set or is empty"
+            );
+        }
+        // Only require polisher API key when polishing is actually enabled.
+        if self.polisher.level != "none" && self.polisher.api_key.trim().is_empty() {
+            anyhow::bail!(
+                "polisher level is not 'none' but ALTGO_POLISHER_API_KEY is not set or is empty"
+            );
+        }
+        Ok(())
+    }
+
     /// 将配置保存到指定路径（仅 GUI 模式使用）。
     #[cfg(feature = "gui")]
     pub fn save(&self, path: &Path) -> Result<()> {
@@ -389,5 +409,54 @@ level = "debug"
         let path = Config::default_config_path();
         assert!(path.to_string_lossy().contains("altgo"));
         assert!(path.to_string_lossy().ends_with("altgo.toml"));
+    }
+
+    #[test]
+    fn test_validate_missing_api_key() {
+        let mut cfg = Config::default();
+        cfg.transcriber.engine = "api".to_string();
+        cfg.transcriber.api_key = String::new();
+        cfg.polisher.api_key = String::new();
+        assert!(cfg.validate().is_err());
+    }
+
+    #[test]
+    fn test_validate_success_with_api_key() {
+        let mut cfg = Config::default();
+        cfg.transcriber.engine = "api".to_string();
+        cfg.transcriber.api_key = "test-key".to_string();
+        cfg.polisher.api_key = "polish-key".to_string();
+        assert!(cfg.validate().is_ok());
+    }
+
+    #[test]
+    fn test_validate_whitespace_api_key_fails() {
+        let mut cfg = Config::default();
+        cfg.transcriber.engine = "api".to_string();
+        cfg.transcriber.api_key = "   ".to_string();
+        cfg.polisher.api_key = "valid-key".to_string();
+        assert!(cfg.validate().is_err());
+    }
+
+    #[test]
+    fn test_validate_local_mode_no_polisher_key() {
+        // Local transcriber with polishing disabled should not require API keys.
+        let mut cfg = Config::default();
+        cfg.transcriber.engine = "local".to_string();
+        cfg.transcriber.api_key = String::new();
+        cfg.polisher.level = "none".to_string();
+        cfg.polisher.api_key = String::new();
+        assert!(cfg.validate().is_ok());
+    }
+
+    #[test]
+    fn test_validate_polisher_requires_key_when_enabled() {
+        // When polisher level != "none", API key is required.
+        let mut cfg = Config::default();
+        cfg.transcriber.engine = "local".to_string();
+        cfg.transcriber.api_key = String::new();
+        cfg.polisher.level = "medium".to_string();
+        cfg.polisher.api_key = String::new();
+        assert!(cfg.validate().is_err());
     }
 }
