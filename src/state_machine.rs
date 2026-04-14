@@ -347,13 +347,22 @@ mod tests {
     fn test_spurious_quick_release_rejected() {
         let threshold = Duration::from_millis(300);
         let interval = Duration::from_millis(300);
-        let mut sm = Machine::new(threshold, interval);
+
+        // Use a separate config to set min_press_duration to 1ms so we can
+        // reliably test the spurious release rejection without depending on
+        // accurate thread::sleep timing across all platforms (e.g. ARM64).
+        let mut sm = Machine {
+            state: State::Idle,
+            long_press_threshold: threshold,
+            double_click_interval: interval,
+            min_press_duration: Duration::from_millis(1),
+            press_time: None,
+        };
 
         // Press → PotentialPress
         assert_eq!(sm.process(press()), None);
 
-        // Release within 100ms (min_press_duration) → rejected, stays PotentialPress
-        std::thread::sleep(Duration::from_millis(30));
+        // Release immediately (elapsed << min_press_duration) → rejected, stays PotentialPress
         assert_eq!(sm.process(release()), None);
         assert_eq!(sm.state, State::PotentialPress);
 
