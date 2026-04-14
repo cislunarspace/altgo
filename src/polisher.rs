@@ -89,9 +89,55 @@ struct ChatChoice {
     message: ChatMessage,
 }
 
+/// Anthropic Messages API 请求体。
+#[derive(Debug, Serialize)]
+struct AnthropicRequest {
+    model: String,
+    max_tokens: u32,
+    system: String,
+    messages: Vec<AnthropicMessage>,
+    temperature: f32,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct AnthropicMessage {
+    role: String,
+    content: String,
+}
+
+/// Anthropic Messages API 响应。
+#[derive(Debug, Deserialize)]
+struct AnthropicResponse {
+    content: Vec<AnthropicContent>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AnthropicContent {
+    text: String,
+}
+
+/// API 协议类型。
+#[derive(Debug, Clone, Copy)]
+pub enum ApiProtocol {
+    /// OpenAI 兼容接口（/v1/chat/completions）
+    OpenAi,
+    /// Anthropic Messages 接口（/v1/messages）
+    Anthropic,
+}
+
+impl ApiProtocol {
+    pub fn from_str(s: &str) -> anyhow::Result<Self> {
+        match s.to_lowercase().as_str() {
+            "openai" => Ok(ApiProtocol::OpenAi),
+            "anthropic" => Ok(ApiProtocol::Anthropic),
+            other => Err(anyhow!("unknown polisher protocol: '{}'. Use 'openai' or 'anthropic'", other)),
+        }
+    }
+}
+
 /// LLM 文本润色器。
 ///
-/// 使用兼容 OpenAI 的聊天 API 对文本进行润色处理，
+/// 支持 OpenAI 和 Anthropic 两种 API 协议，
 /// 支持指数退避重试（最多 3 次）。
 #[derive(Clone)]
 pub struct LLMFormatter {
@@ -101,6 +147,7 @@ pub struct LLMFormatter {
     client: Client,
     max_retries: u32,
     max_tokens: u32,
+    protocol: ApiProtocol,
 }
 
 impl LLMFormatter {
@@ -112,16 +159,17 @@ impl LLMFormatter {
         model: String,
         timeout: Duration,
     ) -> anyhow::Result<Self> {
-        Self::with_max_tokens(api_key, api_base_url, model, timeout, 1024)
+        Self::with_config(api_key, api_base_url, model, timeout, 1024, ApiProtocol::OpenAi)
     }
 
-    /// 创建新的润色器，指定最大 token 数。
-    pub fn with_max_tokens(
+    /// 创建新的润色器，指定最大 token 数和协议。
+    pub fn with_config(
         api_key: String,
         api_base_url: String,
         model: String,
         timeout: Duration,
         max_tokens: u32,
+        protocol: ApiProtocol,
     ) -> anyhow::Result<Self> {
         let client = Client::builder()
             .timeout(timeout)
@@ -134,6 +182,7 @@ impl LLMFormatter {
             client,
             max_retries: 3,
             max_tokens,
+            protocol,
         })
     }
 
@@ -147,21 +196,6 @@ impl LLMFormatter {
         }
 
         let system_prompt = get_system_prompt(level);
-        let body = ChatRequest {
-            model: self.model.clone(),
-            messages: vec![
-                ChatMessage {
-                    role: "system".to_string(),
-                    content: system_prompt.to_string(),
-                },
-                ChatMessage {
-                    role: "user".to_string(),
-                    content: text.to_string(),
-                },
-            ],
-            temperature: 0.3,
-            max_tokens: self.max_tokens,
-        };
 
         let mut last_err = None;
         for attempt in 0..self.max_retries {
@@ -170,8 +204,42 @@ impl LLMFormatter {
                 tokio::time::sleep(delay).await;
             }
 
-            match self.do_request(&body).await {
-                Ok(result) => return Ok(result),
+            let result = match self.protocol {
+                ApiProtocol::OpenAi => {
+                    let body = ChatRequest {
+                        model: self.model.clone(),
+                        messages: vec![
+                            ChatMessage {
+                                role: "system".to_string(),
+                                content: system_prompt.to_string(),
+                            },
+                            ChatMessage {
+                                role: "user".to_string(),
+                                content: text.to_string(),
+                            },
+                        ],
+                        temperature: 0.3,
+                        max_tokens: self.max_tokens,
+                    };
+                    self.do_openai_request(&body).await
+                }
+                ApiProtocol::Anthropic => {
+                    let body = AnthropicRequest {
+                        model: self.model.clone(),
+                        max_tokens: self.max_tokens,
+                        system: system_prompt.to_string(),
+                        messages: vec![AnthropicMessage {
+                            role: "user".to_string(),
+                            content: text.to_string(),
+                        }],
+                        temperature: 0.3,
+                    };
+                    self.do_anthropic_request(&body).await
+                }
+            };
+
+            match result {
+                Ok(r) => return Ok(r),
                 Err(e) => {
                     // Don't retry on auth errors.
                     if e.to_string().contains("401") || e.to_string().contains("403") {
@@ -186,7 +254,7 @@ impl LLMFormatter {
         Err(last_err.unwrap_or_else(|| anyhow!("all retry attempts exhausted")))
     }
 
-    async fn do_request(&self, body: &ChatRequest) -> anyhow::Result<String> {
+    async fn do_openai_request(&self, body: &ChatRequest) -> anyhow::Result<String> {
         let url = format!("{}/v1/chat/completions", self.api_base_url);
         let resp = self
             .client
@@ -195,29 +263,58 @@ impl LLMFormatter {
             .json(body)
             .send()
             .await
-            .context("LLM API request failed")?;
+            .context("OpenAI API request failed")?;
 
-        let status = resp.status();
-        if status.as_u16() == 429 {
-            // Rate limited — return early so caller can handle retry with Retry-After.
-            return Err(anyhow!("rate limited"));
-        }
-        if !status.is_success() {
-            let body = resp
-                .text()
-                .await
-                .context("failed to read LLM API error body")?;
+        self.check_rate_limit(&resp)?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.context("failed to read API error body")?;
             return Err(anyhow!("LLM API returned {}: {}", status, body));
         }
 
         let chat_resp: ChatResponse = resp.json().await.context("failed to parse LLM response")?;
-
         chat_resp
             .choices
             .into_iter()
             .next()
             .map(|c| c.message.content)
             .ok_or_else(|| anyhow!("LLM returned empty choices"))
+    }
+
+    async fn do_anthropic_request(&self, body: &AnthropicRequest) -> anyhow::Result<String> {
+        let url = format!("{}/v1/messages", self.api_base_url);
+        let resp = self
+            .client
+            .post(&url)
+            .header("x-api-key", &self.api_key)
+            .header("anthropic-version", "2023-06-01")
+            .json(body)
+            .send()
+            .await
+            .context("Anthropic API request failed")?;
+
+        self.check_rate_limit(&resp)?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.context("failed to read API error body")?;
+            return Err(anyhow!("LLM API returned {}: {}", status, body));
+        }
+
+        let anthropic_resp: AnthropicResponse =
+            resp.json().await.context("failed to parse Anthropic response")?;
+        anthropic_resp
+            .content
+            .into_iter()
+            .next()
+            .map(|c| c.text)
+            .ok_or_else(|| anyhow!("Anthropic returned empty content"))
+    }
+
+    fn check_rate_limit(&self, resp: &reqwest::Response) -> anyhow::Result<()> {
+        if resp.status().as_u16() == 429 {
+            return Err(anyhow!("rate limited"));
+        }
+        Ok(())
     }
 }
 

@@ -139,12 +139,18 @@ async fn main() -> anyhow::Result<()> {
         );
         polisher::PolishLevel::Medium
     });
-    let formatter = polisher::LLMFormatter::with_max_tokens(
+    let polisher_protocol = polisher::ApiProtocol::from_str(&cfg.polisher.protocol)
+        .unwrap_or_else(|e| {
+            tracing::warn!(error = %e, "invalid polisher protocol, defaulting to openai");
+            polisher::ApiProtocol::OpenAi
+        });
+    let formatter = polisher::LLMFormatter::with_config(
         cfg.polisher.api_key.clone(),
         cfg.polisher.api_base_url.clone(),
         cfg.polisher.model.clone(),
         cfg.polisher.timeout(),
         cfg.polisher.max_tokens,
+        polisher_protocol,
     )?;
 
     // Start key listener.

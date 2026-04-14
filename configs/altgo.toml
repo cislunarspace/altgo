@@ -18,7 +18,7 @@ channels = 1
 engine = "local"
 # For "api" mode: API key and base URL.
 api_key = ""
-api_base_url = "https://api.openai.com"
+api_base_url = ""
 # For "api" mode: model name (e.g. "whisper-1").
 # For "local" mode: path to GGML model file (e.g. "~/models/ggml-base.bin").
 model = ""
@@ -27,14 +27,24 @@ language = "zh"
 timeout_seconds = 30
 
 [polisher]
-# Engine: "openai", "ollama", etc.
-engine = "openai"
+# API protocol: "openai" (OpenAI-compatible) or "anthropic" (Anthropic Messages API).
+protocol = "openai"
 # API key. Can also be set via ALTGO_POLISHER_API_KEY env var.
 api_key = ""
-api_base_url = "https://api.deepseek.com"
-model = "deepseek-chat"
-# Polish level: "none", "light", "medium", "heavy".
-level = "medium"
+# API base URL. Must be set when level is not "none".
+# Examples:
+#   OpenAI:    https://api.openai.com
+#   DeepSeek:  https://api.deepseek.com
+#   Anthropic: https://api.anthropic.com
+api_base_url = ""
+# Model name. Must be set when level is not "none".
+# Examples:
+#   OpenAI:    gpt-3.5-turbo, gpt-4o-mini
+#   DeepSeek:  deepseek-chat
+#   Anthropic: claude-sonnet-4-20250514
+model = ""
+# Polish level: "none" (disabled), "light", "medium", "heavy".
+level = "none"
 # Max tokens for LLM response. Increase for long transcriptions.
 max_tokens = 1024
 timeout_seconds = 60

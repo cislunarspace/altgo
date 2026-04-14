@@ -137,24 +137,26 @@ altgo
 
 ### 方案 B：开启润色功能
 
-需要一个 OpenAI 兼容的 API 密钥（支持 DeepSeek、OpenAI、其他兼容接口）。
+需要一个 LLM API 密钥。支持 OpenAI 兼容接口和 Anthropic 接口。
 
 **第 1 步：创建配置文件**（同方案 A）
 
-**第 2 步：配置 API 密钥**
+**第 2 步：配置 API 密钥和 Provider**
 
-在配置文件的 `[polisher]` 段填写密钥和接口：
+编辑配置文件，在 `[polisher]` 段填写你的 Provider 信息：
 
 ```toml
 [polisher]
-engine = "openai"
-api_key = "sk-your-key"              # 替换为你的 API 密钥
-api_base_url = "https://api.deepseek.com"  # DeepSeek；用 OpenAI 则填 https://api.openai.com
-model = "deepseek-chat"              # DeepSeek 模型；OpenAI 填 gpt-3.5-turbo 等
-level = "medium"                     # "light" / "medium" / "heavy"
+protocol = "openai"               # "openai"（OpenAI/DeepSeek 等）或 "anthropic"
+api_key = "sk-your-key"           # 你的 API 密钥
+api_base_url = "https://..."      # 你的 Provider API 地址
+model = "your-model"              # 使用的模型名称
+level = "medium"                  # "light" / "medium" / "heavy"
 ```
 
-或者通过环境变量设置（不写入配置文件）：
+> **常见 Provider 配置示例**见下方 [Provider 配置参考](#provider-配置参考)。
+
+或者通过环境变量设置密钥（其他字段仍需写在配置文件中）：
 
 ```bash
 # Linux / macOS
@@ -220,11 +222,11 @@ language = "zh"                    # 语言提示
 timeout_seconds = 30
 
 [polisher]
-engine = "openai"
+protocol = "openai"                # "openai"（OpenAI/DeepSeek 等）或 "anthropic"
 api_key = ""                       # LLM API 密钥（level 不为 "none" 时必填）
-api_base_url = "https://api.deepseek.com"
-model = "deepseek-chat"
-level = "medium"                   # "none"（关闭）/ "light"（修标点）/ "medium"（改语序）/ "heavy"（结构化重写）
+api_base_url = ""                  # Provider API 地址（level 不为 "none" 时必填）
+model = ""                         # 模型名称（level 不为 "none" 时必填）
+level = "none"                     # "none"（关闭）/ "light"（修标点）/ "medium"（改语序）/ "heavy"（结构化重写）
 max_tokens = 1024
 timeout_seconds = 60
 
@@ -271,6 +273,50 @@ model = "~/models/ggml-base.bin"
 | `light` | 修正标点和错别字 | 是 |
 | `medium` | 修正语法、改善语序通顺度 | 是 |
 | `heavy` | 结构化重写，适合正式文档 | 是 |
+
+### Provider 配置参考
+
+以下为常见 Provider 的 `[polisher]` 配置示例：
+
+**OpenAI：**
+
+```toml
+[polisher]
+protocol = "openai"
+api_key = "sk-your-key"
+api_base_url = "https://api.openai.com"
+model = "gpt-3.5-turbo"
+```
+
+**DeepSeek：**
+
+```toml
+[polisher]
+protocol = "openai"
+api_key = "sk-your-key"
+api_base_url = "https://api.deepseek.com"
+model = "deepseek-chat"
+```
+
+**Anthropic：**
+
+```toml
+[polisher]
+protocol = "anthropic"
+api_key = "sk-ant-your-key"
+api_base_url = "https://api.anthropic.com"
+model = "claude-sonnet-4-20250514"
+```
+
+**本地 Ollama（OpenAI 兼容）：**
+
+```toml
+[polisher]
+protocol = "openai"
+api_key = "ollama"
+api_base_url = "http://localhost:11434"
+model = "qwen2.5:7b"
+```
 
 ### 环境变量
 

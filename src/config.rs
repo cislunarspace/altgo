@@ -141,13 +141,13 @@ impl Default for TranscriberConfig {
 #[derive(Debug, Deserialize, Clone, serde::Serialize)]
 #[serde(default)]
 pub struct PolisherConfig {
-    /// 引擎类型（目前仅 `"openai"` 兼容接口）
-    pub engine: String,
+    /// API 协议：`"openai"`（OpenAI/DeepSeek 等）或 `"anthropic"`
+    pub protocol: String,
     /// API 密钥（可通过 `ALTGO_POLISHER_API_KEY` 环境变量覆盖）
     pub api_key: String,
-    /// API 基础 URL
+    /// API 基础 URL（如 `https://api.openai.com`、`https://api.anthropic.com`）
     pub api_base_url: String,
-    /// 模型名称（如 `"gpt-3.5-turbo"`、`"deepseek-chat"`）
+    /// 模型名称（如 `"gpt-3.5-turbo"`、`"claude-sonnet-4-20250514"`）
     pub model: String,
     /// 润色级别：`"none"`、`"light"`、`"medium"`、`"heavy"`
     pub level: String,
@@ -167,11 +167,11 @@ impl PolisherConfig {
 impl Default for PolisherConfig {
     fn default() -> Self {
         Self {
-            engine: "openai".to_string(),
+            protocol: "openai".to_string(),
             api_key: String::new(),
-            api_base_url: "https://api.openai.com".to_string(),
-            model: "gpt-3.5-turbo".to_string(),
-            level: "medium".to_string(),
+            api_base_url: String::new(),
+            model: String::new(),
+            level: "none".to_string(),
             timeout_seconds: 60,
             max_tokens: 1024,
         }
@@ -278,14 +278,18 @@ impl Config {
             anyhow::bail!(
                 "润色功能已开启（level = \"{}\"），但未配置 API 密钥。\n\
                  \n\
-                 解决方法（任选一种）：\n\
-                 1. 设置环境变量：\n\
-                    Linux/macOS:  export ALTGO_POLISHER_API_KEY=\"your-key\"\n\
-                    Windows:      $env:ALTGO_POLISHER_API_KEY = \"your-key\"\n\
-                 2. 在配置文件中填写 api_key：\n\
-                    编辑 {}，在 [polisher] 下填写 api_key = \"your-key\"\n\
-                 3. 关闭润色（只需语音转文字）：\n\
-                    将 polisher.level 改为 \"none\"",
+                 请在配置文件中填写 [polisher] 段：\n\
+                   api_key = \"your-key\"\n\
+                   api_base_url = \"https://your-provider.com\"\n\
+                   model = \"your-model-name\"\n\
+                   protocol = \"openai\"  # 或 \"anthropic\"\n\
+                 \n\
+                 或通过环境变量设置密钥：\n\
+                   Linux/macOS:  export ALTGO_POLISHER_API_KEY=\"your-key\"\n\
+                   Windows:      $env:ALTGO_POLISHER_API_KEY = \"your-key\"\n\
+                 \n\
+                 如果不需要润色，将 level 改为 \"none\" 即可跳过此检查。\n\
+                 配置文件路径：{}",
                 self.polisher.level,
                 config_path.display()
             );
@@ -333,7 +337,7 @@ mod tests {
         assert_eq!(cfg.key_listener.debounce_window_ms, 100);
         assert_eq!(cfg.recorder.sample_rate, 16000);
         assert_eq!(cfg.transcriber.engine, "local");
-        assert_eq!(cfg.polisher.level, "medium");
+        assert_eq!(cfg.polisher.level, "none");
         assert!(cfg.output.enable_notify);
         assert_eq!(cfg.logging.level, "info");
     }
