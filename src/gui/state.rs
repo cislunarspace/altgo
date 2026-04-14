@@ -41,12 +41,12 @@ impl SharedState {
 
     /// Get a snapshot of the current state (synchronous, for GUI thread).
     pub fn get(&self) -> GuiState {
-        self.inner.lock().unwrap().clone()
+        self.inner.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
     /// Set recording state (callable from any thread).
     pub fn set_recording(&self, state: RecordingState) {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         inner.recording = state;
         if state != RecordingState::Done {
             inner.transcription = None;
@@ -55,7 +55,7 @@ impl SharedState {
 
     /// Set the transcription result.
     pub fn set_transcription(&self, text: String) {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         inner.recording = RecordingState::Done;
         inner.transcription = Some(text);
         inner.message = None;
@@ -64,7 +64,7 @@ impl SharedState {
     /// Set a status message.
     #[allow(dead_code)]
     pub fn set_message(&self, msg: impl Into<String>) {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         inner.message = Some(msg.into());
     }
 }

@@ -2,6 +2,68 @@
 //!
 //! No external dependencies. Add new keys to both `t_zh` and `t_en`.
 
+/// All known translation keys — must be kept in sync with `t_zh` and `t_en`.
+#[allow(dead_code)]
+const KEYS: &[&str] = &[
+    // Menu bar
+    "menu.settings",
+    "menu.file",
+    "menu.exit",
+    "menu.help",
+    "menu.about",
+    // Title
+    "title.subtitle",
+    // About dialog
+    "about.text",
+    // Status bar
+    "status.idle",
+    "status.recording",
+    "status.processing",
+    "status.done",
+    // Main content
+    "main.idle",
+    "main.recording",
+    "main.processing",
+    "main.hint",
+    "main.result_label",
+    "main.copied",
+    // Settings panel
+    "settings.title",
+    "settings.recording",
+    "settings.key_name",
+    "settings.transcription",
+    "settings.engine",
+    "settings.engine_api",
+    "settings.engine_local",
+    "settings.language",
+    "settings.model",
+    "settings.model_path",
+    "settings.api_key",
+    "settings.api_url",
+    "settings.polishing",
+    "settings.polish_level",
+    "settings.polish_none",
+    "settings.polish_light",
+    "settings.polish_medium",
+    "settings.polish_heavy",
+    "settings.save",
+    "settings.cancel",
+    "settings.restart_hint",
+    "settings.gui_language",
+    "settings.lang_zh",
+    "settings.lang_en",
+    // Tray
+    "tray.show",
+    "tray.settings",
+    "tray.exit",
+    "tray.tooltip",
+    // Window title
+    "window.title",
+    // Notifications
+    "notify.polish_failed",
+    "notify.processing",
+];
+
 /// Supported UI languages.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Deserialize, serde::Serialize)]
 pub enum Lang {
@@ -102,6 +164,7 @@ fn t_zh(key: &'static str) -> &'static str {
 
         // Notifications
         "notify.polish_failed" => "润色失败，已使用原始文本",
+        "notify.processing" => "正在处理语音...",
 
         _ => key,
     }
@@ -173,7 +236,23 @@ fn t_en(key: &'static str) -> &'static str {
 
         // Notifications
         "notify.polish_failed" => "Polish failed, using raw text",
+        "notify.processing" => "Processing speech...",
 
         _ => key,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_zh_and_en_keys_match() {
+        for key in KEYS {
+            let zh = t_zh(key);
+            let en = t_en(key);
+            assert_ne!(zh, *key, "Chinese translation missing for key: {key}");
+            assert_ne!(en, *key, "English translation missing for key: {key}");
+        }
     }
 }

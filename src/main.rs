@@ -1,6 +1,9 @@
 // On Windows, link as GUI subsystem when the gui feature is enabled.
 // This prevents the OS from allocating a console window.
-#![cfg_attr(all(feature = "gui", target_os = "windows"), windows_subsystem = "windows")]
+#![cfg_attr(
+    all(feature = "gui", target_os = "windows"),
+    windows_subsystem = "windows"
+)]
 
 //! altgo 入口模块。
 //!
@@ -18,6 +21,7 @@ mod audio;
 pub(crate) mod config;
 pub(crate) mod key_listener;
 pub(crate) mod output;
+pub(crate) mod pipeline;
 pub(crate) mod polisher;
 pub(crate) mod recorder;
 pub(crate) mod state_machine;
@@ -50,13 +54,6 @@ struct Cli {
     /// Force CLI mode even when GUI is available
     #[arg(long)]
     no_gui: bool,
-}
-
-/// 语音识别后端的包装枚举，支持 API 和本地两种引擎。
-#[derive(Clone)]
-enum Transcriber {
-    Api(transcriber::WhisperApi),
-    Local(transcriber::LocalWhisper),
 }
 
 #[tokio::main]
@@ -114,14 +111,14 @@ async fn main() -> anyhow::Result<()> {
                 model = %cfg.transcriber.model,
                 "using local whisper for transcription"
             );
-            Transcriber::Local(transcriber::LocalWhisper::new(
+            transcriber::Transcriber::Local(transcriber::LocalWhisper::new(
                 cfg.transcriber.model.clone(),
                 cfg.transcriber.language.clone(),
             ))
         }
         engine => {
             tracing::info!(engine = engine, "using Whisper API for transcription");
-            Transcriber::Api(transcriber::WhisperApi::new(
+            transcriber::Transcriber::Api(transcriber::WhisperApi::new(
                 cfg.transcriber.api_key.clone(),
                 cfg.transcriber.api_base_url.clone(),
                 cfg.transcriber.model.clone(),
@@ -159,7 +156,11 @@ async fn main() -> anyhow::Result<()> {
     // sequence that would trigger continuous recording instead of long-press.
     let (key_tx, key_rx) = tokio::sync::mpsc::unbounded_channel();
     let debounce_window = cfg.key_listener.debounce_window();
-    tokio::spawn(debounce_task(key_events, key_tx, debounce_window));
+    tokio::spawn(key_listener::debounce_task(
+        key_events,
+        key_tx,
+        debounce_window,
+    ));
 
     // Start state machine.
     let sm = state_machine::Machine::new(
@@ -185,7 +186,7 @@ async fn main() -> anyhow::Result<()> {
                 state_machine::Command::StartRecord => {
                     tracing::info!("recording started");
                     if cfg.output.enable_notify {
-                        let _ = output::notify_processing();
+                        let _ = output::notify_processing("正在处理语音...");
                     }
                     if let Err(e) = recorder.start() {
                         tracing::error!(error = %e, "failed to start recording");
@@ -250,7 +251,11 @@ async fn main() -> anyhow::Result<()> {
         };
         let (new_key_tx, new_key_rx) = tokio::sync::mpsc::unbounded_channel();
         let debounce_window = cfg.key_listener.debounce_window();
-        tokio::spawn(debounce_task(key_events, new_key_tx, debounce_window));
+        tokio::spawn(key_listener::debounce_task(
+            key_events,
+            new_key_tx,
+            debounce_window,
+        ));
 
         let sm = state_machine::Machine::new(
             cfg.key_listener.long_press_threshold(),
@@ -266,100 +271,26 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// 防抖任务：过滤 IME 引起的按键抖动，将稳定的按键事件转发给状态机。
-async fn debounce_task(
-    mut raw_events: tokio::sync::mpsc::UnboundedReceiver<key_listener::KeyEvent>,
-    key_tx: tokio::sync::mpsc::UnboundedSender<state_machine::KeyEvent>,
-    debounce_window: Duration,
-) {
-    let mut is_pressed = false;
-    let mut pending_release: Option<std::pin::Pin<Box<tokio::time::Sleep>>> = None;
-
-    loop {
-        tokio::select! {
-            evt = raw_events.recv() => {
-                match evt {
-                    Some(evt) if evt.pressed => {
-                        // Press cancels any pending release.
-                        pending_release = None;
-                        is_pressed = true;
-                        if key_tx
-                            .send(state_machine::KeyEvent { pressed: true })
-                            .is_err()
-                        {
-                            break;
-                        }
-                    }
-                    Some(_) => {
-                        // Release — if no debounce is running, send immediately.
-                        // If debounce is running, it will fire and send the release.
-                        if is_pressed && pending_release.is_none() {
-                            pending_release =
-                                Some(Box::pin(tokio::time::sleep(debounce_window)));
-                        }
-                    }
-                    None => break,
-                }
-            }
-            // Debounce timer fired — forward the release to the state machine.
-            _ = async {
-                if let Some(timer) = &mut pending_release {
-                    timer.as_mut().await;
-                } else {
-                    std::future::pending::<()>().await;
-                }
-            }, if pending_release.is_some() => {
-                pending_release = None;
-                is_pressed = false;
-                if key_tx
-                    .send(state_machine::KeyEvent { pressed: false })
-                    .is_err()
-                {
-                    break;
-                }
-            }
-        }
-    }
-}
-
 /// 语音处理管道：语音识别 → 文本润色 → 输出到剪切板。
 async fn process_audio(
     cfg: &Arc<config::Config>,
-    transcriber: &Transcriber,
+    transcriber: &transcriber::Transcriber,
     formatter: &polisher::LLMFormatter,
     wav_data: &[u8],
     polish_level: polisher::PolishLevel,
 ) -> anyhow::Result<()> {
-    // Step 1: Transcribe.
-    let result = match transcriber {
-        Transcriber::Local(lw) => lw.transcribe(wav_data).await,
-        Transcriber::Api(api) => api.transcribe(wav_data).await,
-    };
+    let output = pipeline::process_audio_core(transcriber, formatter, wav_data, polish_level)
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, "transcription failed");
+            e
+        })?;
 
-    let result = result.map_err(|e| {
-        tracing::error!(error = %e, "transcription failed");
-        e
-    })?;
-
-    tracing::info!(text = %result.text, "transcribed");
-
-    if result.text.is_empty() {
-        tracing::warn!("empty transcription, skipping");
+    if output.text.is_empty() {
         return Ok(());
     }
 
-    // Step 2: Polish.
-    let mut polish_failed = false;
-    let polished = formatter
-        .polish(&result.text, polish_level)
-        .await
-        .unwrap_or_else(|e| {
-            tracing::warn!(error = %e, "polish failed, using raw text");
-            polish_failed = true;
-            result.text.clone()
-        });
-
-    if polish_failed && cfg.output.enable_notify {
+    if output.polish_failed && cfg.output.enable_notify {
         let _ = output::notify(
             "altgo",
             "润色失败，已使用原始文本",
@@ -367,15 +298,12 @@ async fn process_audio(
         );
     }
 
-    tracing::info!(text = %polished, "polished");
-
-    // Step 3: Output.
-    if let Err(e) = output::write_clipboard(&polished).await {
+    if let Err(e) = output::write_clipboard(&output.text).await {
         tracing::error!(error = %e, "clipboard write failed");
     }
 
     if cfg.output.enable_notify {
-        let _ = output::notify_result(&polished, cfg.output.notify_timeout_ms);
+        let _ = output::notify_result(&output.text, cfg.output.notify_timeout_ms);
     }
 
     tracing::info!("done — text copied to clipboard");

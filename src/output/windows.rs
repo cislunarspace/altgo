@@ -154,9 +154,9 @@ fn format_ps1_script(title: &str, body: &str, timeout_sec: f64) -> String {
     s
 }
 
-/// 显示"正在处理语音"通知。
-pub fn notify_processing() -> anyhow::Result<()> {
-    notify("altgo", "正在处理语音...", 5000)
+/// 显示处理中通知。
+pub fn notify_processing(message: &str) -> anyhow::Result<()> {
+    notify("altgo", message, 5000)
 }
 
 /// 显示语音识别结果通知。

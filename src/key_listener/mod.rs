@@ -29,3 +29,59 @@ pub struct KeyEvent {
     /// 是否为按下事件
     pub pressed: bool,
 }
+
+/// 防抖任务：过滤 IME 引起的按键抖动，将稳定的按键事件转发给状态机。
+pub(crate) async fn debounce_task(
+    mut raw_events: tokio::sync::mpsc::UnboundedReceiver<KeyEvent>,
+    key_tx: tokio::sync::mpsc::UnboundedSender<crate::state_machine::KeyEvent>,
+    debounce_window: std::time::Duration,
+) {
+    let mut is_pressed = false;
+    let mut pending_release: Option<std::pin::Pin<Box<tokio::time::Sleep>>> = None;
+
+    loop {
+        tokio::select! {
+            evt = raw_events.recv() => {
+                match evt {
+                    Some(evt) if evt.pressed => {
+                        // Press cancels any pending release.
+                        pending_release = None;
+                        is_pressed = true;
+                        if key_tx
+                            .send(crate::state_machine::KeyEvent { pressed: true })
+                            .is_err()
+                        {
+                            break;
+                        }
+                    }
+                    Some(_) => {
+                        // Release — if no debounce is running, send immediately.
+                        // If debounce is running, it will fire and send the release.
+                        if is_pressed && pending_release.is_none() {
+                            pending_release =
+                                Some(Box::pin(tokio::time::sleep(debounce_window)));
+                        }
+                    }
+                    None => break,
+                }
+            }
+            // Debounce timer fired — forward the release to the state machine.
+            _ = async {
+                if let Some(timer) = &mut pending_release {
+                    timer.as_mut().await;
+                } else {
+                    std::future::pending::<()>().await;
+                }
+            }, if pending_release.is_some() => {
+                pending_release = None;
+                is_pressed = false;
+                if key_tx
+                    .send(crate::state_machine::KeyEvent { pressed: false })
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        }
+    }
+}

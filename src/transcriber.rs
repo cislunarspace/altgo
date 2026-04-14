@@ -217,6 +217,23 @@ fn which_exists(cmd: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// Unified transcription backend — dispatches between API and local engines.
+#[derive(Clone)]
+pub enum Transcriber {
+    Api(WhisperApi),
+    Local(LocalWhisper),
+}
+
+impl Transcriber {
+    /// Transcribe audio data using the selected backend.
+    pub async fn transcribe(&self, wav_data: &[u8]) -> anyhow::Result<TranscribeResult> {
+        match self {
+            Transcriber::Api(api) => api.transcribe(wav_data).await,
+            Transcriber::Local(lw) => lw.transcribe(wav_data).await,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

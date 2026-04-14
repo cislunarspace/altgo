@@ -16,6 +16,8 @@ pub struct AltgoApp {
     last_transcription: Option<String>,
     /// Path to the config file for saving.
     config_path: PathBuf,
+    /// Full config — cloned from and saved to disk.
+    config: crate::config::Config,
     /// Whether the settings panel is open.
     settings_open: bool,
     /// Current UI language (takes effect immediately).
@@ -43,9 +45,10 @@ impl AltgoApp {
             last_state: RecordingState::Idle,
             last_transcription: None,
             config_path,
+            config: cfg.clone(),
             settings_open: false,
             lang,
-            edit_key_name: cfg.key_listener.key_name,
+            edit_key_name: cfg.key_listener.key_name.clone(),
             edit_language: cfg.transcriber.language.clone(),
             edit_engine: cfg.transcriber.engine.clone(),
             edit_api_key: cfg.transcriber.api_key.clone(),
@@ -61,37 +64,25 @@ impl AltgoApp {
 
     /// Save the edited config to disk.
     fn save_config(&mut self) {
-        let cfg = crate::config::Config {
-            key_listener: crate::config::KeyListenerConfig {
-                key_name: self.edit_key_name.clone(),
-                ..Default::default()
-            },
-            transcriber: crate::config::TranscriberConfig {
-                engine: self.edit_engine.clone(),
-                api_key: self.edit_api_key.clone(),
-                api_base_url: self.edit_api_base_url.clone(),
-                model: self.edit_model.clone(),
-                language: self.edit_language.clone(),
-                ..Default::default()
-            },
-            polisher: crate::config::PolisherConfig {
-                engine: "openai".to_string(),
-                api_key: self.edit_polisher_api_key.clone(),
-                api_base_url: self.edit_api_base_url_polisher.clone(),
-                model: self.edit_polisher_model.clone(),
-                level: self.edit_polisher_level.clone(),
-                ..Default::default()
-            },
-            gui: crate::config::GuiConfig {
-                language: self.edit_gui_language.code().to_string(),
-            },
-            ..Default::default()
-        };
+        let mut cfg = self.config.clone();
+        cfg.key_listener.key_name = self.edit_key_name.clone();
+        cfg.transcriber.engine = self.edit_engine.clone();
+        cfg.transcriber.api_key = self.edit_api_key.clone();
+        cfg.transcriber.api_base_url = self.edit_api_base_url.clone();
+        cfg.transcriber.model = self.edit_model.clone();
+        cfg.transcriber.language = self.edit_language.clone();
+        cfg.polisher.engine = "openai".to_string();
+        cfg.polisher.api_key = self.edit_polisher_api_key.clone();
+        cfg.polisher.api_base_url = self.edit_api_base_url_polisher.clone();
+        cfg.polisher.model = self.edit_polisher_model.clone();
+        cfg.polisher.level = self.edit_polisher_level.clone();
+        cfg.gui.language = self.edit_gui_language.code().to_string();
 
         if let Err(e) = cfg.save(&self.config_path) {
             tracing::error!(error = %e, "failed to save config");
         } else {
             tracing::info!("settings saved");
+            self.config = cfg;
         }
     }
 
@@ -110,12 +101,6 @@ impl eframe::App for AltgoApp {
             ctx.request_repaint();
             self.last_state = state.recording;
             self.last_transcription = state.transcription.clone();
-        }
-
-        // Handle close request - hide window instead of closing.
-        if ctx.input(|i| i.viewport().close_requested()) {
-            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
-            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
         }
 
         // Top area: menu bar + title.
@@ -293,8 +278,12 @@ impl AltgoApp {
                 // UI language (at the top for discoverability).
                 ui.horizontal(|ui| {
                     ui.label(self.t("settings.gui_language"));
+                    let selected_label = match self.edit_gui_language {
+                        i18n::Lang::Zh => "中文",
+                        i18n::Lang::En => "English",
+                    };
                     egui::ComboBox::from_id_salt("gui_language")
-                        .selected_text(i18n::t("settings.lang_en", self.edit_gui_language))
+                        .selected_text(selected_label)
                         .show_ui(ui, |ui| {
                             ui.selectable_value(
                                 &mut self.edit_gui_language,
@@ -427,7 +416,9 @@ impl AltgoApp {
 
                 ui.horizontal(|ui| {
                     ui.label(self.t("settings.api_key"));
-                    ui.add(egui::TextEdit::singleline(&mut self.edit_polisher_api_key).password(true));
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.edit_polisher_api_key).password(true),
+                    );
                 });
 
                 ui.horizontal(|ui| {
@@ -445,6 +436,18 @@ impl AltgoApp {
                 self.save_config();
             }
             if ui.button(self.t("settings.cancel")).clicked() {
+                // Restore edit fields from stored config.
+                self.edit_key_name = self.config.key_listener.key_name.clone();
+                self.edit_language = self.config.transcriber.language.clone();
+                self.edit_engine = self.config.transcriber.engine.clone();
+                self.edit_api_key = self.config.transcriber.api_key.clone();
+                self.edit_api_base_url = self.config.transcriber.api_base_url.clone();
+                self.edit_model = self.config.transcriber.model.clone();
+                self.edit_polisher_level = self.config.polisher.level.clone();
+                self.edit_polisher_api_key = self.config.polisher.api_key.clone();
+                self.edit_api_base_url_polisher = self.config.polisher.api_base_url.clone();
+                self.edit_polisher_model = self.config.polisher.model.clone();
+                self.edit_gui_language = i18n::Lang::from_code(&self.config.gui.language);
                 self.settings_open = false;
             }
         });
