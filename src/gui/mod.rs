@@ -3,6 +3,7 @@
 //! Compiled when the `gui` feature is enabled.
 
 pub mod app;
+pub mod i18n;
 pub mod state;
 
 use std::sync::Arc;
@@ -12,6 +13,11 @@ pub use state::SharedState;
 /// Run the GUI event loop.
 pub fn run_gui(state: Arc<SharedState>) -> anyhow::Result<()> {
     let state_clone = Arc::clone(&state);
+
+    // Load config early for language and font setup.
+    let config_path = crate::config::Config::default_config_path();
+    let cfg = crate::config::Config::load(&config_path).unwrap_or_default();
+    let lang = i18n::Lang::from_code(&cfg.gui.language);
 
     // Spawn the audio pipeline in a background thread with its own Tokio runtime.
     std::thread::spawn(move || {
@@ -26,9 +32,10 @@ pub fn run_gui(state: Arc<SharedState>) -> anyhow::Result<()> {
         });
     });
 
+    let window_title = i18n::t("window.title", lang);
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_title("altgo — 语音转文字")
+            .with_title(window_title)
             .with_inner_size([480.0, 360.0])
             .with_resizable(false),
         // Keep app alive when window is closed - we handle close ourselves for tray behavior
@@ -38,9 +45,9 @@ pub fn run_gui(state: Arc<SharedState>) -> anyhow::Result<()> {
     eframe::run_native(
         "altgo",
         options,
-        Box::new(move |_cc| {
-            let config_path = crate::config::Config::default_config_path();
-            Ok(Box::new(app::AltgoApp::new(state, config_path)))
+        Box::new(move |cc| {
+            install_cjk_fonts(&cc.egui_ctx);
+            Ok(Box::new(app::AltgoApp::new(state, config_path, cfg)))
         }),
     )
     .map_err(|e| anyhow::anyhow!("eframe error: {}", e))?;
@@ -204,9 +211,10 @@ async fn process_audio(
         });
 
     if polish_failed && cfg.output.enable_notify {
+        let lang = i18n::Lang::from_code(&cfg.gui.language);
         let _ = crate::output::notify(
             "altgo",
-            "润色失败，已使用原始文本",
+            i18n::t("notify.polish_failed", lang),
             cfg.output.notify_timeout_ms,
         );
     }
@@ -224,6 +232,95 @@ async fn process_audio(
     state.set_transcription(polished);
     tracing::info!("done — text copied to clipboard");
     Ok(())
+}
+
+/// Install CJK-capable fonts from system paths.
+///
+/// Tries multiple font paths per platform so that Chinese (and other CJK)
+/// characters render correctly in egui. Falls back gracefully with a warning
+/// if no suitable font is found.
+fn install_cjk_fonts(ctx: &egui::Context) {
+    let font_bytes = load_cjk_system_font();
+    match font_bytes {
+        Some((bytes, name)) => {
+            tracing::info!(font = %name, "installing CJK font");
+            let mut fonts = egui::FontDefinitions::default();
+            fonts.font_data.insert(
+                "cjk-system-font".to_owned(),
+                egui::FontData::from_owned(bytes),
+            );
+            // Append CJK font as fallback for Proportional and Monospace families.
+            // Latin/emoji fonts are tried first; CJK covers the rest.
+            fonts
+                .families
+                .entry(egui::FontFamily::Proportional)
+                .or_default()
+                .push("cjk-system-font".to_owned());
+            fonts
+                .families
+                .entry(egui::FontFamily::Monospace)
+                .or_default()
+                .push("cjk-system-font".to_owned());
+            ctx.set_fonts(fonts);
+        }
+        None => {
+            tracing::warn!(
+                "no CJK system font found — Chinese/Japanese/Korean text may not render"
+            );
+        }
+    }
+}
+
+/// Try to load a CJK-capable system font, returning `(bytes, font_name)` on success.
+fn load_cjk_system_font() -> Option<(Vec<u8>, String)> {
+    let candidates: Vec<&str> = platform_cjk_fonts();
+    for path in &candidates {
+        if let Ok(bytes) = std::fs::read(path) {
+            tracing::debug!(path, "found CJK font");
+            return Some((bytes, (*path).to_string()));
+        }
+    }
+    None
+}
+
+/// Return candidate CJK font paths for the current platform.
+fn platform_cjk_fonts() -> Vec<&'static str> {
+    if cfg!(target_os = "windows") {
+        vec![
+            "C:/Windows/Fonts/msyh.ttc",       // Microsoft YaHei (default on Win10+)
+            "C:/Windows/Fonts/msyhboot.ttc",    // YaHei boot variant
+            "C:/Windows/Fonts/simsun.ttc",       // SimSun (legacy)
+            "C:/Windows/Fonts/simhei.ttf",       // SimHei (legacy)
+            "C:/Windows/Fonts/simsun.ttf",       // SimSun TTF variant
+        ]
+    } else if cfg!(target_os = "macos") {
+        vec![
+            "/System/Library/Fonts/PingFang.ttc",          // PingFang SC (default on macOS 10.11+)
+            "/System/Library/Fonts/STHeiti Light.ttc",     // STHeiti (older macOS)
+            "/System/Library/Fonts/Hiragino Sans GB.ttc",  // Hiragino (older macOS)
+            "/Library/Fonts/Arial Unicode.ttf",             // Arial Unicode MS
+        ]
+    } else {
+        // Linux — many distributions, many possible paths.
+        vec![
+            // Noto Sans CJK (most common on modern distros)
+            "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+            "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+            "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
+            // Noto Sans SC (Simplified Chinese subset, smaller)
+            "/usr/share/fonts/opentype/noto/NotoSansSC-Regular.otf",
+            "/usr/share/fonts/truetype/noto/NotoSansSC-Regular.ttf",
+            // Droid Sans Fallback (older distros)
+            "/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf",
+            // WenQuanYi (common on Chinese-focused distros)
+            "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
+            "/usr/share/fonts/wqy-zenhei/wqy-zenhei.ttc",
+            "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
+            // Source Han Sans (Adobe/Google)
+            "/usr/share/fonts/opentype/noto/NotoSansCJKsc-Regular.otf",
+            "/usr/share/fonts/SourceHanSans/SourceHanSansSC-Regular.otf",
+        ]
+    }
 }
 
 /// Transcriber backend wrapper for the GUI pipeline.

@@ -31,6 +31,8 @@ pub struct Config {
     pub output: OutputConfig,
     /// 日志配置
     pub logging: LoggingConfig,
+    /// GUI 配置
+    pub gui: GuiConfig,
 }
 
 /// 按键监听配置。
@@ -204,6 +206,22 @@ impl Default for LoggingConfig {
     fn default() -> Self {
         Self {
             level: "info".to_string(),
+        }
+    }
+}
+
+/// GUI 配置。
+#[derive(Debug, Deserialize, Clone, serde::Serialize)]
+#[serde(default)]
+pub struct GuiConfig {
+    /// 界面语言：`"zh"` 或 `"en"`
+    pub language: String,
+}
+
+impl Default for GuiConfig {
+    fn default() -> Self {
+        Self {
+            language: "zh".to_string(),
         }
     }
 }

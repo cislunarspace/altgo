@@ -9,6 +9,8 @@ use tao::{
     AppHandle, Icon,
 };
 
+use super::i18n;
+
 /// Generate a minimal 32x32 microphone icon as RGBA pixels.
 fn generate_mic_icon() -> Icon {
     let size = 32usize;
@@ -74,16 +76,17 @@ fn generate_mic_icon() -> Icon {
 pub fn build_tray(
     _app_handle: &AppHandle,
     window_target: &EventLoopWindowTarget<()>,
+    lang: i18n::Lang,
 ) -> tao::system_tray::SystemTray {
     let icon = generate_mic_icon();
 
     let mut menu = ContextMenu::new();
-    menu.add_item(MenuItemAttributes::new("显示窗口"));
-    menu.add_item(MenuItemAttributes::new("设置"));
-    menu.add_item(MenuItemAttributes::new("退出"));
+    menu.add_item(MenuItemAttributes::new(i18n::t("tray.show", lang)));
+    menu.add_item(MenuItemAttributes::new(i18n::t("tray.settings", lang)));
+    menu.add_item(MenuItemAttributes::new(i18n::t("tray.exit", lang)));
 
     SystemTrayBuilder::new(icon, Some(menu))
-        .with_tooltip("altgo — 按住 Alt 说话")
+        .with_tooltip(i18n::t("tray.tooltip", lang))
         .build(window_target)
         .expect("failed to build system tray")
 }
@@ -94,6 +97,7 @@ pub fn build_tray(
 pub fn build_tray(
     app_handle: &AppHandle,
     window_target: &EventLoopWindowTarget<()>,
+    lang: i18n::Lang,
 ) -> tao::system_tray::SystemTray {
     unimplemented!("System tray not supported on this platform")
 }

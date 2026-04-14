@@ -1,3 +1,7 @@
+// On Windows, link as GUI subsystem when the gui feature is enabled.
+// This prevents the OS from allocating a console window.
+#![cfg_attr(all(feature = "gui", target_os = "windows"), windows_subsystem = "windows")]
+
 //! altgo 入口模块。
 //!
 //! 负责 CLI 参数解析（clap）、初始化各子模块，并运行主事件循环。
@@ -39,9 +43,13 @@ struct Cli {
     #[arg(short = 'V', long)]
     version: bool,
 
-    /// Launch the GUI
+    /// Launch the GUI (default when compiled with gui feature)
     #[arg(long)]
     gui: bool,
+
+    /// Force CLI mode even when GUI is available
+    #[arg(long)]
+    no_gui: bool,
 }
 
 /// 语音识别后端的包装枚举，支持 API 和本地两种引擎。
@@ -60,16 +68,21 @@ async fn main() -> anyhow::Result<()> {
         return Ok(());
     }
 
+    // Determine whether to launch GUI or CLI mode.
     #[cfg(feature = "gui")]
-    if cli.gui {
+    let use_gui = !cli.no_gui; // Default to GUI when feature is enabled
+
+    #[cfg(not(feature = "gui"))]
+    let use_gui = cli.gui; // Only use GUI if explicitly requested
+
+    #[cfg(feature = "gui")]
+    if use_gui {
         let state = gui::state::global_state();
-        // Build tray icon before running the GUI event loop.
-        // We need a tao AppHandle, which we get from the native options viewport.
         return gui::run_gui(state);
     }
 
     #[cfg(not(feature = "gui"))]
-    if cli.gui {
+    if use_gui {
         anyhow::bail!("GUI not available — rebuild with --features gui");
     }
 

@@ -6,6 +6,7 @@ use std::sync::Arc;
 use eframe::egui;
 use egui::{Color32, FontId, RichText, TopBottomPanel, ViewportCommand};
 
+use super::i18n;
 use super::state::{GuiState, RecordingState, SharedState};
 
 /// Main eframe application.
@@ -17,6 +18,8 @@ pub struct AltgoApp {
     config_path: PathBuf,
     /// Whether the settings panel is open.
     settings_open: bool,
+    /// Current UI language (takes effect immediately).
+    lang: i18n::Lang,
     /// Edited config values (separate from actual config until saved).
     edit_key_name: String,
     edit_language: String,
@@ -25,15 +28,15 @@ pub struct AltgoApp {
     edit_api_base_url: String,
     edit_model: String,
     edit_polisher_level: String,
+    edit_polisher_api_key: String,
     edit_api_base_url_polisher: String,
     edit_polisher_model: String,
+    edit_gui_language: i18n::Lang,
 }
 
 impl AltgoApp {
-    pub fn new(state: Arc<SharedState>, config_path: PathBuf) -> Self {
-        // Load current config for editing.
-        let cfg = crate::config::Config::load(&config_path)
-            .unwrap_or_else(|_| crate::config::Config::default());
+    pub fn new(state: Arc<SharedState>, config_path: PathBuf, cfg: crate::config::Config) -> Self {
+        let lang = i18n::Lang::from_code(&cfg.gui.language);
 
         Self {
             state,
@@ -41,6 +44,7 @@ impl AltgoApp {
             last_transcription: None,
             config_path,
             settings_open: false,
+            lang,
             edit_key_name: cfg.key_listener.key_name,
             edit_language: cfg.transcriber.language.clone(),
             edit_engine: cfg.transcriber.engine.clone(),
@@ -48,8 +52,10 @@ impl AltgoApp {
             edit_api_base_url: cfg.transcriber.api_base_url.clone(),
             edit_model: cfg.transcriber.model.clone(),
             edit_polisher_level: cfg.polisher.level.clone(),
+            edit_polisher_api_key: cfg.polisher.api_key.clone(),
             edit_api_base_url_polisher: cfg.polisher.api_base_url.clone(),
             edit_polisher_model: cfg.polisher.model.clone(),
+            edit_gui_language: lang,
         }
     }
 
@@ -70,11 +76,14 @@ impl AltgoApp {
             },
             polisher: crate::config::PolisherConfig {
                 engine: "openai".to_string(),
-                api_key: self.edit_api_key.clone(),
+                api_key: self.edit_polisher_api_key.clone(),
                 api_base_url: self.edit_api_base_url_polisher.clone(),
                 model: self.edit_polisher_model.clone(),
                 level: self.edit_polisher_level.clone(),
                 ..Default::default()
+            },
+            gui: crate::config::GuiConfig {
+                language: self.edit_gui_language.code().to_string(),
             },
             ..Default::default()
         };
@@ -84,6 +93,11 @@ impl AltgoApp {
         } else {
             tracing::info!("settings saved");
         }
+    }
+
+    /// Helper to translate a key with the current language.
+    fn t(&self, key: &'static str) -> &'static str {
+        i18n::t(key, self.lang)
     }
 }
 
@@ -105,23 +119,22 @@ impl eframe::App for AltgoApp {
         }
 
         // Top area: menu bar + title.
+        let lang = self.lang;
         TopBottomPanel::top("top").show(ctx, |ui| {
             egui::menu::bar(ui, |ui| {
-                if ui.button("设置").clicked() {
+                if ui.button(i18n::t("menu.settings", lang)).clicked() {
                     self.settings_open = !self.settings_open;
                 }
-                ui.menu_button("文件", |ui| {
-                    if ui.button("退出").clicked() {
+                ui.menu_button(i18n::t("menu.file", lang), |ui| {
+                    if ui.button(i18n::t("menu.exit", lang)).clicked() {
                         ctx.send_viewport_cmd(ViewportCommand::Close);
                     }
                 });
-                ui.menu_button("帮助", |ui| {
-                    if ui.button("关于 altgo").clicked() {
+                ui.menu_button(i18n::t("menu.help", lang), |ui| {
+                    if ui.button(i18n::t("menu.about", lang)).clicked() {
                         ui.label(
-                            RichText::new(
-                                "altgo v0.1.0\n无需打字，言出法随\n按住 Alt 键说话，松开自动转写",
-                            )
-                            .font(FontId::proportional(13.0)),
+                            RichText::new(i18n::t("about.text", lang))
+                                .font(FontId::proportional(13.0)),
                         );
                     }
                 });
@@ -137,7 +150,7 @@ impl eframe::App for AltgoApp {
                 );
                 ui.add_space(8.0);
                 ui.label(
-                    RichText::new("语音转文字")
+                    RichText::new(i18n::t("title.subtitle", lang))
                         .font(FontId::proportional(13.0))
                         .color(Color32::GRAY),
                 );
@@ -162,10 +175,10 @@ impl eframe::App for AltgoApp {
                 ui.add_space(8.0);
 
                 let status_text = match state.recording {
-                    RecordingState::Idle => "等待说话",
-                    RecordingState::Recording => "正在录音...",
-                    RecordingState::Processing => "正在转写...",
-                    RecordingState::Done => "转写完成，已复制到剪贴板",
+                    RecordingState::Idle => i18n::t("status.idle", lang),
+                    RecordingState::Recording => i18n::t("status.recording", lang),
+                    RecordingState::Processing => i18n::t("status.processing", lang),
+                    RecordingState::Done => i18n::t("status.done", lang),
                 };
                 ui.label(RichText::new(status_text).font(FontId::proportional(14.0)));
             });
@@ -210,9 +223,9 @@ impl AltgoApp {
                     ui.add_space(16.0);
 
                     let main_text = match state.recording {
-                        RecordingState::Idle => "按住 右 Alt 键说话",
-                        RecordingState::Recording => "正在录音...",
-                        _ => "正在处理...",
+                        RecordingState::Idle => self.t("main.idle"),
+                        RecordingState::Recording => self.t("main.recording"),
+                        _ => self.t("main.processing"),
                     };
                     ui.label(
                         RichText::new(main_text)
@@ -221,7 +234,7 @@ impl AltgoApp {
                     );
                     ui.add_space(6.0);
                     ui.label(
-                        RichText::new("松开后自动转写并复制到剪贴板")
+                        RichText::new(self.t("main.hint"))
                             .font(FontId::proportional(13.0))
                             .color(Color32::from_rgb(0x88, 0x88, 0x88)),
                     );
@@ -231,7 +244,7 @@ impl AltgoApp {
                 if let Some(text) = &state.transcription {
                     ui.vertical_centered(|ui| {
                         ui.label(
-                            RichText::new("转写结果")
+                            RichText::new(self.t("main.result_label"))
                                 .font(FontId::proportional(11.0))
                                 .color(Color32::from_rgb(0x66, 0x66, 0x66)),
                         );
@@ -257,7 +270,7 @@ impl AltgoApp {
 
                         ui.add_space(12.0);
                         ui.label(
-                            RichText::new("已复制到剪贴板 ✓")
+                            RichText::new(self.t("main.copied"))
                                 .font(FontId::proportional(12.0))
                                 .color(Color32::from_rgb(0x4A, 0xFF, 0x9F)),
                         );
@@ -268,7 +281,7 @@ impl AltgoApp {
     }
 
     fn show_settings_ui(&mut self, ui: &mut egui::Ui) {
-        ui.heading("设置");
+        ui.heading(self.t("settings.title"));
 
         ui.add_space(8.0);
 
@@ -277,69 +290,91 @@ impl AltgoApp {
             .show(ui, |ui| {
                 ui.set_width(400.0);
 
+                // UI language (at the top for discoverability).
+                ui.horizontal(|ui| {
+                    ui.label(self.t("settings.gui_language"));
+                    egui::ComboBox::from_id_salt("gui_language")
+                        .selected_text(i18n::t("settings.lang_en", self.edit_gui_language))
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(
+                                &mut self.edit_gui_language,
+                                i18n::Lang::Zh,
+                                "中文",
+                            );
+                            ui.selectable_value(
+                                &mut self.edit_gui_language,
+                                i18n::Lang::En,
+                                "English",
+                            );
+                        });
+                });
+                ui.add_space(12.0);
+
                 // Recording settings
                 ui.label(
-                    RichText::new("录音设置")
+                    RichText::new(self.t("settings.recording"))
                         .font(FontId::proportional(14.0))
                         .color(Color32::from_rgb(0x4A, 0x9F, 0xFF)),
                 );
                 ui.add_space(4.0);
 
                 ui.horizontal(|ui| {
-                    ui.label("按键名称:");
+                    ui.label(self.t("settings.key_name"));
                     ui.text_edit_singleline(&mut self.edit_key_name);
                 });
                 ui.add_space(12.0);
 
                 // Transcription settings
                 ui.label(
-                    RichText::new("转写设置")
+                    RichText::new(self.t("settings.transcription"))
                         .font(FontId::proportional(14.0))
                         .color(Color32::from_rgb(0x4A, 0x9F, 0xFF)),
                 );
                 ui.add_space(4.0);
 
                 ui.horizontal(|ui| {
-                    ui.label("引擎:");
+                    ui.label(self.t("settings.engine"));
+                    let engine_api = i18n::t("settings.engine_api", self.lang);
+                    let engine_local = i18n::t("settings.engine_local", self.lang);
                     egui::ComboBox::from_id_salt("engine")
                         .selected_text(&self.edit_engine)
                         .show_ui(ui, |ui| {
                             ui.selectable_value(
                                 &mut self.edit_engine,
                                 "api".to_string(),
-                                "API (OpenAI兼容)",
+                                engine_api,
                             );
                             ui.selectable_value(
                                 &mut self.edit_engine,
                                 "local".to_string(),
-                                "本地 (whisper.cpp)",
+                                engine_local,
                             );
                         });
                 });
 
                 ui.horizontal(|ui| {
-                    ui.label("语言:");
+                    ui.label(self.t("settings.language"));
                     ui.text_edit_singleline(&mut self.edit_language);
                 });
 
                 if self.edit_engine == "api" {
                     ui.horizontal(|ui| {
-                        ui.label("API Key:");
-                        ui.text_edit_singleline(&mut self.edit_api_key);
+                        ui.label(self.t("settings.api_key"));
+                        ui.add(egui::TextEdit::singleline(&mut self.edit_api_key).password(true));
                     });
 
                     ui.horizontal(|ui| {
-                        ui.label("API URL:");
+                        ui.label(self.t("settings.api_url"));
                         ui.text_edit_singleline(&mut self.edit_api_base_url);
                     });
 
                     ui.horizontal(|ui| {
-                        ui.label("模型:");
+                        ui.label(self.t("settings.model"));
                         ui.text_edit_singleline(&mut self.edit_model);
                     });
                 } else {
                     ui.horizontal(|ui| {
-                        ui.label("模型路径:");
+                        ui.label(self.t("settings.model_path"));
                         ui.text_edit_singleline(&mut self.edit_model);
                     });
                 }
@@ -347,47 +382,56 @@ impl AltgoApp {
 
                 // Polisher settings
                 ui.label(
-                    RichText::new("润色设置")
+                    RichText::new(self.t("settings.polishing"))
                         .font(FontId::proportional(14.0))
                         .color(Color32::from_rgb(0x4A, 0x9F, 0xFF)),
                 );
                 ui.add_space(4.0);
 
                 ui.horizontal(|ui| {
-                    ui.label("润色级别:");
+                    ui.label(self.t("settings.polish_level"));
+                    let p_none = i18n::t("settings.polish_none", self.lang);
+                    let p_light = i18n::t("settings.polish_light", self.lang);
+                    let p_medium = i18n::t("settings.polish_medium", self.lang);
+                    let p_heavy = i18n::t("settings.polish_heavy", self.lang);
                     egui::ComboBox::from_id_salt("polish_level")
                         .selected_text(&self.edit_polisher_level)
                         .show_ui(ui, |ui| {
                             ui.selectable_value(
                                 &mut self.edit_polisher_level,
                                 "none".to_string(),
-                                "关闭",
+                                p_none,
                             );
                             ui.selectable_value(
                                 &mut self.edit_polisher_level,
                                 "light".to_string(),
-                                "轻度",
+                                p_light,
                             );
                             ui.selectable_value(
                                 &mut self.edit_polisher_level,
                                 "medium".to_string(),
-                                "中度",
+                                p_medium,
                             );
                             ui.selectable_value(
                                 &mut self.edit_polisher_level,
                                 "heavy".to_string(),
-                                "重度",
+                                p_heavy,
                             );
                         });
                 });
 
                 ui.horizontal(|ui| {
-                    ui.label("API URL:");
+                    ui.label(self.t("settings.api_url"));
                     ui.text_edit_singleline(&mut self.edit_api_base_url_polisher);
                 });
 
                 ui.horizontal(|ui| {
-                    ui.label("模型:");
+                    ui.label(self.t("settings.api_key"));
+                    ui.add(egui::TextEdit::singleline(&mut self.edit_polisher_api_key).password(true));
+                });
+
+                ui.horizontal(|ui| {
+                    ui.label(self.t("settings.model"));
                     ui.text_edit_singleline(&mut self.edit_polisher_model);
                 });
             });
@@ -395,17 +439,19 @@ impl AltgoApp {
         ui.add_space(12.0);
 
         ui.horizontal(|ui| {
-            if ui.button("保存").clicked() {
+            if ui.button(self.t("settings.save")).clicked() {
+                // Apply language change immediately.
+                self.lang = self.edit_gui_language;
                 self.save_config();
             }
-            if ui.button("取消").clicked() {
+            if ui.button(self.t("settings.cancel")).clicked() {
                 self.settings_open = false;
             }
         });
 
         ui.add_space(8.0);
         ui.label(
-            RichText::new("提示: 部分设置需要重启应用后生效")
+            RichText::new(self.t("settings.restart_hint"))
                 .font(FontId::proportional(11.0))
                 .color(Color32::GRAY),
         );
