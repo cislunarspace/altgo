@@ -14,31 +14,29 @@
 
         <StandardDirectory Id="ProgramFilesFolder">
             <Directory Id="INSTALLFOLDER" Name="altgo">
-                <ComponentGroupRef Id="ProductComponents" />
+                <Component Id="MainExecutable">
+                    <File Id="altgo.exe" Source="$(var.SourceDir)\altgo.exe" KeyPath="yes" />
+                </Component>
             </Directory>
         </StandardDirectory>
 
         <StandardDirectory Id="ProgramMenuFolder">
-            <Directory Id="ApplicationProgramsFolder" Name="altgo" />
+            <Directory Id="ApplicationProgramsFolder" Name="altgo">
+                <Component Id="ApplicationShortcut">
+                    <Shortcut Id="ApplicationStartMenuShortcut"
+                              Name="altgo"
+                              Description="语音转文字工具"
+                              Target="[INSTALLFOLDER]altgo.exe"
+                              WorkingDirectory="INSTALLFOLDER" />
+                    <RemoveFolder Id="CleanUpShortCut" Directory="ApplicationProgramsFolder" On="uninstall" />
+                    <RegistryValue Root="HKCU" Key="Software\altgo" Name="installed" Type="integer" Value="1" KeyPath="yes" />
+                </Component>
+            </Directory>
         </StandardDirectory>
 
-        <ComponentGroup Id="ProductComponents" Directory="INSTALLFOLDER">
-            <Component Id="MainExecutable">
-                <File Id="altgo.exe" Source="$(var.SourceDir)\altgo.exe" KeyPath="yes" />
-            </Component>
-            <Component Id="ApplicationShortcut">
-                <Shortcut Id="ApplicationStartMenuShortcut"
-                          Name="altgo"
-                          Description="语音转文字工具"
-                          Target="[INSTALLFOLDER]altgo.exe"
-                          WorkingDirectory="INSTALLFOLDER" />
-                <RemoveFolder Id="CleanUpShortCut" Directory="ApplicationProgramsFolder" On="uninstall" />
-                <RegistryValue Root="HKCU" Key="Software\altgo" Name="installed" Type="integer" Value="1" KeyPath="yes" />
-            </Component>
-        </ComponentGroup>
-
         <Feature Id="ProductFeature" Title="altgo" Level="1">
-            <ComponentGroupRef Id="ProductComponents" />
+            <ComponentRef Id="MainExecutable" />
+            <ComponentRef Id="ApplicationShortcut" />
         </Feature>
     </Package>
 </Wix>
