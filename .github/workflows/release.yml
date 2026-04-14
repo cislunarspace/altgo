@@ -32,10 +32,6 @@ jobs:
             target: aarch64-apple-darwin
             artifact: altgo-aarch64-macos
             ext: .tar.gz
-          - os: macos-12
-            target: x86_64-apple-darwin
-            artifact: altgo-x86_64-macos
-            ext: .tar.gz
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             artifact: altgo-x86_64-windows
