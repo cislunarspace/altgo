@@ -8,10 +8,14 @@
 use super::KeyEvent;
 use anyhow::{Context, Result};
 use std::io::BufRead;
+use std::os::windows::process::CommandExt;
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio::sync::mpsc;
+
+// Windows flag to prevent subprocess from creating a console window.
+const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 /// Windows 按键监听器。
 ///
@@ -84,6 +88,7 @@ while ($true) {{
             .arg("-NonInteractive")
             .arg("-Command")
             .arg(&script)
+            .creation_flags(CREATE_NO_WINDOW)
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .stdin(Stdio::null())

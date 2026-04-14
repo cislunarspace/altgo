@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 /// altgo 主配置结构体，包含所有子系统的配置。
-#[derive(Debug, Default, Deserialize, Clone)]
+#[derive(Debug, Default, Deserialize, Clone, serde::Serialize)]
 #[serde(default)]
 pub struct Config {
     /// 按键监听配置
@@ -34,7 +34,7 @@ pub struct Config {
 }
 
 /// 按键监听配置。
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone, serde::Serialize)]
 #[serde(default)]
 pub struct KeyListenerConfig {
     /// 监听的按键名称（如 `ISO_Level3_Shift`、`Alt_R`）
@@ -76,7 +76,7 @@ impl Default for KeyListenerConfig {
 }
 
 /// 录音配置。
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone, serde::Serialize)]
 #[serde(default)]
 pub struct RecorderConfig {
     /// 采样率（Hz），默认 16000
@@ -95,7 +95,7 @@ impl Default for RecorderConfig {
 }
 
 /// 语音识别配置。
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone, serde::Serialize)]
 #[serde(default)]
 pub struct TranscriberConfig {
     /// 引擎类型：`"local"`（本地 whisper.cpp）或 `"api"`（Whisper API）
@@ -133,7 +133,7 @@ impl Default for TranscriberConfig {
 }
 
 /// 文本润色配置。
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone, serde::Serialize)]
 #[serde(default)]
 pub struct PolisherConfig {
     /// 引擎类型（目前仅 `"openai"` 兼容接口）
@@ -174,7 +174,7 @@ impl Default for PolisherConfig {
 }
 
 /// 输出配置。
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone, serde::Serialize)]
 #[serde(default)]
 pub struct OutputConfig {
     /// 是否启用桌面通知
@@ -193,7 +193,7 @@ impl Default for OutputConfig {
 }
 
 /// 日志配置。
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone, serde::Serialize)]
 #[serde(default)]
 pub struct LoggingConfig {
     /// 日志级别（如 `"info"`、`"debug"`、`"warn"`）
@@ -230,6 +230,23 @@ impl Config {
         }
 
         Ok(cfg)
+    }
+
+    /// 将配置保存到指定路径。
+    pub fn save(&self, path: &Path) -> Result<()> {
+        let content = toml::to_string_pretty(self).context("failed to serialize config to TOML")?;
+
+        // Ensure parent directory exists.
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("create directory {}", parent.display()))?;
+        }
+
+        std::fs::write(path, content)
+            .with_context(|| format!("write config to {}", path.display()))?;
+
+        tracing::info!(path = %path.display(), "config saved");
+        Ok(())
     }
 
     /// 返回默认配置文件路径（`~/.config/altgo/altgo.toml`）。

@@ -5,11 +5,6 @@
 
 use std::sync::{Arc, Mutex};
 
-#[cfg(target_os = "linux")]
-use tao::system_tray::SystemTray;
-#[cfg(target_os = "linux")]
-use tao::AppHandle;
-
 /// Current recording state shown in the UI.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum RecordingState {
@@ -35,20 +30,12 @@ pub struct GuiState {
 /// Shared mutable state — lock-free reads for the GUI thread.
 pub struct SharedState {
     inner: Mutex<GuiState>,
-    #[cfg(target_os = "linux")]
-    app_handle: Mutex<Option<AppHandle>>,
-    #[cfg(target_os = "linux")]
-    tray: Mutex<Option<SystemTray>>,
 }
 
 impl SharedState {
     pub fn new() -> Self {
         Self {
             inner: Mutex::new(GuiState::default()),
-            #[cfg(target_os = "linux")]
-            app_handle: Mutex::new(None),
-            #[cfg(target_os = "linux")]
-            tray: Mutex::new(None),
         }
     }
 
@@ -64,19 +51,14 @@ impl SharedState {
         if state != RecordingState::Done {
             inner.transcription = None;
         }
-        drop(inner);
-        self.update_tray();
     }
 
     /// Set the transcription result.
     pub fn set_transcription(&self, text: String) {
-        {
-            let mut inner = self.inner.lock().unwrap();
-            inner.recording = RecordingState::Done;
-            inner.transcription = Some(text);
-            inner.message = None;
-        }
-        self.update_tray();
+        let mut inner = self.inner.lock().unwrap();
+        inner.recording = RecordingState::Done;
+        inner.transcription = Some(text);
+        inner.message = None;
     }
 
     /// Set a status message.
@@ -84,40 +66,6 @@ impl SharedState {
     pub fn set_message(&self, msg: impl Into<String>) {
         let mut inner = self.inner.lock().unwrap();
         inner.message = Some(msg.into());
-    }
-
-    /// Store the tao AppHandle (call once at startup, Linux only).
-    #[cfg(target_os = "linux")]
-    pub fn set_app_handle(&self, handle: AppHandle) {
-        *self.app_handle.lock().unwrap() = Some(handle);
-    }
-
-    /// Store the SystemTray (call once at startup, Linux only).
-    #[cfg(target_os = "linux")]
-    pub fn set_tray(&self, tray: SystemTray) {
-        *self.tray.lock().unwrap() = Some(tray);
-    }
-
-    /// Update the system tray tooltip to match current recording state (Linux only).
-    #[cfg(target_os = "linux")]
-    fn update_tray(&self) {
-        let state = self.get();
-        let tooltip = match state.recording {
-            RecordingState::Idle => "altgo — 按住 Alt 说话",
-            RecordingState::Recording => "altgo — 正在录音...",
-            RecordingState::Processing => "altgo — 处理中...",
-            RecordingState::Done => "altgo — 转写完成",
-        };
-
-        if let Some(tray) = self.tray.lock().unwrap().as_ref() {
-            tray.set_tooltip(Some(tooltip));
-        }
-        tracing::debug!(tooltip, "tray tooltip updated");
-    }
-
-    #[cfg(not(target_os = "linux"))]
-    fn update_tray(&self) {
-        // No-op on non-Linux platforms.
     }
 }
 

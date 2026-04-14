@@ -21,10 +21,12 @@ jobs:
             target: x86_64-unknown-linux-gnu
             artifact: altgo-x86_64-linux
             ext: .tar.gz
+            deb: true
           - os: ubuntu-latest
             target: aarch64-unknown-linux-gnu
             artifact: altgo-aarch64-linux
             ext: .tar.gz
+            deb: true
           - os: macos-latest
             target: aarch64-apple-darwin
             artifact: altgo-aarch64-macos
@@ -37,6 +39,7 @@ jobs:
             target: x86_64-pc-windows-msvc
             artifact: altgo-x86_64-windows
             ext: .zip
+            msi_ext: .msi
 
     steps:
       - uses: actions/checkout@v4
@@ -50,27 +53,65 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y gcc-aarch64-linux-gnu
 
+      - name: Install cargo-deb (Linux)
+        if: matrix.deb == true
+        run: |
+          cargo install cargo-deb --locked
+
+      - name: Install WiX (Windows MSI)
+        if: matrix.os == 'windows-latest'
+        run: dotnet tool install --global wix --version 5.0.0 || echo "WiX already installed"
+
       - name: Build
         run: cargo build --target ${{ matrix.target }} --release
 
-      - name: Package (Linux/macOS)
-        if: runner.os != 'Windows'
+      - name: Build DEB (Linux x86_64)
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        run: cargo deb --no-build-release
+        working-directory: .
+
+      - name: Build DEB (Linux ARM64)
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: cargo deb --no-build-release --target aarch64-unknown-linux-gnu
+        working-directory: .
+
+      - name: Package (Linux/macOS tar.gz)
+        if: runner.os != 'Windows' && matrix.deb != true
         run: |
           cd target/${{ matrix.target }}/release
           tar czf ../../../${{ matrix.artifact }}.tar.gz altgo
           cd ../../..
 
-      - name: Package (Windows)
+      - name: Package (Windows zip)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           Compress-Archive -Path target/${{ matrix.target }}/release/altgo.exe -DestinationPath ${{ matrix.artifact }}.zip
 
+      - name: Build MSI (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: |
+          $env:Path = "$env:USERPROFILE\.dotnet\tools;$env:Path"
+          wix build msi/Product.wxs -d Version=$($env:VERSION -replace 'v','') -d SourceDir=target/${{ matrix.target }}/release -o target/${{ matrix.artifact }}.msi
+
+      - name: Upload DEB artifacts
+        if: matrix.deb == true
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}-deb
+          path: target/${{ matrix.target }}/release/debian/*.deb
+          if-no-files-found: error
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
-          path: ${{ matrix.artifact }}${{ matrix.ext }}
+          path: |
+            ${{ matrix.artifact }}${{ matrix.ext }}
+            ${{ matrix.msi_ext && format('target/{0}/{1}/release/altgo{2}', matrix.target, matrix.artifact, matrix.msi_ext) }}
           if-no-files-found: error
 
   release:

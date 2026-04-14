@@ -1,12 +1,9 @@
-//! GUI module — eframe-based UI with system tray (Linux only for tray).
+//! GUI module — eframe-based UI.
 //!
 //! Compiled when the `gui` feature is enabled.
 
 pub mod app;
 pub mod state;
-
-#[cfg(target_os = "linux")]
-pub mod tray;
 
 use std::sync::Arc;
 
@@ -34,6 +31,7 @@ pub fn run_gui(state: Arc<SharedState>) -> anyhow::Result<()> {
             .with_title("altgo — 语音转文字")
             .with_inner_size([480.0, 360.0])
             .with_resizable(false),
+        // Keep app alive when window is closed - we handle close ourselves for tray behavior
         ..Default::default()
     };
 
@@ -41,15 +39,8 @@ pub fn run_gui(state: Arc<SharedState>) -> anyhow::Result<()> {
         "altgo",
         options,
         Box::new(move |_cc| {
-            #[cfg(target_os = "linux")]
-            {
-                let app_handle = _cc.platform.clone();
-                let tray = tray::build_tray(&app_handle);
-                state.set_app_handle(app_handle);
-                state.set_tray(tray);
-            }
-
-            Ok(Box::new(app::AltgoApp::new(state)))
+            let config_path = crate::config::Config::default_config_path();
+            Ok(Box::new(app::AltgoApp::new(state, config_path)))
         }),
     )
     .map_err(|e| anyhow::anyhow!("eframe error: {}", e))?;

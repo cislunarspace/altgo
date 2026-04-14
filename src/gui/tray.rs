@@ -1,53 +1,16 @@
-//! System tray integration via tao 0.16 (Linux only).
+//! System tray integration via tao 0.16 (Linux and Windows).
 //!
-//! NOTE: tao's system tray (using libappindicator) is only available on Linux.
+//! Uses the correct tao 0.16.11 API.
 
-use tao::system_tray::SystemTrayBuilder;
-use tao::AppHandle;
+use tao::{
+    event_loop::EventLoopWindowTarget,
+    menu::{ContextMenu, MenuItemAttributes},
+    system_tray::SystemTrayBuilder,
+    AppHandle, Icon,
+};
 
-/// Build the system tray with icon and context menu (Linux only).
-#[cfg(target_os = "linux")]
-pub fn build_tray(app_handle: &AppHandle) -> tao::system_tray::SystemTray {
-    let show_item = tao::menu::MenuItem::new("显示窗口", true, None::<&str>);
-    let quit_item = tao::menu::MenuItem::new("退出", true, None::<&str>);
-
-    let menu = tao::menu::Menu::new(&[&show_item, &quit_item]);
-
-    // Generate a simple 32x32 microphone icon as RGBA pixels encoded as PNG.
-    let icon = generate_mic_icon();
-
-    let app = app_handle.clone();
-
-    SystemTrayBuilder::new(icon, menu)
-        .tooltip("altgo — 按住 Alt 说话")
-        .on_tray_event(move |_tray, event| {
-            use tao::system_tray::TrayEvent;
-            match event {
-                TrayEvent::Click { .. } => {
-                    if let Some(window) = app.get_window("altgo") {
-                        let _ = window.show();
-                        let _ = window.set_focus();
-                    }
-                }
-                _ => {}
-            }
-        })
-        .on_menu_event(|_tray, event| {
-            if event.id == "quit" {
-                _tray.app_handle().exit();
-            }
-        })
-        .build()
-}
-
-/// No-op on non-Linux platforms.
-#[cfg(not(target_os = "linux"))]
-pub fn build_tray(_app_handle: &tao::AppHandle, _state: Arc<SharedState>) {
-    // System tray is only available on Linux via libappindicator.
-}
-
-/// Generate a minimal 32x32 microphone icon as a PNG in memory.
-fn generate_mic_icon() -> tao::image::Image<'static> {
+/// Generate a minimal 32x32 microphone icon as RGBA pixels.
+fn generate_mic_icon() -> Icon {
     let size = 32usize;
 
     let mut rgba = vec![0u8; size * size * 4];
@@ -55,7 +18,7 @@ fn generate_mic_icon() -> tao::image::Image<'static> {
     // Draw microphone body (light blue filled circle).
     let cx = size / 2;
     let cy = size / 2 - 2;
-    let radius = 7i32;
+    let radius: i32 = 7;
 
     for dy in -(radius + 2)..=(radius + 2) {
         for dx in -(radius + 2)..=(radius + 2) {
@@ -75,13 +38,14 @@ fn generate_mic_icon() -> tao::image::Image<'static> {
     }
 
     // Draw mic stand (small rounded rect at bottom).
-    let stand_top = cy + radius - 2;
+    let stand_top = cy as usize + radius as usize - 2;
     let stand_bottom = stand_top + 8;
     let stand_left = cx - 3;
     let stand_right = cx + 3;
 
     for y in stand_top..stand_bottom {
         for x in stand_left..=stand_right {
+            let x = x as usize;
             if x < size && y < size {
                 let idx = (y * size + x) * 4;
                 rgba[idx] = 74;
@@ -102,5 +66,34 @@ fn generate_mic_icon() -> tao::image::Image<'static> {
         writer.write_image_data(&rgba).unwrap();
     }
 
-    tao::image::Image::from_bytes(&png_data).unwrap()
+    Icon::from_bytes(&png_data).expect("failed to create icon from PNG")
+}
+
+/// Build the system tray with icon and context menu.
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+pub fn build_tray(
+    _app_handle: &AppHandle,
+    window_target: &EventLoopWindowTarget<()>,
+) -> tao::system_tray::SystemTray {
+    let icon = generate_mic_icon();
+
+    let mut menu = ContextMenu::new();
+    menu.add_item(MenuItemAttributes::new("显示窗口"));
+    menu.add_item(MenuItemAttributes::new("设置"));
+    menu.add_item(MenuItemAttributes::new("退出"));
+
+    SystemTrayBuilder::new(icon, Some(menu))
+        .with_tooltip("altgo — 按住 Alt 说话")
+        .build(window_target)
+        .expect("failed to build system tray")
+}
+
+/// No-op on non-Linux/Windows platforms.
+#[cfg(not(any(target_os = "linux", target_os = "windows")))]
+#[allow(unused_variables)]
+pub fn build_tray(
+    app_handle: &AppHandle,
+    window_target: &EventLoopWindowTarget<()>,
+) -> tao::system_tray::SystemTray {
+    unimplemented!("System tray not supported on this platform")
 }
