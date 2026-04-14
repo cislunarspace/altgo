@@ -257,14 +257,37 @@ impl Config {
     /// Call this after `load()` to check API keys are present when using API engines.
     pub fn validate(&self) -> Result<()> {
         if self.transcriber.engine == "api" && self.transcriber.api_key.trim().is_empty() {
+            let config_path = Self::default_config_path();
             anyhow::bail!(
-                "transcriber engine is 'api' but ALTGO_TRANSCRIBER_API_KEY is not set or is empty"
+                "转写引擎设置为 'api'，但未配置 API 密钥。\n\
+                 \n\
+                 解决方法（任选一种）：\n\
+                 1. 设置环境变量：\n\
+                    Linux/macOS:  export ALTGO_TRANSCRIBER_API_KEY=\"your-key\"\n\
+                    Windows:      $env:ALTGO_TRANSCRIBER_API_KEY = \"your-key\"\n\
+                 2. 在配置文件中填写 api_key：\n\
+                    编辑 {}，在 [transcriber] 下填写 api_key = \"your-key\"\n\
+                 3. 使用本地 whisper.cpp（无需 API 密钥）：\n\
+                    将 transcriber.engine 改为 \"local\"",
+                config_path.display()
             );
         }
         // Only require polisher API key when polishing is actually enabled.
         if self.polisher.level != "none" && self.polisher.api_key.trim().is_empty() {
+            let config_path = Self::default_config_path();
             anyhow::bail!(
-                "polisher level is not 'none' but ALTGO_POLISHER_API_KEY is not set or is empty"
+                "润色功能已开启（level = \"{}\"），但未配置 API 密钥。\n\
+                 \n\
+                 解决方法（任选一种）：\n\
+                 1. 设置环境变量：\n\
+                    Linux/macOS:  export ALTGO_POLISHER_API_KEY=\"your-key\"\n\
+                    Windows:      $env:ALTGO_POLISHER_API_KEY = \"your-key\"\n\
+                 2. 在配置文件中填写 api_key：\n\
+                    编辑 {}，在 [polisher] 下填写 api_key = \"your-key\"\n\
+                 3. 关闭润色（只需语音转文字）：\n\
+                    将 polisher.level 改为 \"none\"",
+                self.polisher.level,
+                config_path.display()
             );
         }
         Ok(())
