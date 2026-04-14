@@ -130,7 +130,10 @@ impl SoxRecorder {
             let _ = child.wait();
         });
 
-        *self.done.lock().unwrap() = Some(handle);
+        *self
+            .done
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner()) = Some(handle);
         Ok(())
     }
 
@@ -138,8 +141,15 @@ impl SoxRecorder {
     pub fn stop(&self) -> Result<Vec<u8>> {
         self.recording.store(false, Ordering::SeqCst);
 
-        if let Some(handle) = self.done.lock().unwrap().take() {
-            let _ = handle.join();
+        if let Some(handle) = self
+            .done
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner())
+            .take()
+        {
+            if let Err(e) = handle.join() {
+                tracing::error!(error = ?e, "recording thread panicked");
+            }
         }
 
         let pcm_data = self.shared_buffer.read_all();

@@ -78,10 +78,13 @@ pub(crate) async fn debounce_task(
                 }
             }, if pending_release.is_some() => {
                 pending_release = None;
-                is_pressed.store(false, Ordering::SeqCst);
-                if key_tx
-                    .send(crate::state_machine::KeyEvent { pressed: false })
-                    .is_err()
+                // Only send RELEASE if the key is not currently pressed.
+                // If a new press arrived before the timer fired, the press
+                // will handle sending the correct state.
+                if !is_pressed.load(Ordering::SeqCst)
+                    && key_tx
+                        .send(crate::state_machine::KeyEvent { pressed: false })
+                        .is_err()
                 {
                     break;
                 }

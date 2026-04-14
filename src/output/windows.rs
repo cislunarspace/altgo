@@ -49,9 +49,17 @@ pub fn notify(title: &str, body: &str, timeout_ms: u64) -> anyhow::Result<()> {
     let truncated = truncate_text(body, 200);
     let timeout_sec = (timeout_ms as f64) / 1000.0;
 
-    // Escape single quotes for PowerShell string interpolation.
-    let title_escaped = title.replace('\'', "''");
-    let body_escaped = truncated.replace('\n', " ").replace('\'', "''");
+    // Escape special characters for PowerShell single-quoted strings.
+    // Need to escape: ' (single quote), $ (variable expansion), ` (escape char)
+    let title_escaped = title
+        .replace('\'', "''")
+        .replace('$', "`$")
+        .replace('`', "``");
+    let body_escaped = truncated
+        .replace('\n', " ")
+        .replace('\'', "''")
+        .replace('$', "`$")
+        .replace('`', "``");
 
     // Write the PowerShell script to a temp file to avoid format! escaping issues
     // with XAML (hex colors like #CC2D2D2D clash with Rust token parsing).
@@ -89,7 +97,7 @@ pub fn notify(title: &str, body: &str, timeout_ms: u64) -> anyhow::Result<()> {
             });
         }
         Err(e) => {
-            tracing::debug!(error = %e, "failed to spawn PowerShell notification");
+            tracing::warn!(error = %e, "failed to spawn PowerShell notification");
             // tmp is dropped here on the main thread, cleaning up immediately.
         }
     }

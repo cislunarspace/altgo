@@ -14,6 +14,9 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
+/// 重试延迟基数（毫秒），用于指数退避计算。
+const RETRY_BASE_DELAY_MS: u64 = 500;
+
 /// 润色级别，控制 LLM 对文本的改写程度。
 #[derive(Debug, Clone, Copy)]
 pub enum PolishLevel {
@@ -158,7 +161,7 @@ impl LLMFormatter {
         let mut last_err = None;
         for attempt in 0..self.max_retries {
             if attempt > 0 {
-                let delay = Duration::from_millis(500 * 2u64.pow(attempt - 1));
+                let delay = Duration::from_millis(RETRY_BASE_DELAY_MS * 2u64.pow(attempt - 1));
                 tokio::time::sleep(delay).await;
             }
 

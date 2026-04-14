@@ -271,7 +271,7 @@ impl Config {
     /// 返回默认配置文件路径（`~/.config/altgo/altgo.toml`）。
     pub fn default_config_path() -> PathBuf {
         dirs::config_dir()
-            .unwrap_or_else(|| PathBuf::from("."))
+            .expect("could not determine config directory")
             .join("altgo")
             .join("altgo.toml")
     }

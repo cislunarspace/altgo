@@ -27,10 +27,16 @@ pub fn run_gui(state: Arc<SharedState>) -> anyhow::Result<()> {
 
     // Spawn the audio pipeline in a background thread with its own Tokio runtime.
     std::thread::spawn(move || {
-        let rt = tokio::runtime::Builder::new_current_thread()
+        let rt = match tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
-            .expect("failed to build Tokio runtime for GUI pipeline");
+        {
+            Ok(rt) => rt,
+            Err(e) => {
+                tracing::error!(error = %e, "failed to build Tokio runtime for GUI pipeline");
+                return;
+            }
+        };
         rt.block_on(async {
             if let Err(e) = run_pipeline(state_clone, cfg_clone).await {
                 tracing::error!(error = %e, "GUI pipeline exited with error");

@@ -23,47 +23,43 @@ impl Buffer {
         }
     }
 
-    /// 向缓冲区追加数据。
-    pub fn write(&self, chunk: &[u8]) {
+    /// Execute a closure with exclusive access to the buffer data.
+    fn with_lock<F, R>(&self, f: F) -> R
+    where
+        F: FnOnce(&mut Vec<u8>) -> R,
+    {
         let mut data = self
             .data
             .lock()
             .unwrap_or_else(|poison| poison.into_inner());
-        data.extend_from_slice(chunk);
+        f(&mut data)
+    }
+
+    /// 向缓冲区追加数据。
+    pub fn write(&self, chunk: &[u8]) {
+        self.with_lock(|data| data.extend_from_slice(chunk));
     }
 
     /// 返回当前缓冲区内容的副本。
     pub fn read_all(&self) -> Vec<u8> {
-        self.data
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner())
-            .clone()
+        self.with_lock(|data| data.clone())
     }
 
     /// 清空缓冲区。
     pub fn reset(&self) {
-        self.data
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner())
-            .clear();
+        self.with_lock(|data| data.clear());
     }
 
     #[allow(dead_code)]
     /// 返回缓冲区当前字节数。
     pub fn len(&self) -> usize {
-        self.data
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner())
-            .len()
+        self.with_lock(|data| data.len())
     }
 
     #[allow(dead_code)]
     /// 缓冲区是否为空。
     pub fn is_empty(&self) -> bool {
-        self.data
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner())
-            .is_empty()
+        self.with_lock(|data| data.is_empty())
     }
 }
 

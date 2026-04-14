@@ -108,11 +108,11 @@ pub fn notify(title: &str, body: &str, timeout_ms: u64) -> anyhow::Result<()> {
     match output {
         Ok(out) if out.status.success() => Ok(()),
         Ok(_) => {
-            tracing::debug!("notify-send failed, ignoring");
+            tracing::warn!("notify-send command failed");
             Ok(())
         }
-        Err(_) => {
-            tracing::debug!("notify-send not available");
+        Err(e) => {
+            tracing::warn!(error = %e, "notify-send not available");
             Ok(())
         }
     }
