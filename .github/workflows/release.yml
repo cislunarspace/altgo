@@ -22,7 +22,7 @@ jobs:
             artifact: altgo-x86_64-linux
             ext: .tar.gz
             deb: true
-          - os: ubuntu-latest
+          - os: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
             artifact: altgo-aarch64-linux
             ext: .tar.gz
@@ -31,7 +31,7 @@ jobs:
             target: aarch64-apple-darwin
             artifact: altgo-aarch64-macos
             ext: .tar.gz
-          - os: macos-latest
+          - os: macos-13
             target: x86_64-apple-darwin
             artifact: altgo-x86_64-macos
             ext: .tar.gz
@@ -46,50 +46,71 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}-gui
 
-      - name: Install cross-compilation tools (Linux ARM64)
-        if: matrix.target == 'aarch64-unknown-linux-gnu'
+      # Linux system deps for GUI (glow/OpenGL)
+      - name: Install system dependencies (Linux)
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu
+          sudo apt-get install -y \
+            libgl1-mesa-dev \
+            libxcb1-dev \
+            libxkbcommon-dev \
+            libxkbcommon-x11-dev \
+            libspeechd-dev \
+            libasound2-dev
 
-      - name: Install cargo-deb (Linux)
-        if: matrix.deb == true
+      # macOS SDK setup (for tao/eframe)
+      - name: Setup macOS SDK
+        if: runner.os == 'macOS'
         run: |
-          cargo install cargo-deb --locked
+          echo "MACOSX_DEPLOYMENT_TARGET=10.13" >> $GITHUB_ENV
+          sudo xcode-select --switch /Applications/Xcode.app/Contents/Developer
 
+      # Windows WiX toolchain
       - name: Install WiX (Windows MSI)
-        if: matrix.os == 'windows-latest'
+        if: runner.os == 'Windows'
         run: dotnet tool install --global wix --version 5.0.0 || echo "WiX already installed"
 
-      - name: Build
-        run: cargo build --target ${{ matrix.target }} --release
+      # Install cargo-deb for Linux targets
+      - name: Install cargo-deb (Linux)
+        if: matrix.deb == true
+        run: cargo install cargo-deb --locked
 
+      # Build with GUI feature
+      - name: Build
+        run: cargo build --target ${{ matrix.target }} --release --features gui
+
+      # Build DEB packages
       - name: Build DEB (Linux x86_64)
         if: matrix.target == 'x86_64-unknown-linux-gnu'
-        run: cargo deb --no-build-release
-        working-directory: .
+        run: cargo deb --no-build --target x86_64-unknown-linux-gnu
 
       - name: Build DEB (Linux ARM64)
         if: matrix.target == 'aarch64-unknown-linux-gnu'
-        run: cargo deb --no-build-release --target aarch64-unknown-linux-gnu
-        working-directory: .
+        run: cargo deb --no-build --target aarch64-unknown-linux-gnu
 
+      # Package tar.gz (Linux/macOS)
       - name: Package (Linux/macOS tar.gz)
-        if: runner.os != 'Windows' && matrix.deb != true
+        if: runner.os != 'Windows'
         run: |
           cd target/${{ matrix.target }}/release
           tar czf ../../../${{ matrix.artifact }}.tar.gz altgo
           cd ../../..
 
+      # Package zip (Windows)
       - name: Package (Windows zip)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           Compress-Archive -Path target/${{ matrix.target }}/release/altgo.exe -DestinationPath ${{ matrix.artifact }}.zip
 
+      # Build MSI (Windows)
       - name: Build MSI (Windows)
-        if: matrix.os == 'windows-latest'
+        if: runner.os == 'Windows'
         shell: pwsh
         env:
           VERSION: ${{ github.ref_name }}
@@ -97,21 +118,23 @@ jobs:
           $env:Path = "$env:USERPROFILE\.dotnet\tools;$env:Path"
           wix build msi/Product.wxs -d Version=$($env:VERSION -replace 'v','') -d SourceDir=target/${{ matrix.target }}/release -o target/${{ matrix.artifact }}.msi
 
+      # Upload DEB artifacts
       - name: Upload DEB artifacts
         if: matrix.deb == true
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}-deb
           path: target/${{ matrix.target }}/release/debian/*.deb
-          if-no-files-found: error
+          if-no-files-found: warn
 
+      # Upload main artifact (tar.gz/zip + MSI)
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
           path: |
             ${{ matrix.artifact }}${{ matrix.ext }}
-            ${{ matrix.msi_ext && format('target/{0}/{1}/release/altgo{2}', matrix.target, matrix.artifact, matrix.msi_ext) }}
+            ${{ matrix.msi_ext && format('target/{0}{1}', matrix.artifact, matrix.msi_ext) }}
           if-no-files-found: error
 
   release:

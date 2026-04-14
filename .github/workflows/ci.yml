@@ -30,7 +30,25 @@ jobs:
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
         with:
-          key: ${{ matrix.target }}
+          key: ${{ matrix.target }}-gui
+
+      - name: Install system dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libgl1-mesa-dev \
+            libxcb1-dev \
+            libxkbcommon-dev \
+            libxkbcommon-x11-dev \
+            libspeechd-dev \
+            libasound2-dev
+
+      - name: Setup macOS SDK
+        if: runner.os == 'macOS'
+        run: |
+          echo "MACOSX_DEPLOYMENT_TARGET=10.13" >> $GITHUB_ENV
+          sudo xcode-select --switch /Applications/Xcode.app/Contents/Developer
 
       - name: Check formatting
         run: cargo fmt --all -- --check
@@ -38,8 +56,8 @@ jobs:
       - name: Clippy
         run: cargo clippy --target ${{ matrix.target }} -- -D warnings
 
-      - name: Build
-        run: cargo build --target ${{ matrix.target }} --release
+      - name: Build (with GUI)
+        run: cargo build --target ${{ matrix.target }} --release --features gui
 
       - name: Run tests
-        run: cargo test --target ${{ matrix.target }}
+        run: cargo test --target ${{ matrix.target }} --features gui
