@@ -81,7 +81,10 @@ impl PulseRecorder {
                 match reader.read(&mut chunk) {
                     Ok(0) => break,
                     Ok(n) => buffer.write(&chunk[..n]),
-                    Err(_) => break,
+                    Err(e) => {
+                        tracing::debug!(error = %e, "read error in parecord, stopping");
+                        break;
+                    }
                 }
             }
 
@@ -99,9 +102,8 @@ impl PulseRecorder {
         self.recording.store(false, Ordering::SeqCst);
 
         // Wait for the recording thread to finish.
-        let handle = self.done.lock().unwrap().take();
-        if let Some(h) = handle {
-            let _ = h.join();
+        if let Some(handle) = self.done.lock().unwrap().take() {
+            let _ = handle.join();
         }
 
         let pcm_data = self.shared_buffer.read_all();

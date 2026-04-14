@@ -76,11 +76,16 @@ pub fn notify(title: &str, body: &str, timeout_ms: u64) -> anyhow::Result<()> {
 
     match child {
         Ok(mut child) => {
-            // Move tmp into background thread — it auto-deletes when PowerShell exits.
-            let _ = child.stdin.take();
+            // Keep the temp file alive until PowerShell exits by moving the
+            // tempfile's path into the thread. PowerShell reads the file at
+            // startup, so even if the file is deleted afterward it's fine.
+            // We use into_temp_path().keep() to be safe against slow startup.
+            let tmp_path = tmp.into_temp_path();
+            if let Err(e) = tmp_path.keep() {
+                tracing::debug!(error = %e, "failed to keep temp file");
+            }
             std::thread::spawn(move || {
                 let _ = child.wait();
-                // tmp (NamedTempFile) is dropped here, cleaning up the .ps1 file.
             });
         }
         Err(e) => {

@@ -119,7 +119,10 @@ impl SoxRecorder {
                 match reader.read(&mut chunk) {
                     Ok(0) => break,
                     Ok(n) => buffer.write(&chunk[..n]),
-                    Err(_) => break,
+                    Err(e) => {
+                        tracing::debug!(error = %e, "read error in recorder, stopping");
+                        break;
+                    }
                 }
             }
 
@@ -135,9 +138,8 @@ impl SoxRecorder {
     pub fn stop(&self) -> Result<Vec<u8>> {
         self.recording.store(false, Ordering::SeqCst);
 
-        let handle = self.done.lock().unwrap().take();
-        if let Some(h) = handle {
-            let _ = h.join();
+        if let Some(handle) = self.done.lock().unwrap().take() {
+            let _ = handle.join();
         }
 
         let pcm_data = self.shared_buffer.read_all();

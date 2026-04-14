@@ -64,6 +64,25 @@ impl AltgoApp {
 
     /// Save the edited config to disk.
     fn save_config(&mut self) {
+        // Validate input values before saving.
+        let valid_polisher_levels = ["none", "light", "medium", "heavy"];
+        if !valid_polisher_levels.contains(&self.edit_polisher_level.as_str()) {
+            tracing::warn!(
+                level = %self.edit_polisher_level,
+                "invalid polisher level, ignoring save"
+            );
+            return;
+        }
+
+        let valid_engines = ["api", "local"];
+        if !valid_engines.contains(&self.edit_engine.as_str()) {
+            tracing::warn!(
+                engine = %self.edit_engine,
+                "invalid engine, ignoring save"
+            );
+            return;
+        }
+
         let mut cfg = self.config.clone();
         cfg.key_listener.key_name = self.edit_key_name.clone();
         cfg.transcriber.engine = self.edit_engine.clone();

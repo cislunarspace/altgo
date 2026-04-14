@@ -10,8 +10,12 @@ use anyhow::{Context, Result};
 use std::io::BufRead;
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use tokio::sync::mpsc;
+
+/// Cache for xmodmap keycode mappings. Parsing xmodmap output is expensive,
+/// so we cache the entire keycode table on first use.
+static XMODMAP_CACHE: OnceLock<std::collections::HashMap<String, u8>> = OnceLock::new();
 
 /// X11 按键监听器，使用 `xinput test-xi2` 捕获全局按键事件。
 ///
@@ -122,28 +126,46 @@ impl X11Listener {
     }
 
     fn resolve_keycode(&self) -> Result<u8> {
-        let output = Command::new("xmodmap")
-            .arg("-pke")
-            .output()
-            .context("xmodmap not found")?;
+        let keycode_map = XMODMAP_CACHE.get_or_init(|| {
+            let output = match Command::new("xmodmap")
+                .arg("-pke")
+                .output()
+            {
+                Ok(o) => o,
+                Err(e) => {
+                    tracing::warn!(error = %e, "xmodmap not found or failed, keycode resolution may fail");
+                    return std::collections::HashMap::new();
+                }
+            };
 
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let target_keysym = &self.key_name;
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let mut map = std::collections::HashMap::new();
 
-        for line in stdout.lines() {
-            if line.contains(target_keysym) {
+            // xmodmap -pke output format: keycode <N> = keysym ...
+            // e.g., "keycode  64 = Alt_L Meta_L Alt_L Meta_L"
+            for line in stdout.lines() {
                 if let Some(keycode_str) = line.split_whitespace().nth(1) {
                     if let Ok(keycode) = keycode_str.parse::<u8>() {
-                        return Ok(keycode);
+                        // Extract all keysyms from the line (skip "keycode N =")
+                        for keysym in line.split_whitespace().skip(3) {
+                            // Skip "=" if present
+                            let keysym = keysym.trim_end_matches('=');
+                            if !keysym.is_empty() && !map.contains_key(keysym) {
+                                map.insert(keysym.to_string(), keycode);
+                            }
+                        }
                     }
                 }
             }
-        }
+            map
+        });
 
-        anyhow::bail!(
-            "keycode for '{}' not found in xmodmap output",
-            target_keysym
-        )
+        keycode_map.get(&self.key_name).copied().ok_or_else(|| {
+            anyhow::anyhow!(
+                "keycode for '{}' not found in xmodmap output",
+                self.key_name
+            )
+        })
     }
 }
 

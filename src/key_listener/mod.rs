@@ -36,7 +36,9 @@ pub(crate) async fn debounce_task(
     key_tx: tokio::sync::mpsc::UnboundedSender<crate::state_machine::KeyEvent>,
     debounce_window: std::time::Duration,
 ) {
-    let mut is_pressed = false;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    let is_pressed = AtomicBool::new(false);
     let mut pending_release: Option<std::pin::Pin<Box<tokio::time::Sleep>>> = None;
 
     loop {
@@ -46,7 +48,7 @@ pub(crate) async fn debounce_task(
                     Some(evt) if evt.pressed => {
                         // Press cancels any pending release.
                         pending_release = None;
-                        is_pressed = true;
+                        is_pressed.store(true, Ordering::SeqCst);
                         if key_tx
                             .send(crate::state_machine::KeyEvent { pressed: true })
                             .is_err()
@@ -57,10 +59,12 @@ pub(crate) async fn debounce_task(
                     Some(_) => {
                         // Release — if no debounce is running, send immediately.
                         // If debounce is running, it will fire and send the release.
-                        if is_pressed && pending_release.is_none() {
+                        if is_pressed.load(Ordering::SeqCst) && pending_release.is_none() {
                             pending_release =
                                 Some(Box::pin(tokio::time::sleep(debounce_window)));
                         }
+                        // Always update is_pressed on release, even without debounce timer.
+                        is_pressed.store(false, Ordering::SeqCst);
                     }
                     None => break,
                 }
@@ -74,7 +78,7 @@ pub(crate) async fn debounce_task(
                 }
             }, if pending_release.is_some() => {
                 pending_release = None;
-                is_pressed = false;
+                is_pressed.store(false, Ordering::SeqCst);
                 if key_tx
                     .send(crate::state_machine::KeyEvent { pressed: false })
                     .is_err()

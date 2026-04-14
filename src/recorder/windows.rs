@@ -173,7 +173,7 @@ impl WindowsRecorder {
             // Try ffmpeg with dshow, then sox as fallback.
             let audio_device = resolve_audio_device();
             let ffmpeg_path = find_ffmpeg();
-            let result = std::process::Command::new(&ffmpeg_path)
+            let ffmpeg_result = std::process::Command::new(&ffmpeg_path)
                 .args([
                     "-f",
                     "dshow",
@@ -195,9 +195,9 @@ impl WindowsRecorder {
                 .stderr(std::process::Stdio::null())
                 .spawn();
 
-            let mut child = match result {
+            let mut child = match ffmpeg_result {
                 Ok(c) => c,
-                Err(_) => {
+                Err(ffmpeg_err) => {
                     // Fallback to sox.
                     let sox_result = std::process::Command::new("sox")
                         .args([
@@ -222,10 +222,11 @@ impl WindowsRecorder {
 
                     match sox_result {
                         Ok(c) => c,
-                        Err(e) => {
+                        Err(sox_err) => {
                             tracing::error!(
-                                error = %e,
-                                "failed to start ffmpeg or sox — install ffmpeg or sox"
+                                ffmpeg_error = %ffmpeg_err,
+                                sox_error = %sox_err,
+                                "failed to start both ffmpeg and sox — install ffmpeg or sox"
                             );
                             recording.store(false, Ordering::SeqCst);
                             return;
@@ -249,7 +250,10 @@ impl WindowsRecorder {
                 match reader.read(&mut chunk) {
                     Ok(0) => break,
                     Ok(n) => buffer.write(&chunk[..n]),
-                    Err(_) => break,
+                    Err(e) => {
+                        tracing::debug!(error = %e, "read error in ffmpeg/sox, stopping");
+                        break;
+                    }
                 }
             }
 
@@ -265,9 +269,8 @@ impl WindowsRecorder {
     pub fn stop(&self) -> Result<Vec<u8>> {
         self.recording.store(false, Ordering::SeqCst);
 
-        let handle = self.done.lock().unwrap().take();
-        if let Some(h) = handle {
-            let _ = h.join();
+        if let Some(handle) = self.done.lock().unwrap().take() {
+            let _ = handle.join();
         }
 
         let pcm_data = self.shared_buffer.read_all();
