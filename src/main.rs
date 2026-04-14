@@ -269,18 +269,17 @@ async fn debounce_task(
                     Some(evt) if evt.pressed => {
                         // Press cancels any pending release.
                         pending_release = None;
-                        if !is_pressed {
-                            is_pressed = true;
-                            if key_tx
-                                .send(state_machine::KeyEvent { pressed: true })
-                                .is_err()
-                            {
-                                break;
-                            }
+                        is_pressed = true;
+                        if key_tx
+                            .send(state_machine::KeyEvent { pressed: true })
+                            .is_err()
+                        {
+                            break;
                         }
                     }
                     Some(_) => {
-                        // Release — start debounce timer if not already pending.
+                        // Release — if no debounce is running, send immediately.
+                        // If debounce is running, it will fire and send the release.
                         if is_pressed && pending_release.is_none() {
                             pending_release =
                                 Some(Box::pin(tokio::time::sleep(debounce_window)));

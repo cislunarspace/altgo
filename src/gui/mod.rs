@@ -256,11 +256,9 @@ async fn debounce_task(
             Some(evt) = raw_events.recv() => {
                 if evt.pressed {
                     pending_release = None;
-                    if !is_pressed {
-                        is_pressed = true;
-                        if key_tx.send(crate::state_machine::KeyEvent { pressed: true }).is_err() {
-                            break;
-                        }
+                    is_pressed = true;
+                    if key_tx.send(crate::state_machine::KeyEvent { pressed: true }).is_err() {
+                        break;
                     }
                 } else if is_pressed && pending_release.is_none() {
                     pending_release = Some(Box::pin(tokio::time::sleep(debounce_window)));
