@@ -11,13 +11,13 @@
 //! 并将录音数据交给 `process_audio` 进行异步处理（转写 → 润色 → 复制到剪切板）。
 
 mod audio;
-mod config;
-mod key_listener;
-mod output;
-mod polisher;
-mod recorder;
-mod state_machine;
-mod transcriber;
+pub(crate) mod config;
+pub(crate) mod key_listener;
+pub(crate) mod output;
+pub(crate) mod polisher;
+pub(crate) mod recorder;
+pub(crate) mod state_machine;
+pub(crate) mod transcriber;
 
 #[cfg(feature = "gui")]
 mod gui;
