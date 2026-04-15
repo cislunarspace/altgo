@@ -353,11 +353,11 @@ language = "zh"
 timeout_seconds = 30
 
 [polisher]
-protocol = "openai"                 # "openai" 或 "anthropic"
-api_key = ""                        # 润色 API Key，环境变量 ALTGO_POLISHER_API_KEY 也可
-api_base_url = ""                   # API Base URL，level 不为 "none" 时必须设置
-model = ""                          # 模型名，level 不为 "none" 时必须设置
-level = "none"                      # 润色级别："none"、"light"、"medium"、"heavy"
+protocol = "openai"                 # "openai" or "anthropic"
+api_key = ""                        # Polisher API key; also via ALTGO_POLISHER_API_KEY env var
+api_base_url = ""                   # API base URL; required when level is not "none"
+model = ""                          # Model name; required when level is not "none"
+level = "none"                      # Polishing level: "none", "light", "medium", "heavy"
 max_tokens = 1024
 timeout_seconds = 60
 
