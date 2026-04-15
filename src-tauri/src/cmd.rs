@@ -4,7 +4,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use serde::Serialize;
-use tauri::{Emitter, State};
+use tauri::{Emitter, Manager, State};
 
 use crate::AppState;
 
@@ -159,7 +159,7 @@ pub async fn get_status(state: State<'_, AppState>) -> Result<RecordingStatus, S
     }
 }
 
-async fn run_pipeline(
+pub async fn run_pipeline(
     app: tauri::AppHandle,
     cfg: Arc<altgo::config::Config>,
     mut stop_rx: tokio::sync::oneshot::Receiver<()>,
@@ -267,7 +267,15 @@ async fn run_pipeline(
                     Some(altgo::state_machine::Command::StartRecord) => {
                         tracing::info!("recording started");
                         let _ = app.emit("pipeline-status", "recording");
-                        let _ = altgo::output::show_recording_window();
+                        if let Some(overlay) = app.get_webview_window("overlay") {
+                            if let Ok(Some(monitor)) = overlay.primary_monitor() {
+                                let scale = monitor.scale_factor();
+                                let screen_w = monitor.size().width as f64 / scale;
+                                let x = (screen_w - 200.0) / 2.0;
+                                let _ = overlay.set_position(tauri::LogicalPosition::new(x, 4.0));
+                            }
+                            let _ = overlay.show();
+                        }
                         if let Err(e) = recorder.start() {
                             tracing::error!(error = %e, "failed to start recording");
                         }
@@ -275,7 +283,6 @@ async fn run_pipeline(
                     Some(altgo::state_machine::Command::StopRecord) => {
                         tracing::info!("recording stopped, processing...");
                         let _ = app.emit("pipeline-status", "processing");
-                        let _ = altgo::output::close_recording_window();
                         let wav_data = match recorder.stop() {
                             Ok(data) => data,
                             Err(e) => {
@@ -314,11 +321,25 @@ async fn run_pipeline(
                                         let _ = app.emit("transcription-result", &output.text);
                                     }
                                     let _ = app.emit("pipeline-status", "done");
+                                    let app_h = app.clone();
+                                    tokio::spawn(async move {
+                                        tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+                                        if let Some(overlay) = app_h.get_webview_window("overlay") {
+                                            let _ = overlay.hide();
+                                        }
+                                    });
                                 }
                                 Err(e) => {
                                     tracing::error!(error = %e, "audio processing failed");
                                     let _ = app.emit("pipeline-error", format!("processing: {}", e));
                                     let _ = app.emit("pipeline-status", "idle");
+                                    let app_h = app.clone();
+                                    tokio::spawn(async move {
+                                        tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+                                        if let Some(overlay) = app_h.get_webview_window("overlay") {
+                                            let _ = overlay.hide();
+                                        }
+                                    });
                                 }
                             }
                         });

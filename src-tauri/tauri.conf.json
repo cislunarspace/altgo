@@ -4,14 +4,15 @@
   "version": "1.0.0",
   "identifier": "com.altgo.app",
   "build": {
-    "beforeDevCommand": "npm run dev",
+    "beforeDevCommand": "npm run dev --prefix ./frontend",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "npm run build",
+    "beforeBuildCommand": "npm run build --prefix ./frontend",
     "frontendDist": "../frontend/dist"
   },
   "app": {
     "windows": [
       {
+        "label": "main",
         "title": "altgo — 语音转文字",
         "width": 520,
         "height": 480,
@@ -19,6 +20,19 @@
         "center": true,
         "decorations": true,
         "visible": true
+      },
+      {
+        "label": "overlay",
+        "url": "overlay.html",
+        "width": 200,
+        "height": 48,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "visible": false,
+        "resizable": false,
+        "focusable": false
       }
     ],
     "security": {

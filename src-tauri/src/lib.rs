@@ -1,21 +1,15 @@
-//! altgo Tauri 后端。
-//!
-//! 注册 Tauri commands、系统托盘，连接前端和核心管道。
-
 use tauri::{Manager, RunEvent};
 use tokio::sync::Mutex;
 
 mod cmd;
 mod tray;
 
-/// 应用状态 — 在 Tauri 管理器中共享。
 pub struct AppState {
     config: Mutex<altgo::config::Config>,
     config_path: std::path::PathBuf,
     pipeline: Mutex<Option<PipelineHandle>>,
 }
 
-/// 后台管道的句柄，用于停止。
 struct PipelineHandle {
     stop_tx: tokio::sync::oneshot::Sender<()>,
 }
@@ -30,6 +24,8 @@ pub fn run() {
                 .expect("failed to load config");
             cfg.validate().expect("invalid config");
 
+            let cfg_arc = std::sync::Arc::new(cfg.clone());
+
             let state = AppState {
                 config: Mutex::new(cfg),
                 config_path,
@@ -38,6 +34,22 @@ pub fn run() {
             app.manage(state);
 
             tray::create_tray(app)?;
+
+            let app_handle = app.handle().clone();
+            let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
+
+            std::thread::spawn(move || {
+                let rt = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .expect("failed to build tokio runtime");
+                rt.block_on(cmd::run_pipeline(app_handle, cfg_arc, stop_rx));
+            });
+
+            {
+                let state = app.state::<AppState>();
+                *state.pipeline.blocking_lock() = Some(PipelineHandle { stop_tx });
+            }
 
             Ok(())
         })
