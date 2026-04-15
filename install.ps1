@@ -344,13 +344,13 @@ function Generate-Config {
     # Read template (UTF-8 with BOM) and substitute paths.
     # install_config.toml is stored as UTF-8 with BOM so PowerShell 5.1 reads it correctly.
     $templatePath = Join-Path $ProjectDir "install_config.toml"
-    $configContent = [System.IO.File]::ReadAllText($templatePath, [System.Text.UTF8]::new($true)) `
+    $utf8Bom = New-Object System.Text.UTF8Encoding($true)
+    $configContent = [System.IO.File]::ReadAllText($templatePath, $utf8Bom) `
         -replace "\{MODEL_PATH\}", $modelPath `
         -replace "\{WHISPER_PATH\}", $whisperPath
 
     # Write with BOM so PowerShell 5.1 reads UTF-8 correctly (avoids Chinese garbling)
-    $utf8 = [System.Text.UTF8Encoding]::new($true)
-    [System.IO.File]::WriteAllText($configPath, $configContent, $utf8)
+    [System.IO.File]::WriteAllText($configPath, $configContent, $utf8Bom)
     Write-Host "[OK] Config written to $configPath" -ForegroundColor Green
 }
 
