@@ -1,6 +1,6 @@
 //! Windows 输出模块。
 //!
-//! 剪切板通过 `clip.exe` 写入（需要 UTF-16LE 编码）。
+//! 剪切板通过 PowerShell Set-Clipboard 写入（原生支持 Unicode）。
 //! 通知通过 PowerShell/WPF 创建半透明浮动窗口实现，
 //! 位于屏幕右下角，超时后自动消失。如果 WPF 不可用，
 //! 回退到 MessageBox。
@@ -8,22 +8,23 @@
 use super::truncate_text;
 use std::process::Command;
 
-/// 通过 `clip.exe` 将文本写入 Windows 剪切板（UTF-16LE 编码）。
+/// 通过 PowerShell Set-Clipboard 将文本写入 Windows 剪切板（原生支持 Unicode）。
 pub async fn write_clipboard(text: &str) -> anyhow::Result<()> {
     let text = text.to_string();
     tokio::task::spawn_blocking(move || {
-        // Convert to UTF-16LE (Windows native clipboard encoding).
-        let utf16: Vec<u8> = text.encode_utf16().flat_map(|u| u.to_le_bytes()).collect();
-
-        let output = Command::new("clip")
+        // Use PowerShell Set-Clipboard which natively handles Unicode.
+        // clip.exe reads stdin as ANSI and corrupts non-ASCII chars on
+        // non-English Windows (GB2312/CP936), causing mojibake.
+        let output = Command::new("powershell")
+            .args(["-NoProfile", "-NonInteractive", "-Command", "Set-Clipboard"])
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null())
             .spawn()
             .and_then(|mut child| {
                 if let Some(mut stdin) = child.stdin.take() {
                     use std::io::Write;
-                    let _ = stdin.write_all(&utf16);
+                    stdin.write_all(text.as_bytes())?;
                 }
                 child.wait_with_output()
             });
