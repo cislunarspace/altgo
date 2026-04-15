@@ -1,20 +1,17 @@
 //! Windows 输出模块。
 //!
 //! 剪切板通过 PowerShell Set-Clipboard 写入（原生支持 Unicode）。
-//! 通知通过 PowerShell/WPF 创建半透明浮动窗口实现，
-//! 位于屏幕右下角，超时后自动消失。如果 WPF 不可用，
-//! 回退到 MessageBox。
+//! 文本注入通过 SendInput 实现（支持中日韩字符）。
+//! 悬浮窗通过 PowerShell/WPF 创建，位于屏幕中下方（任务栏上方）。
+//! 如果 WPF 不可用，回退到 MessageBox。
 
 use super::truncate_text;
-use std::process::Command;
+use std::process::{Command, Stdio};
 
-/// 通过 PowerShell Set-Clipboard 将文本写入 Windows 剪切板（原生支持 Unicode）。
+/// 通过 PowerShell Set-Clipboard 将文本写入 Windows 剪切板。
 pub async fn write_clipboard(text: &str) -> anyhow::Result<()> {
     let text = text.to_string();
     tokio::task::spawn_blocking(move || {
-        // Use PowerShell Set-Clipboard which natively handles Unicode.
-        // clip.exe reads stdin as ANSI and corrupts non-ASCII chars on
-        // non-English Windows (GB2312/CP936), causing mojibake.
         let output = Command::new("powershell")
             .args(["-NoProfile", "-NonInteractive", "-Command", "Set-Clipboard"])
             .stdin(std::process::Stdio::piped())
@@ -42,34 +39,143 @@ pub async fn write_clipboard(text: &str) -> anyhow::Result<()> {
     .map_err(|e| anyhow::anyhow!("clipboard task panicked: {e}"))?
 }
 
-/// 通过 PowerShell/WPF 显示浮动通知窗口。
-///
-/// 在屏幕右下角创建半透明无边框窗口，超时后自动消失。
-/// 如果 WPF 不可用，回退到 MessageBox。
-pub fn notify(title: &str, body: &str, timeout_ms: u64) -> anyhow::Result<()> {
-    let truncated = truncate_text(body, 200);
-    let timeout_sec = (timeout_ms as f64) / 1000.0;
+/// 检查当前焦点元素是否为接受文本输入的控件。
+fn is_text_input_focused() -> bool {
+    let ps_script = r#"
+        Add-Type -AssemblyName UIAutomationClient
+        Add-Type -AssemblyName UIAutomationTypes
+        $el = [System.Windows.Automation.AutomationElement]::FocusedElement
+        if ($el -eq [System.Windows.Automation.AutomationElement]::None) { Write-Output 'false'; exit }
+        $ct = $el.Current.ControlType
+        if ($ct.ProgrammaticName -match 'Text|Edit') { Write-Output 'true'; exit }
+        $class = $el.Current.ClassName
+        if ($class -match 'Edit|TextBox|RichEdit|WpfText|IME') { Write-Output 'true' } else { Write-Output 'false' }
+    "#;
 
-    // Escape special characters for PowerShell single-quoted strings.
-    // Need to escape: ' (single quote), $ (variable expansion), ` (escape char)
-    let title_escaped = title
-        .replace('\'', "''")
-        .replace('$', "`$")
-        .replace('`', "``");
-    let body_escaped = truncated
-        .replace('\n', " ")
-        .replace('\'', "''")
-        .replace('$', "`$")
-        .replace('`', "``");
+    let output = Command::new("powershell")
+        .args(["-NoProfile", "-NonInteractive", "-Command", ps_script])
+        .stdout(Stdio::piped())
+        .output();
 
-    // Write the PowerShell script to a temp file to avoid format! escaping issues
-    // with XAML (hex colors like #CC2D2D2D clash with Rust token parsing).
-    let tmp = tempfile::NamedTempFile::with_suffix(".ps1")?;
-    let script = format_ps1_script(&title_escaped, &body_escaped, timeout_sec);
-    std::fs::write(tmp.path(), script)?;
+    match output {
+        Ok(out) => String::from_utf8_lossy(&out.stdout).trim() == "true",
+        Err(_) => false,
+    }
+}
 
-    // Spawn in background so it doesn't block the main loop.
-    let child = Command::new("powershell")
+/// 通过 SendInput 发送 Unicode 文本到当前焦点窗口。
+fn send_unicode_text(text: &str) -> anyhow::Result<()> {
+    use windows::Win32::UI::Input::KeyboardAndMouse::{
+        SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT,
+        KEYEVENTF_KEYUP, KEYEVENTF_UNICODE, VIRTUAL_KEY,
+    };
+
+    let inputs: Vec<INPUT> = text
+        .chars()
+        .flat_map(|c| {
+            let down = INPUT {
+                r#type: INPUT_KEYBOARD,
+                Anonymous: INPUT_0 {
+                    ki: KEYBDINPUT {
+                        wVk: VIRTUAL_KEY(0),
+                        wScan: c as u16,
+                        dwFlags: KEYEVENTF_UNICODE,
+                        time: 0,
+                        dwExtraInfo: 0,
+                    },
+                },
+            };
+            let up = INPUT {
+                r#type: INPUT_KEYBOARD,
+                Anonymous: INPUT_0 {
+                    ki: KEYBDINPUT {
+                        wVk: VIRTUAL_KEY(0),
+                        wScan: c as u16,
+                        dwFlags: KEYEVENTF_UNICODE | KEYEVENTF_KEYUP,
+                        time: 0,
+                        dwExtraInfo: 0,
+                    },
+                },
+            };
+            [down, up]
+        })
+        .collect();
+
+    unsafe {
+        let result = SendInput(&inputs, std::mem::size_of::<INPUT>() as i32);
+        if result == 0 {
+            return Err(anyhow::anyhow!("SendInput returned 0"));
+        }
+    }
+    Ok(())
+}
+
+/// 尝试将文本注入到当前光标位置。返回原因描述。
+pub fn try_inject_at_cursor(text: &str) -> &'static str {
+    if !is_text_input_focused() {
+        return "not_text_field";
+    }
+
+    if let Err(e) = send_unicode_text(text) {
+        tracing::warn!(error = %e, "SendInput failed");
+        return "send_failed";
+    }
+
+    "injected"
+}
+
+// ─── Floating windows ──────────────────────────────────────────────────────────
+
+/// 从系统获取屏幕工作区尺寸，返回 (screen_width, screen_height)。
+fn get_screen_workarea() -> (i32, i32) {
+    let ps_script = r#"
+        $s = [System.Windows.SystemParameters]::WorkArea
+        Write-Output "$($s.Width),$($s.Height)"
+    "#;
+    let output = match Command::new("powershell")
+        .args(["-NoProfile", "-NonInteractive", "-Command", ps_script])
+        .stdout(Stdio::piped())
+        .output()
+    {
+        Ok(o) => o,
+        Err(_) => return (1920, 1080),
+    };
+    let s = String::from_utf8_lossy(&output.stdout);
+    let parts: Vec<&str> = s.trim().split(',').collect();
+    if parts.len() < 2 {
+        return (1920, 1080);
+    }
+    let w: i32 = parts[0].parse().unwrap_or(1920);
+    let h: i32 = parts[1].parse().unwrap_or(1080);
+    (w, h)
+}
+
+/// 计算居中靠下的窗口 Left 坐标。
+fn center_left(window_width: i32) -> i32 {
+    let (sw, _) = get_screen_workarea();
+    (sw - window_width) / 2
+}
+
+/// 计算靠下的 Top 坐标（距任务栏上方 offset 像素）。
+fn bottom_top(window_height: i32, offset: i32) -> i32 {
+    let (_, sh) = get_screen_workarea();
+    sh - window_height - offset
+}
+
+fn spawn_ps_script(script: &str) {
+    let tmp = match tempfile::NamedTempFile::with_suffix(".ps1") {
+        Ok(t) => t,
+        Err(e) => {
+            tracing::warn!(error = %e, "failed to create temp ps1 file");
+            return;
+        }
+    };
+    if let Err(e) = std::fs::write(tmp.path(), script) {
+        tracing::warn!(error = %e, "failed to write ps1 script");
+        return;
+    }
+
+    let mut child = match Command::new("powershell")
         .args([
             "-NoProfile",
             "-NonInteractive",
@@ -78,94 +184,132 @@ pub fn notify(title: &str, body: &str, timeout_ms: u64) -> anyhow::Result<()> {
             "-File",
             &tmp.path().to_string_lossy(),
         ])
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn();
-
-    match child {
-        Ok(mut child) => {
-            // Keep the temp file alive until PowerShell exits by moving the
-            // tempfile's path into the thread. PowerShell reads the file at
-            // startup, so even if the file is deleted afterward it's fine.
-            // We use into_temp_path().keep() to be safe against slow startup.
-            let tmp_path = tmp.into_temp_path();
-            if let Err(e) = tmp_path.keep() {
-                tracing::debug!(error = %e, "failed to keep temp file");
-            }
-            std::thread::spawn(move || {
-                let _ = child.wait();
-            });
-        }
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+    {
+        Ok(c) => c,
         Err(e) => {
-            tracing::warn!(error = %e, "failed to spawn PowerShell notification");
-            // tmp is dropped here on the main thread, cleaning up immediately.
+            tracing::warn!(error = %e, "failed to spawn PowerShell");
+            return;
         }
-    }
+    };
+
+    let tmp_path = tmp.into_temp_path();
+    let _ = tmp_path.keep();
+    std::thread::spawn(move || {
+        let _ = child.wait();
+    });
+}
+
+/// 显示录音悬浮窗口（居中靠下）。
+pub fn show_recording_window() -> anyhow::Result<()> {
+    let left = center_left(320);
+    let top = bottom_top(120, 80);
+
+    let script = include_str!("windows_recording.ps1")
+        .replace("{left}", &left.to_string())
+        .replace("{top}", &top.to_string());
+
+    tokio::task::spawn_blocking(move || {
+        spawn_ps_script(&script);
+    });
     Ok(())
 }
 
-fn format_ps1_script(title: &str, body: &str, timeout_sec: f64) -> String {
-    // Build the script by concatenation to avoid format!/r#"..."# parsing
-    // issues with XAML hex colors like #CC2D2D2D.
-    let mut s = String::new();
-    s.push_str("try {\n");
-    s.push_str("    Add-Type -AssemblyName PresentationFramework\n");
-    s.push_str("    Add-Type -AssemblyName PresentationCore\n");
-    s.push_str("    Add-Type -AssemblyName WindowsBase\n\n");
-    s.push_str("    $xaml = @\"\n");
-    s.push_str("<Window xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\"\n");
-    s.push_str("        xmlns:x=\"http://schemas.microsoft.com/winfx/2006/xaml\"\n");
-    s.push_str("        WindowStyle=\"None\" AllowsTransparency=\"True\"\n");
-    s.push_str("        Background=\"#CC2D2D2D\" Opacity=\"0.92\"\n");
-    s.push_str("        ShowInTaskbar=\"False\" Topmost=\"True\"\n");
-    s.push_str("        SizeToContent=\"Height\" Width=\"320\"\n");
-    s.push_str("        WindowStartupLocation=\"Manual\">\n");
-    s.push_str("    <Border CornerRadius=\"12\" Padding=\"16,12\" Background=\"#CC2D2D2D\"\n");
-    s.push_str("            BorderBrush=\"#44FFFFFF\" BorderThickness=\"1\">\n");
-    s.push_str("        <StackPanel>\n");
-    s.push_str("            <TextBlock Foreground=\"#CCFFFFFF\"\n");
-    s.push_str(
-        "                       FontSize=\"13\" FontWeight=\"SemiBold\" Margin=\"0,0,0,4\"/>\n",
-    );
-    s.push_str("            <TextBlock Foreground=\"#AAFFFFFF\"\n");
-    s.push_str("                       FontSize=\"12\" TextWrapping=\"Wrap\"/>\n");
-    s.push_str("        </StackPanel>\n");
-    s.push_str("    </Border>\n");
-    s.push_str("</Window>\n");
-    s.push_str("\"@\n\n");
-    s.push_str(
-        "    $reader = [System.Xml.XmlReader]::Create([System.IO.StringReader]::new($xaml))\n",
-    );
-    s.push_str("    $window = [System.Windows.Markup.XamlReader]::Load($reader)\n\n");
-    s.push_str("    # Set text after loading XAML to avoid parsing issues.\n");
-    s.push_str("    $window.Content.Child.Children[0].Text = '");
-    s.push_str(title);
-    s.push_str("'\n");
-    s.push_str("    $window.Content.Child.Children[1].Text = '");
-    s.push_str(body);
-    s.push_str("'\n\n");
-    s.push_str("    # Position near bottom-right of work area.\n");
-    s.push_str("    $screen = [System.Windows.SystemParameters]::WorkArea\n");
-    s.push_str("    $window.Left = $screen.Right - $window.Width - 24\n");
-    s.push_str("    $window.Top = $screen.Bottom - $window.Height - 24\n\n");
-    s.push_str("    # Auto-dismiss timer.\n");
-    s.push_str("    $timer = New-Object System.Windows.Threading.DispatcherTimer\n");
-    s.push_str("    $timer.Interval = [TimeSpan]::FromSeconds(");
-    s.push_str(&timeout_sec.to_string());
-    s.push_str(")\n");
-    s.push_str("    $timer.Add_Tick({ $window.Close(); $timer.Stop() })\n");
-    s.push_str("    $timer.Start()\n\n");
-    s.push_str("    $window.ShowDialog() | Out-Null\n");
-    s.push_str("} catch {\n");
-    s.push_str("    Add-Type -AssemblyName System.Windows.Forms\n");
-    s.push_str("    [System.Windows.Forms.MessageBox]::Show('");
-    s.push_str(body);
-    s.push_str("', '");
-    s.push_str(title);
-    s.push_str("', 'OK', 'Information') | Out-Null\n");
-    s.push_str("}\n");
-    s
+/// 关闭录音悬浮窗口（静默，窗口由下一次录音/结果覆盖）。
+pub fn close_recording_window() -> anyhow::Result<()> {
+    Ok(())
+}
+
+/// 显示结果悬浮窗口（注入失败时调用）。
+pub fn show_result_window(
+    raw_text: &str,
+    polished_text: &str,
+    polish_failed: bool,
+    timeout_ms: u64,
+) -> anyhow::Result<()> {
+    let left = center_left(420);
+    let top = bottom_top(300, 100);
+    let title = if polish_failed { "识别结果" } else { "润色结果" };
+
+    // Escape single quotes for PowerShell string
+    let escape_ps = |s: &str| s.replace('\'', "''").replace('\n', " ").replace('\r', "");
+
+    let script = include_str!("windows_result.ps1")
+        .replace("{left}", &left.to_string())
+        .replace("{top}", &top.to_string())
+        .replace("{title}", title)
+        .replace("{raw_text}", &escape_ps(raw_text))
+        .replace("{polished_text}", &escape_ps(polished_text))
+        .replace("{timeout_ms}", &timeout_ms.to_string());
+
+    tokio::task::spawn_blocking(move || {
+        spawn_ps_script(&script);
+    });
+    Ok(())
+}
+
+// ─── Unified output API ─────────────────────────────────────────────────────
+
+/// 统一的输出函数：尝试注入光标，失败则显示悬浮窗口。
+pub async fn output_text(
+    raw_text: &str,
+    polished_text: &str,
+    polish_failed: bool,
+    inject_at_cursor: bool,
+    prefer_polished: bool,
+    timeout_ms: u64,
+) -> anyhow::Result<&'static str> {
+    let text_to_use = if prefer_polished && !polish_failed {
+        polished_text
+    } else {
+        raw_text
+    };
+
+    let reason = if inject_at_cursor {
+        try_inject_at_cursor(text_to_use)
+    } else {
+        "disabled"
+    };
+
+    match reason {
+        "injected" => {
+            tracing::info!("text injected at cursor");
+            Ok("injected")
+        }
+        _ => {
+            tracing::info!(reason = reason, "cursor injection skipped, showing result window");
+            show_result_window(raw_text, polished_text, polish_failed, timeout_ms)?;
+            Ok(reason)
+        }
+    }
+}
+
+/// 通过 PowerShell/WPF 显示浮动通知窗口。
+pub fn notify(title: &str, body: &str, timeout_ms: u64) -> anyhow::Result<()> {
+    let truncated = truncate_text(body, 200);
+    let timeout_sec = (timeout_ms as f64) / 1000.0;
+
+    let title_escaped = title
+        .replace('\'', "''")
+        .replace('$', "`$")
+        .replace('`', "``");
+    let body_escaped = truncated
+        .replace('\'', "''")
+        .replace('$', "`$")
+        .replace('`', "``");
+
+    let script = include_str!("windows_notify.ps1")
+        .replace("{title}", &title_escaped)
+        .replace("{body}", &body_escaped)
+        .replace("{timeout_sec}", &timeout_sec.to_string());
+
+    tokio::task::spawn_blocking(move || {
+        spawn_ps_script(&script);
+    });
+    Ok(())
 }
 
 /// 显示处理中通知。

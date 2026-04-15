@@ -19,3 +19,6 @@ timeout_seconds = 60
 
 [output]
 enable_notify = true
+notify_timeout_ms = 5000
+inject_at_cursor = true             # Attempt to inject text at cursor position (Windows only)
+prefer_polished = true             # Prefer polished text for injection/copy

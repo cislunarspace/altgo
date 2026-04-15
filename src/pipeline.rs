@@ -11,6 +11,8 @@ use crate::transcriber::Transcriber;
 pub struct PipelineOutput {
     /// 处理后的文本（润色成功时为润色文本，否则为原始转写文本）
     pub text: String,
+    /// 原始转写文本（润色前）
+    pub raw_text: String,
     /// 润色是否失败
     pub polish_failed: bool,
 }
@@ -33,25 +35,28 @@ pub(crate) async fn process_audio_core(
         tracing::warn!("empty transcription, skipping");
         return Ok(PipelineOutput {
             text: String::new(),
+            raw_text: String::new(),
             polish_failed: false,
         });
     }
 
-    // Step 2: Polish.
+    // Step 2: Polish — preserve raw text for the floating window.
     let mut polish_failed = false;
+    let raw_text = result.text.clone();
     let polished = formatter
-        .polish(&result.text, polish_level)
+        .polish(&raw_text, polish_level)
         .await
         .unwrap_or_else(|e| {
             tracing::warn!(error = %e, "polish failed, using raw text");
             polish_failed = true;
-            result.text.clone()
+            raw_text.clone()
         });
 
     tracing::info!(text = %polished, "polished");
 
     Ok(PipelineOutput {
         text: polished,
+        raw_text,
         polish_failed,
     })
 }

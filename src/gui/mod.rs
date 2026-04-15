@@ -151,10 +151,7 @@ async fn run_pipeline(
             crate::state_machine::Command::StartRecord => {
                 tracing::info!("recording started");
                 state.set_recording(crate::gui::state::RecordingState::Recording);
-                if cfg.output.enable_notify {
-                    let lang = i18n::Lang::from_code(&cfg.gui.language);
-                    let _ = crate::output::notify_processing(i18n::t("notify.processing", lang));
-                }
+                let _ = crate::output::show_recording_window();
                 if let Err(e) = recorder.start() {
                     tracing::error!(error = %e, "failed to start recording");
                 }
@@ -162,6 +159,7 @@ async fn run_pipeline(
             crate::state_machine::Command::StopRecord => {
                 tracing::info!("recording stopped, processing...");
                 state.set_recording(crate::gui::state::RecordingState::Processing);
+                let _ = crate::output::close_recording_window();
                 let wav_data = match recorder.stop() {
                     Ok(data) => data,
                     Err(e) => {
@@ -199,7 +197,7 @@ async fn run_pipeline(
     Ok(())
 }
 
-/// Voice processing pipeline: transcription → polishing → clipboard output.
+/// Voice processing pipeline: transcription → polishing → output (inject or floating window).
 async fn process_audio(
     cfg: &Arc<crate::config::Config>,
     transcriber: &crate::transcriber::Transcriber,
@@ -230,16 +228,19 @@ async fn process_audio(
         );
     }
 
-    if let Err(e) = crate::output::write_clipboard(&output.text).await {
-        tracing::error!(error = %e, "clipboard write failed");
-    }
-
-    if cfg.output.enable_notify {
-        let _ = crate::output::notify_result(&output.text, cfg.output.notify_timeout_ms);
-    }
+    let reason = crate::output::output_text(
+        &output.raw_text,
+        &output.text,
+        output.polish_failed,
+        cfg.output.inject_at_cursor,
+        cfg.output.prefer_polished,
+        cfg.output.notify_timeout_ms,
+    )
+    .await
+    .map_err(|e| anyhow::anyhow!("output failed: {}", e))?;
 
     state.set_transcription(output.text);
-    tracing::info!("done — text copied to clipboard");
+    tracing::info!(reason = reason, "done — text output");
     Ok(())
 }
 

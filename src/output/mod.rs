@@ -5,7 +5,7 @@
 //!
 //! - Linux：`xclip`/`xsel`/`wl-copy`（剪切板）+ `notify-send`（通知）
 //! - macOS：`pbcopy`（剪切板）+ `osascript`（通知）
-//! - Windows：`clip.exe`（UTF-16LE）+ PowerShell/WPF 浮动通知
+//! - Windows：`Set-Clipboard`（原生 Unicode）+ SendInput 注入光标 + PowerShell/WPF 悬浮窗
 //!
 //! 还提供 `truncate_text` 工具函数，用于安全地截断 UTF-8 文本。
 
@@ -24,7 +24,10 @@ pub use linux::{notify, notify_processing, notify_result, write_clipboard};
 pub use macos::{notify, notify_processing, notify_result, write_clipboard};
 
 #[cfg(target_os = "windows")]
-pub use windows::{notify, notify_processing, notify_result, write_clipboard};
+pub use windows::{
+    notify, notify_processing, notify_result, write_clipboard,
+    output_text, show_recording_window, close_recording_window,
+};
 
 /// 截断文本到指定字节数，尊重 UTF-8 字符边界。
 ///

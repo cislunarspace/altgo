@@ -38,6 +38,12 @@ egui = { version = "0.29", optional = true }
 eframe = { version = "0.29", optional = true, default-features = false, features = ["default_fonts", "glow"] }
 once_cell = { version = "1.19", optional = true }
 
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.58", features = [
+    "Win32_Foundation",
+    "Win32_UI_Input_KeyboardAndMouse",
+] }
+
 [dev-dependencies]
 mockito = "1"
 serde_json = "1"

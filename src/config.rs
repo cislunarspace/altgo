@@ -189,13 +189,19 @@ pub struct OutputConfig {
     pub enable_notify: bool,
     /// 通知显示时长（毫秒）
     pub notify_timeout_ms: u64,
+    /// 是否尝试将文本注入到当前光标位置（仅 Windows）
+    pub inject_at_cursor: bool,
+    /// 注入/复制时是否优先使用润色后的文本
+    pub prefer_polished: bool,
 }
 
 impl Default for OutputConfig {
     fn default() -> Self {
         Self {
             enable_notify: true,
-            notify_timeout_ms: 3000,
+            notify_timeout_ms: 5000,
+            inject_at_cursor: true,
+            prefer_polished: true,
         }
     }
 }

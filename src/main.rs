@@ -195,15 +195,14 @@ async fn main() -> anyhow::Result<()> {
             match cmd {
                 state_machine::Command::StartRecord => {
                     tracing::info!("recording started");
-                    if cfg.output.enable_notify {
-                        let _ = output::notify_processing("正在处理语音...");
-                    }
+                    let _ = output::show_recording_window();
                     if let Err(e) = recorder.start() {
                         tracing::error!(error = %e, "failed to start recording");
                     }
                 }
                 state_machine::Command::StopRecord => {
                     tracing::info!("recording stopped, processing...");
+                    let _ = output::close_recording_window();
                     let wav_data = match recorder.stop() {
                         Ok(data) => data,
                         Err(e) => {
@@ -281,7 +280,7 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// 语音处理管道：语音识别 → 文本润色 → 输出到剪切板。
+/// 语音处理管道：语音识别 → 文本润色 → 输出（注入光标或悬浮窗）。
 async fn process_audio(
     cfg: &Arc<config::Config>,
     transcriber: &transcriber::Transcriber,
@@ -308,14 +307,17 @@ async fn process_audio(
         );
     }
 
-    if let Err(e) = output::write_clipboard(&output.text).await {
-        tracing::error!(error = %e, "clipboard write failed");
-    }
+    let reason = output::output_text(
+        &output.raw_text,
+        &output.text,
+        output.polish_failed,
+        cfg.output.inject_at_cursor,
+        cfg.output.prefer_polished,
+        cfg.output.notify_timeout_ms,
+    )
+    .await
+    .map_err(|e| anyhow::anyhow!("output failed: {}", e))?;
 
-    if cfg.output.enable_notify {
-        let _ = output::notify_result(&output.text, cfg.output.notify_timeout_ms);
-    }
-
-    tracing::info!("done — text copied to clipboard");
+    tracing::info!(reason = reason, "done — text output");
     Ok(())
 }
