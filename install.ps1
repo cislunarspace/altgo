@@ -365,7 +365,9 @@ timeout_seconds = 60
 enable_notify = true
 "@
 
-    Set-Content -Path $configPath -Value $configContent -Encoding UTF8
+    # Write with BOM so PowerShell 5.1 reads UTF-8 correctly (avoids Chinese garbling)
+    $utf8 = [System.Text.UTF8Encoding]::new($true)
+    [System.IO.File]::WriteAllText($configPath, $configContent, $utf8)
     Write-Host "[OK] Config written to $configPath" -ForegroundColor Green
 }
 
