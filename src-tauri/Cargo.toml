@@ -1,0 +1,22 @@
+[package]
+name = "altgo-tauri"
+version = "1.0.0"
+edition = "2021"
+description = "altgo Tauri desktop application"
+
+[lib]
+name = "altgo_tauri"
+crate-type = ["staticlib", "cdylib", "lib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+altgo = { path = ".." }
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-opener = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["macros", "sync", "time", "rt-multi-thread", "process"] }
+tracing = "0.1"
+anyhow = "1"
