@@ -1,6 +1,11 @@
 # Build artifacts
 /target/
+/src-tauri/target/
 altgo
+
+# Frontend
+/frontend/node_modules/
+/frontend/dist/
 
 # whisper.cpp submodule (cloned separately)
 whisper.cpp/
