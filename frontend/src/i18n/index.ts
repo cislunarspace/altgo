@@ -1,3 +1,5 @@
+import { useState } from "react";
+
 const translations: Record<string, Record<string, string>> = {
   zh: {
     "title.subtitle": "语音转文字",
@@ -36,6 +38,7 @@ const translations: Record<string, Record<string, string>> = {
     "settings.restart_hint": "提示：部分设置需要重启后生效",
     "overlay.recording": "录音中...",
     "overlay.processing": "处理中...",
+    "overlay.copy": "复制",
   },
   en: {
     "title.subtitle": "Voice to Text",
@@ -74,6 +77,7 @@ const translations: Record<string, Record<string, string>> = {
     "settings.restart_hint": "Note: Some settings require restart to take effect",
     "overlay.recording": "Recording...",
     "overlay.processing": "Processing...",
+    "overlay.copy": "Copy",
   },
 };
 
@@ -93,5 +97,3 @@ export function useTranslation() {
 
   return { t, lang, setLang };
 }
-
-import { useState } from "react";

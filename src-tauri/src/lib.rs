@@ -21,14 +21,12 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             let config_path = altgo::config::Config::default_config_path();
-            let cfg = altgo::config::Config::load(&config_path)
-                .expect("failed to load config");
+            let cfg = altgo::config::Config::load(&config_path).expect("failed to load config");
             cfg.validate().expect("invalid config");
 
             let cfg_arc = std::sync::Arc::new(cfg.clone());
 
-            let pipeline_status =
-                std::sync::Arc::new(std::sync::RwLock::new(String::from("idle")));
+            let pipeline_status = std::sync::Arc::new(std::sync::RwLock::new(String::from("idle")));
             let state = AppState {
                 config: Mutex::new(cfg),
                 config_path,
@@ -39,6 +37,14 @@ pub fn run() {
 
             tray::create_tray(app)?;
 
+            #[cfg(target_os = "windows")]
+            {
+                std::thread::spawn(|| {
+                    altgo::recorder::warmup_device();
+                    tracing::info!("audio device warmup complete");
+                });
+            }
+
             let app_handle = app.handle().clone();
             let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
 
@@ -47,7 +53,12 @@ pub fn run() {
                     .enable_all()
                     .build()
                     .expect("failed to build tokio runtime");
-                rt.block_on(cmd::run_pipeline(app_handle, cfg_arc, stop_rx, pipeline_status));
+                rt.block_on(cmd::run_pipeline(
+                    app_handle,
+                    cfg_arc,
+                    stop_rx,
+                    pipeline_status,
+                ));
             });
 
             {
@@ -63,6 +74,8 @@ pub fn run() {
             cmd::start_pipeline,
             cmd::stop_pipeline,
             cmd::get_status,
+            cmd::copy_text,
+            cmd::hide_overlay,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

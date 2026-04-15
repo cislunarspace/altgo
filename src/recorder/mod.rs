@@ -22,3 +22,6 @@ pub type PlatformRecorder = macos::SoxRecorder;
 
 #[cfg(target_os = "windows")]
 pub type PlatformRecorder = windows::WindowsRecorder;
+
+#[cfg(target_os = "windows")]
+pub use windows::warmup_device;

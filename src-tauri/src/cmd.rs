@@ -1,6 +1,7 @@
 //! Tauri commands — 前端通过 IPC 调用的函数。
 
 use std::str::FromStr;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use serde::Serialize;
@@ -10,9 +11,35 @@ use crate::AppState;
 
 const OVERLAY_RECORDING_W: f64 = 200.0;
 const OVERLAY_RECORDING_H: f64 = 48.0;
-const OVERLAY_RESULT_W: f64 = 500.0;
-const OVERLAY_RESULT_H: f64 = 80.0;
+const OVERLAY_RESULT_W: f64 = 520.0;
+const OVERLAY_RESULT_H: f64 = 100.0;
 const OVERLAY_BOTTOM_OFFSET: f64 = 80.0;
+
+#[cfg(target_os = "windows")]
+#[link(name = "user32")]
+extern "system" {
+    fn GetAsyncKeyState(vKey: i32) -> i16;
+}
+
+#[cfg(target_os = "windows")]
+fn is_key_pressed(vk: i32) -> bool {
+    // SAFETY: GetAsyncKeyState is a thread-safe Win32 API. The vKey parameter
+    // is a valid virtual-key code produced by resolve_vk_code. No pointers or
+    // mutable state are involved.
+    unsafe { (GetAsyncKeyState(vk) as u16 & 0x8000) != 0 }
+}
+
+fn resolve_vk_code(key_name: &str) -> Result<i32, String> {
+    match key_name {
+        "ISO_Level3_Shift" | "Alt_R" | "RightAlt" => Ok(0xA5),
+        "Alt_L" | "LeftAlt" => Ok(0xA4),
+        "Super_L" | "Win_L" => Ok(0x5B),
+        "Super_R" | "Win_R" => Ok(0x5C),
+        "Control_R" => Ok(0xA3),
+        "Shift_R" => Ok(0xA1),
+        _ => Err(format!("unsupported key: {}", key_name)),
+    }
+}
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -93,10 +120,7 @@ pub struct SaveConfigRequest {
 }
 
 #[tauri::command]
-pub async fn save_config(
-    state: State<'_, AppState>,
-    req: SaveConfigRequest,
-) -> Result<(), String> {
+pub async fn save_config(state: State<'_, AppState>, req: SaveConfigRequest) -> Result<(), String> {
     let mut cfg = state.config.lock().await;
 
     if let Some(v) = req.key_name {
@@ -191,35 +215,106 @@ pub async fn get_status(state: State<'_, AppState>) -> Result<RecordingStatus, S
     }
 }
 
+#[tauri::command]
+pub async fn copy_text(text: String) -> Result<(), String> {
+    altgo::output::write_clipboard(&text)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn hide_overlay(app: tauri::AppHandle) -> Result<(), String> {
+    if let Some(overlay) = app.get_webview_window("overlay") {
+        let _ = overlay.hide();
+    }
+    Ok(())
+}
+
 pub async fn run_pipeline(
     app: tauri::AppHandle,
     cfg: Arc<altgo::config::Config>,
     mut stop_rx: tokio::sync::oneshot::Receiver<()>,
     pipeline_status: Arc<std::sync::RwLock<String>>,
 ) {
-    let mut listener = match altgo::key_listener::PlatformListener::new(&cfg.key_listener.key_name)
-    {
-        Ok(l) => l,
+    let vk_code = match resolve_vk_code(&cfg.key_listener.key_name) {
+        Ok(vk) => vk,
         Err(e) => {
-            tracing::error!(error = %e, "failed to create key listener");
-            let _ = app.emit("pipeline-error", format!("key listener: {}", e));
+            tracing::error!(error = %e, "failed to resolve key code");
+            let _ = app.emit("pipeline-error", format!("key resolve: {}", e));
             return;
         }
     };
+    tracing::info!(
+        "resolved key '{}' to VK code {}",
+        cfg.key_listener.key_name,
+        vk_code
+    );
+
+    let poll_interval_ms = cfg.key_listener.poll_interval_ms;
+
+    let (raw_key_tx, raw_key_rx) = tokio::sync::mpsc::unbounded_channel();
+    let poll_running = Arc::new(AtomicBool::new(true));
+
     #[cfg(target_os = "windows")]
-    listener.set_poll_interval_ms(cfg.key_listener.poll_interval_ms);
+    {
+        let poll_running = poll_running.clone();
+        std::thread::spawn(move || {
+            let mut was_down = false;
+            while poll_running.load(Ordering::SeqCst) {
+                let is_down = is_key_pressed(vk_code);
+                if is_down && !was_down {
+                    let _ = raw_key_tx.send(altgo::key_listener::KeyEvent { pressed: true });
+                } else if !is_down && was_down {
+                    let _ = raw_key_tx.send(altgo::key_listener::KeyEvent { pressed: false });
+                }
+                was_down = is_down;
+                std::thread::sleep(std::time::Duration::from_millis(poll_interval_ms));
+            }
+        });
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let mut listener =
+            match altgo::key_listener::PlatformListener::new(&cfg.key_listener.key_name) {
+                Ok(l) => l,
+                Err(e) => {
+                    tracing::error!(error = %e, "failed to create key listener");
+                    let _ = app.emit("pipeline-error", format!("key listener: {}", e));
+                    return;
+                }
+            };
+        let key_events = match listener.start() {
+            Ok(rx) => rx,
+            Err(e) => {
+                tracing::error!(error = %e, "failed to start key listener");
+                let _ = app.emit("pipeline-error", format!("key listener start: {}", e));
+                return;
+            }
+        };
+        // Forward PlatformListener events into the shared raw_key channel.
+        let poll_running = poll_running.clone();
+        std::thread::spawn(move || {
+            while poll_running.load(Ordering::SeqCst) {
+                match key_events.try_recv() {
+                    Ok(ev) => { let _ = raw_key_tx.send(ev); }
+                    Err(_) => std::thread::sleep(std::time::Duration::from_millis(poll_interval_ms)),
+                }
+            }
+            // Keep listener alive until the poll loop ends.
+            drop(listener);
+        });
+    }
 
     let mut recorder =
         altgo::recorder::PlatformRecorder::new(cfg.recorder.sample_rate, cfg.recorder.channels);
 
     let transcriber: altgo::transcriber::Transcriber = match cfg.transcriber.engine.as_str() {
-        "local" => altgo::transcriber::Transcriber::Local(
-            altgo::transcriber::LocalWhisper::new(
-                cfg.transcriber.model.clone(),
-                cfg.transcriber.language.clone(),
-                cfg.transcriber.whisper_path.clone(),
-            ),
-        ),
+        "local" => altgo::transcriber::Transcriber::Local(altgo::transcriber::LocalWhisper::new(
+            cfg.transcriber.model.clone(),
+            cfg.transcriber.language.clone(),
+            cfg.transcriber.whisper_path.clone(),
+        )),
         _ => match altgo::transcriber::WhisperApi::new(
             cfg.transcriber.api_key.clone(),
             cfg.transcriber.api_base_url.clone(),
@@ -243,8 +338,8 @@ pub async fn run_pipeline(
             tracing::warn!("invalid polish level, using medium");
             altgo::polisher::PolishLevel::Medium
         });
-    let polisher_protocol =
-        altgo::polisher::ApiProtocol::from_str(&cfg.polisher.protocol).unwrap_or_else(|e| {
+    let polisher_protocol = altgo::polisher::ApiProtocol::from_str(&cfg.polisher.protocol)
+        .unwrap_or_else(|e| {
             tracing::warn!(error = %e, "invalid polisher protocol, defaulting to openai");
             altgo::polisher::ApiProtocol::OpenAi
         });
@@ -267,19 +362,10 @@ pub async fn run_pipeline(
         }
     };
 
-    let key_events = match listener.start() {
-        Ok(rx) => rx,
-        Err(e) => {
-            tracing::error!(error = %e, "failed to start key listener");
-            let _ = app.emit("pipeline-error", format!("key listener start: {}", e));
-            return;
-        }
-    };
-
     let (key_tx, key_rx) = tokio::sync::mpsc::unbounded_channel();
     let debounce_window = cfg.key_listener.debounce_window();
     tokio::spawn(altgo::key_listener::debounce_task(
-        key_events,
+        raw_key_rx,
         key_tx,
         debounce_window,
     ));
@@ -299,23 +385,34 @@ pub async fn run_pipeline(
                 match cmd {
                     Some(altgo::state_machine::Command::StartRecord) => {
                         tracing::info!("recording started");
+                        if let Err(e) = recorder.start() {
+                            tracing::error!(error = %e, "failed to start recording");
+                            continue;
+                        }
                         emit_pipeline_status(&app, &pipeline_status, "recording");
                         if let Some(overlay) = app.get_webview_window("overlay") {
                             position_overlay(&overlay, OVERLAY_RECORDING_W, OVERLAY_RECORDING_H);
                             let _ = overlay.show();
                         }
-                        if let Err(e) = recorder.start() {
-                            tracing::error!(error = %e, "failed to start recording");
-                        }
                     }
                     Some(altgo::state_machine::Command::StopRecord) => {
                         tracing::info!("recording stopped, processing...");
+                        if let Some(overlay) = app.get_webview_window("overlay") {
+                            let _ = overlay.hide();
+                        }
                         emit_pipeline_status(&app, &pipeline_status, "processing");
+                        if let Some(overlay) = app.get_webview_window("overlay") {
+                            position_overlay(&overlay, OVERLAY_RECORDING_W, OVERLAY_RECORDING_H);
+                            let _ = overlay.show();
+                        }
                         let wav_data = match recorder.stop() {
                             Ok(data) => data,
                             Err(e) => {
                                 tracing::error!(error = %e, "failed to stop recording");
                                 emit_pipeline_status(&app, &pipeline_status, "idle");
+                                if let Some(overlay) = app.get_webview_window("overlay") {
+                                    let _ = overlay.hide();
+                                }
                                 continue;
                             }
                         };
@@ -344,9 +441,12 @@ pub async fn run_pipeline(
                                         } else {
                                             &output.raw_text
                                         };
+                                        let display_text = text_to_use.clone();
+
                                         let _ =
                                             altgo::output::write_clipboard(text_to_use).await;
 
+                                        emit_pipeline_status(&app, &pipeline_status, "done");
                                         if let Some(overlay) =
                                             app.get_webview_window("overlay")
                                         {
@@ -358,33 +458,18 @@ pub async fn run_pipeline(
                                             let _ = overlay.show();
                                         }
                                         let _ =
-                                            app.emit("transcription-result", &output.text);
+                                            app.emit("transcription-result", &display_text);
+                                    } else {
+                                        emit_pipeline_status(&app, &pipeline_status, "idle");
                                     }
-                                    emit_pipeline_status(&app, &pipeline_status, "done");
-                                    let app_h = app.clone();
-                                    tokio::spawn(async move {
-                                        tokio::time::sleep(
-                                            tokio::time::Duration::from_secs(5),
-                                        )
-                                        .await;
-                                        if let Some(overlay) =
-                                            app_h.get_webview_window("overlay")
-                                        {
-                                            let _ = overlay.hide();
-                                        }
-                                    });
                                 }
                                 Err(e) => {
                                     tracing::error!(error = %e, "audio processing failed");
                                     let _ = app.emit("pipeline-error", format!("processing: {}", e));
                                     emit_pipeline_status(&app, &pipeline_status, "idle");
-                                    let app_h = app.clone();
-                                    tokio::spawn(async move {
-                                        tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
-                                        if let Some(overlay) = app_h.get_webview_window("overlay") {
-                                            let _ = overlay.hide();
-                                        }
-                                    });
+                                    if let Some(overlay) = app.get_webview_window("overlay") {
+                                        let _ = overlay.hide();
+                                    }
                                 }
                             }
                         });
@@ -394,12 +479,12 @@ pub async fn run_pipeline(
             }
             _ = &mut stop_rx => {
                 tracing::info!("pipeline stop requested");
+                poll_running.store(false, Ordering::SeqCst);
                 break;
             }
         }
     }
 
-    listener.stop();
     emit_pipeline_status(&app, &pipeline_status, "stopped");
     tracing::info!("pipeline stopped");
 }

@@ -14,6 +14,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::thread::JoinHandle;
 
+/// 预热音频设备解析缓存（调用 `resolve_audio_device` 填充 `OnceLock`）。
+pub fn warmup_device() {
+    let _ = resolve_audio_device();
+}
+
 /// Windows 录音器，优先使用 `ffmpeg`（dshow），不可用时回退到 `sox`。
 pub struct WindowsRecorder {
     sample_rate: u32,
