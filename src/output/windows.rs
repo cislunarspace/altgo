@@ -9,6 +9,7 @@ use super::truncate_text;
 use std::process::{Command, Stdio};
 
 /// 通过 PowerShell Set-Clipboard 将文本写入 Windows 剪切板。
+#[allow(dead_code)]
 pub async fn write_clipboard(text: &str) -> anyhow::Result<()> {
     let text = text.to_string();
     tokio::task::spawn_blocking(move || {
@@ -66,8 +67,8 @@ fn is_text_input_focused() -> bool {
 /// 通过 SendInput 发送 Unicode 文本到当前焦点窗口。
 fn send_unicode_text(text: &str) -> anyhow::Result<()> {
     use windows::Win32::UI::Input::KeyboardAndMouse::{
-        SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT,
-        KEYEVENTF_KEYUP, KEYEVENTF_UNICODE, VIRTUAL_KEY,
+        SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, KEYEVENTF_UNICODE,
+        VIRTUAL_KEY,
     };
 
     let inputs: Vec<INPUT> = text
@@ -232,7 +233,11 @@ pub fn show_result_window(
 ) -> anyhow::Result<()> {
     let left = center_left(420);
     let top = bottom_top(300, 100);
-    let title = if polish_failed { "识别结果" } else { "润色结果" };
+    let title = if polish_failed {
+        "识别结果"
+    } else {
+        "润色结果"
+    };
 
     // Escape single quotes for PowerShell string
     let escape_ps = |s: &str| s.replace('\'', "''").replace('\n', " ").replace('\r', "");
@@ -280,7 +285,10 @@ pub async fn output_text(
             Ok("injected")
         }
         _ => {
-            tracing::info!(reason = reason, "cursor injection skipped, showing result window");
+            tracing::info!(
+                reason = reason,
+                "cursor injection skipped, showing result window"
+            );
             show_result_window(raw_text, polished_text, polish_failed, timeout_ms)?;
             Ok(reason)
         }
@@ -313,11 +321,13 @@ pub fn notify(title: &str, body: &str, timeout_ms: u64) -> anyhow::Result<()> {
 }
 
 /// 显示处理中通知。
+#[allow(dead_code)]
 pub fn notify_processing(message: &str) -> anyhow::Result<()> {
     notify("altgo", message, 5000)
 }
 
 /// 显示语音识别结果通知。
+#[allow(dead_code)]
 pub fn notify_result(text: &str, timeout_ms: u64) -> anyhow::Result<()> {
     let truncated = truncate_text(text, 200);
     notify("altgo", &truncated, timeout_ms)

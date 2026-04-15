@@ -49,6 +49,8 @@ pub struct KeyListenerConfig {
     pub debounce_window_ms: u64,
     /// Windows 轮询间隔（毫秒）
     pub poll_interval_ms: u64,
+    /// 最短按下时长（毫秒），过滤 IME 导致的瞬时分合
+    pub min_press_duration_ms: u64,
 }
 
 impl KeyListenerConfig {
@@ -66,16 +68,22 @@ impl KeyListenerConfig {
     pub fn debounce_window(&self) -> Duration {
         Duration::from_millis(self.debounce_window_ms)
     }
+
+    /// 将最短按下时长转换为 `Duration`。
+    pub fn min_press_duration(&self) -> Duration {
+        Duration::from_millis(self.min_press_duration_ms)
+    }
 }
 
 impl Default for KeyListenerConfig {
     fn default() -> Self {
         Self {
             key_name: "ISO_Level3_Shift".to_string(),
-            long_press_threshold_ms: 300,
+            long_press_threshold_ms: 200,
             double_click_interval_ms: 300,
             debounce_window_ms: 100,
-            poll_interval_ms: 50,
+            poll_interval_ms: 30,
+            min_press_duration_ms: 100,
         }
     }
 }
@@ -117,6 +125,10 @@ pub struct TranscriberConfig {
     pub whisper_path: String,
     /// 请求超时时间（秒）
     pub timeout_seconds: u64,
+    /// Whisper API temperature（0.0 - 1.0），越低越确定性，默认 0
+    pub temperature: f32,
+    /// Whisper API prompt，提供上下文/词汇提示以提升识别准确率
+    pub prompt: String,
 }
 
 impl TranscriberConfig {
@@ -136,6 +148,8 @@ impl Default for TranscriberConfig {
             language: "zh".to_string(),
             whisper_path: String::new(),
             timeout_seconds: 30,
+            temperature: 0.0,
+            prompt: String::new(),
         }
     }
 }
@@ -158,6 +172,10 @@ pub struct PolisherConfig {
     pub timeout_seconds: u64,
     /// 最大生成 token 数
     pub max_tokens: u32,
+    /// LLM temperature（0.0 - 2.0），默认 0.3
+    pub temperature: f32,
+    /// 自定义 system prompt，为空时使用内置 prompt
+    pub system_prompt: String,
 }
 
 impl PolisherConfig {
@@ -177,6 +195,8 @@ impl Default for PolisherConfig {
             level: "none".to_string(),
             timeout_seconds: 60,
             max_tokens: 1024,
+            temperature: 0.3,
+            system_prompt: String::new(),
         }
     }
 }
@@ -342,11 +362,15 @@ mod tests {
     fn test_default_config() {
         let cfg = Config::default();
         assert_eq!(cfg.key_listener.key_name, "ISO_Level3_Shift");
-        assert_eq!(cfg.key_listener.long_press_threshold_ms, 300);
+        assert_eq!(cfg.key_listener.long_press_threshold_ms, 200);
         assert_eq!(cfg.key_listener.debounce_window_ms, 100);
+        assert_eq!(cfg.key_listener.poll_interval_ms, 30);
+        assert_eq!(cfg.key_listener.min_press_duration_ms, 100);
         assert_eq!(cfg.recorder.sample_rate, 16000);
         assert_eq!(cfg.transcriber.engine, "local");
+        assert_eq!(cfg.transcriber.temperature, 0.0);
         assert_eq!(cfg.polisher.level, "none");
+        assert_eq!(cfg.polisher.temperature, 0.3);
         assert!(cfg.output.enable_notify);
         assert_eq!(cfg.logging.level, "info");
     }
@@ -428,7 +452,7 @@ level = "debug"
         assert_eq!(cfg.polisher.timeout(), Duration::from_secs(60));
         assert_eq!(
             cfg.key_listener.long_press_threshold(),
-            Duration::from_millis(300)
+            Duration::from_millis(200)
         );
         assert_eq!(
             cfg.key_listener.double_click_interval(),
@@ -436,6 +460,10 @@ level = "debug"
         );
         assert_eq!(
             cfg.key_listener.debounce_window(),
+            Duration::from_millis(100)
+        );
+        assert_eq!(
+            cfg.key_listener.min_press_duration(),
             Duration::from_millis(100)
         );
     }

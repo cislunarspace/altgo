@@ -17,7 +17,22 @@ use std::time::Duration;
 /// 重试延迟基数（毫秒），用于指数退避计算。
 const RETRY_BASE_DELAY_MS: u64 = 500;
 
-/// 润色级别，控制 LLM 对文本的改写程度。
+struct HttpStatusError(u16);
+
+impl std::fmt::Display for HttpStatusError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "HTTP {}", self.0)
+    }
+}
+
+impl std::fmt::Debug for HttpStatusError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "HttpStatusError({})", self.0)
+    }
+}
+
+impl std::error::Error for HttpStatusError {}
+
 #[derive(Debug, Clone, Copy)]
 pub enum PolishLevel {
     /// 不润色
@@ -56,12 +71,23 @@ impl std::str::FromStr for PolishLevel {
     }
 }
 
-fn get_system_prompt(level: PolishLevel) -> &'static str {
+fn get_system_prompt(level: PolishLevel, language: &str) -> String {
+    let lang_name = match language {
+        "zh" => "中文",
+        "en" => "English",
+        "ja" => "日本語",
+        "ko" => "한국어",
+        "fr" => "français",
+        "de" => "Deutsch",
+        "es" => "español",
+        _ => language,
+    };
+
     match level {
-        PolishLevel::None => "",
-        PolishLevel::Light => "你是一个中文语音转文字的后期处理助手。用户给你一段语音识别的原始文本，你需要修复其中的标点符号和明显的错别字，但不改变文本的原本意思和用词。只输出修改后的文本，不要任何解释。",
-        PolishLevel::Medium => "你是一个中文语音转文字的后期处理助手。用户给你一段语音识别的原始文本，你需要修复标点符号、错别字和语病，让语句更通顺流畅，但不改变文本的原本意思。只输出修改后的文本，不要任何解释。",
-        PolishLevel::Heavy => "你是一个中文语音转文字的后期处理助手。用户给你一段语音识别的原始文本，你需要将其重写为结构清晰、表达准确的文字。可以适当调整语序和措辞，但保留核心意思不变。只输出修改后的文本，不要任何解释。",
+        PolishLevel::None => String::new(),
+        PolishLevel::Light => format!("You are a post-processing assistant for speech-to-text in {lang_name}. The user gives you raw speech recognition text in {lang_name}. Fix punctuation and obvious typos without changing the original meaning or word choices. Output only the corrected text with no explanation."),
+        PolishLevel::Medium => format!("You are a post-processing assistant for speech-to-text in {lang_name}. The user gives you raw speech recognition text in {lang_name}. Fix punctuation, typos, and grammar issues to make the text more fluent and natural, without changing the original meaning. Output only the corrected text with no explanation."),
+        PolishLevel::Heavy => format!("You are a post-processing assistant for speech-to-text in {lang_name}. The user gives you raw speech recognition text in {lang_name}. Rewrite it into well-structured, clearly expressed text. You may adjust word order and phrasing, but preserve the core meaning. Output only the rewritten text with no explanation."),
     }
 }
 
@@ -151,10 +177,12 @@ pub struct LLMFormatter {
     max_retries: u32,
     max_tokens: u32,
     protocol: ApiProtocol,
+    temperature: f32,
+    language: String,
+    custom_system_prompt: String,
 }
 
 impl LLMFormatter {
-    /// 创建新的润色器（使用默认 max_tokens=1024）。
     #[allow(dead_code)]
     pub fn new(
         api_key: String,
@@ -169,10 +197,13 @@ impl LLMFormatter {
             timeout,
             1024,
             ApiProtocol::OpenAi,
+            0.3,
+            "zh".to_string(),
+            String::new(),
         )
     }
 
-    /// 创建新的润色器，指定最大 token 数和协议。
+    #[allow(clippy::too_many_arguments)]
     pub fn with_config(
         api_key: String,
         api_base_url: String,
@@ -180,6 +211,9 @@ impl LLMFormatter {
         timeout: Duration,
         max_tokens: u32,
         protocol: ApiProtocol,
+        temperature: f32,
+        language: String,
+        custom_system_prompt: String,
     ) -> anyhow::Result<Self> {
         let client = Client::builder()
             .timeout(timeout)
@@ -193,6 +227,9 @@ impl LLMFormatter {
             max_retries: 3,
             max_tokens,
             protocol,
+            temperature,
+            language,
+            custom_system_prompt,
         })
     }
 
@@ -205,7 +242,11 @@ impl LLMFormatter {
             return Ok(text.to_string());
         }
 
-        let system_prompt = get_system_prompt(level);
+        let system_prompt = if self.custom_system_prompt.is_empty() {
+            get_system_prompt(level, &self.language)
+        } else {
+            self.custom_system_prompt.clone()
+        };
 
         let mut last_err = None;
         for attempt in 0..self.max_retries {
@@ -221,14 +262,14 @@ impl LLMFormatter {
                         messages: vec![
                             ChatMessage {
                                 role: "system".to_string(),
-                                content: system_prompt.to_string(),
+                                content: system_prompt.clone(),
                             },
                             ChatMessage {
                                 role: "user".to_string(),
                                 content: text.to_string(),
                             },
                         ],
-                        temperature: 0.3,
+                        temperature: self.temperature,
                         max_tokens: self.max_tokens,
                     };
                     self.do_openai_request(&body).await
@@ -237,12 +278,12 @@ impl LLMFormatter {
                     let body = AnthropicRequest {
                         model: self.model.clone(),
                         max_tokens: self.max_tokens,
-                        system: system_prompt.to_string(),
+                        system: system_prompt.clone(),
                         messages: vec![AnthropicMessage {
                             role: "user".to_string(),
                             content: text.to_string(),
                         }],
-                        temperature: 0.3,
+                        temperature: self.temperature,
                     };
                     self.do_anthropic_request(&body).await
                 }
@@ -251,8 +292,13 @@ impl LLMFormatter {
             match result {
                 Ok(r) => return Ok(r),
                 Err(e) => {
-                    // Don't retry on auth errors.
-                    if e.to_string().contains("401") || e.to_string().contains("403") {
+                    if let Some(status) = e.downcast_ref::<HttpStatusError>() {
+                        if status.0 == 401 || status.0 == 403 {
+                            return Err(e);
+                        }
+                    }
+                    let err_str = e.to_string();
+                    if err_str.contains("401") || err_str.contains("403") {
                         return Err(e);
                     }
                     tracing::warn!(attempt, error = %e, "polish request failed");
@@ -275,11 +321,17 @@ impl LLMFormatter {
             .await
             .context("OpenAI API request failed")?;
 
-        self.check_rate_limit(&resp)?;
+        let status = resp.status().as_u16();
+        if status == 429 {
+            return Err(anyhow!("rate limited"));
+        }
         if !resp.status().is_success() {
-            let status = resp.status();
-            let body = resp.text().await.context("failed to read API error body")?;
-            return Err(anyhow!("LLM API returned {}: {}", status, body));
+            let resp_body = resp.text().await.context("failed to read API error body")?;
+            let mut err = anyhow!("LLM API returned {}: {}", status, resp_body);
+            if status == 401 || status == 403 {
+                err = err.context(HttpStatusError(status));
+            }
+            return Err(err);
         }
 
         let chat_resp: ChatResponse = resp.json().await.context("failed to parse LLM response")?;
@@ -303,11 +355,17 @@ impl LLMFormatter {
             .await
             .context("Anthropic API request failed")?;
 
-        self.check_rate_limit(&resp)?;
+        let status = resp.status().as_u16();
+        if status == 429 {
+            return Err(anyhow!("rate limited"));
+        }
         if !resp.status().is_success() {
-            let status = resp.status();
-            let body = resp.text().await.context("failed to read API error body")?;
-            return Err(anyhow!("LLM API returned {}: {}", status, body));
+            let resp_body = resp.text().await.context("failed to read API error body")?;
+            let mut err = anyhow!("LLM API returned {}: {}", status, resp_body);
+            if status == 401 || status == 403 {
+                err = err.context(HttpStatusError(status));
+            }
+            return Err(err);
         }
 
         let anthropic_resp: AnthropicResponse = resp
@@ -320,13 +378,6 @@ impl LLMFormatter {
             .next()
             .map(|c| c.text)
             .ok_or_else(|| anyhow!("Anthropic returned empty content"))
-    }
-
-    fn check_rate_limit(&self, resp: &reqwest::Response) -> anyhow::Result<()> {
-        if resp.status().as_u16() == 429 {
-            return Err(anyhow!("rate limited"));
-        }
-        Ok(())
     }
 }
 
@@ -431,7 +482,7 @@ mod tests {
     #[tokio::test]
     async fn test_polish_sends_correct_prompt_for_light() {
         let mut server = mockito::Server::new_async().await;
-        let expected_system = get_system_prompt(PolishLevel::Light);
+        let expected_system = get_system_prompt(PolishLevel::Light, "zh");
         let mock = server
             .mock("POST", "/v1/chat/completions")
             .match_body(mockito::Matcher::PartialJsonString(
@@ -448,11 +499,16 @@ mod tests {
             .create_async()
             .await;
 
-        let formatter = LLMFormatter::new(
+        let formatter = LLMFormatter::with_config(
             "key".to_string(),
             server.url(),
             "model".to_string(),
             Duration::from_secs(5),
+            1024,
+            ApiProtocol::OpenAi,
+            0.3,
+            "zh".to_string(),
+            String::new(),
         )
         .unwrap();
         let _ = formatter.polish("test", PolishLevel::Light).await;

@@ -104,6 +104,8 @@ async fn run_pipeline(
             cfg.transcriber.api_base_url.clone(),
             cfg.transcriber.model.clone(),
             cfg.transcriber.language.clone(),
+            cfg.transcriber.temperature,
+            cfg.transcriber.prompt.clone(),
             cfg.transcriber.timeout(),
         )?),
     };
@@ -117,12 +119,21 @@ async fn run_pipeline(
             );
             crate::polisher::PolishLevel::Medium
         });
-    let formatter = crate::polisher::LLMFormatter::with_max_tokens(
+    let polisher_protocol = crate::polisher::ApiProtocol::from_str(&cfg.polisher.protocol)
+        .unwrap_or_else(|e| {
+            tracing::warn!(error = %e, "invalid polisher protocol, defaulting to openai");
+            crate::polisher::ApiProtocol::OpenAi
+        });
+    let formatter = crate::polisher::LLMFormatter::with_config(
         cfg.polisher.api_key.clone(),
         cfg.polisher.api_base_url.clone(),
         cfg.polisher.model.clone(),
         cfg.polisher.timeout(),
         cfg.polisher.max_tokens,
+        polisher_protocol,
+        cfg.polisher.temperature,
+        cfg.transcriber.language.clone(),
+        cfg.polisher.system_prompt.clone(),
     )?;
 
     // Start key listener.
@@ -141,6 +152,7 @@ async fn run_pipeline(
     let sm = crate::state_machine::Machine::new(
         cfg.key_listener.long_press_threshold(),
         cfg.key_listener.double_click_interval(),
+        cfg.key_listener.min_press_duration(),
     );
     let mut commands = sm.run(key_rx);
 

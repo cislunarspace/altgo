@@ -127,6 +127,8 @@ async fn main() -> anyhow::Result<()> {
                 cfg.transcriber.api_base_url.clone(),
                 cfg.transcriber.model.clone(),
                 cfg.transcriber.language.clone(),
+                cfg.transcriber.temperature,
+                cfg.transcriber.prompt.clone(),
                 cfg.transcriber.timeout(),
             )?)
         }
@@ -152,6 +154,9 @@ async fn main() -> anyhow::Result<()> {
         cfg.polisher.timeout(),
         cfg.polisher.max_tokens,
         polisher_protocol,
+        cfg.polisher.temperature,
+        cfg.transcriber.language.clone(),
+        cfg.polisher.system_prompt.clone(),
     )?;
 
     // Start key listener.
@@ -176,6 +181,7 @@ async fn main() -> anyhow::Result<()> {
     let sm = state_machine::Machine::new(
         cfg.key_listener.long_press_threshold(),
         cfg.key_listener.double_click_interval(),
+        cfg.key_listener.min_press_duration(),
     );
     let mut commands = sm.run(key_rx);
 
@@ -269,6 +275,7 @@ async fn main() -> anyhow::Result<()> {
         let sm = state_machine::Machine::new(
             cfg.key_listener.long_press_threshold(),
             cfg.key_listener.double_click_interval(),
+            cfg.key_listener.min_press_duration(),
         );
         commands = sm.run(new_key_rx);
 

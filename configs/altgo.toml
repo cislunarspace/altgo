@@ -3,8 +3,10 @@
 
 [key_listener]
 key_name = "ISO_Level3_Shift"       # 触发键的 X11 keysym 名，默认右 Alt
-long_press_threshold_ms = 300       # 长按/短按区分阈值（毫秒）
+long_press_threshold_ms = 200       # 长按/短按区分阈值（毫秒）
 double_click_interval_ms = 300      # 双击判定间隔（毫秒）
+min_press_duration_ms = 100         # 最短按下时长（毫秒），过滤 IME 抖动
+poll_interval_ms = 30               # Windows 轮询间隔（毫秒），越小响应越快
 
 [recorder]
 sample_rate = 16000
@@ -14,25 +16,29 @@ channels = 1
 engine = "local"                     # "api"（OpenAI Whisper API）或 "local"（whisper.cpp）
 api_key = ""                        # API 模式下的 API Key
 api_base_url = ""                   # API 模式下的 base URL
-model = ""                        # API 模式：模型名（如 "whisper-1"）；本地模式：GGML 模型文件路径
+model = ""                          # API 模式：模型名（如 "whisper-1"）；本地模式：GGML 模型文件路径
 whisper_path = ""                   # whisper-cli 路径，留空则自动查找 PATH
 language = "zh"                     # 语言提示，如 "zh"（中文）、"en"（英文）
 timeout_seconds = 30
+temperature = 0.0                   # Whisper API temperature（0.0-1.0），越低越确定性
+prompt = ""                         # Whisper API 提示词，提供领域词汇以提升识别率
 
 [polisher]
 protocol = "openai"                 # "openai"（OpenAI 兼容 API）或 "anthropic"（Anthropic Messages API）
 api_key = ""                        # API Key，也可通过 ALTGO_POLISHER_API_KEY 环境变量设置
 api_base_url = ""                   # API Base URL，level 不为 "none" 时必须设置
-model = ""                         # 模型名，level 不为 "none" 时必须设置
+model = ""                          # 模型名，level 不为 "none" 时必须设置
 level = "none"                      # 润色级别："none"（禁用）、"light"、"medium"、"heavy"
-max_tokens = 1024                  # LLM 响应的最大 token 数，录音较长时可调大
+max_tokens = 1024                   # LLM 响应的最大 token 数
 timeout_seconds = 60
+temperature = 0.3                   # LLM temperature（0.0-2.0）
+system_prompt = ""                  # 自定义 system prompt，为空则使用内置多语言 prompt
 
 [output]
 enable_notify = true
 notify_timeout_ms = 5000
 inject_at_cursor = true             # 尝试将文本注入到当前光标位置（仅 Windows）
-prefer_polished = true             # 注入/复制时优先使用润色后的文本
+prefer_polished = true              # 注入/复制时优先使用润色后的文本
 
 [logging]
 level = "info"

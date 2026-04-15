@@ -61,15 +61,16 @@ impl Machine {
     ///
     /// `long_press_threshold`：长按触发阈值
     /// `double_click_interval`：双击检测时间窗口
-    pub fn new(long_press_threshold: Duration, double_click_interval: Duration) -> Self {
+    pub fn new(
+        long_press_threshold: Duration,
+        double_click_interval: Duration,
+        min_press_duration: Duration,
+    ) -> Self {
         Self {
             state: State::Idle,
             long_press_threshold,
             double_click_interval,
-            // Minimum time a key must be held before a release is treated as
-            // intentional.  Filters out IME-induced release-press oscillations
-            // on Windows (e.g. Chinese input methods with Right Alt).
-            min_press_duration: Duration::from_millis(100),
+            min_press_duration,
             press_time: None,
         }
     }
@@ -269,16 +270,14 @@ mod tests {
     fn test_long_press() {
         let threshold = Duration::from_millis(50);
         let interval = Duration::from_millis(50);
-        let mut sm = Machine::new(threshold, interval);
+        let min_press = Duration::from_millis(1);
+        let mut sm = Machine::new(threshold, interval, min_press);
 
-        // Press → PotentialPress
         assert_eq!(sm.process(press()), None);
 
-        // Wait for threshold → Recording
         std::thread::sleep(threshold + Duration::from_millis(5));
         assert_eq!(sm.poll_timeout(), Some(Command::StartRecord));
 
-        // Release → StopRecord
         assert_eq!(sm.process(release()), Some(Command::StopRecord));
     }
 
@@ -286,21 +285,17 @@ mod tests {
     fn test_double_click() {
         let threshold = Duration::from_millis(200);
         let interval = Duration::from_millis(200);
-        let mut sm = Machine::new(threshold, interval);
+        let min_press = Duration::from_millis(1);
+        let mut sm = Machine::new(threshold, interval, min_press);
 
-        // Press → PotentialPress
         assert_eq!(sm.process(press()), None);
 
-        // Hold for at least min_press_duration (100ms) before releasing
         std::thread::sleep(Duration::from_millis(110));
 
-        // Release → WaitSecondClick
         assert_eq!(sm.process(release()), None);
 
-        // Second press quickly → ContinuousRecording
         assert_eq!(sm.process(press()), Some(Command::StartRecord));
 
-        // Press again → StopRecord
         assert_eq!(sm.process(press()), Some(Command::StopRecord));
     }
 
@@ -308,18 +303,15 @@ mod tests {
     fn test_single_click_ignored() {
         let threshold = Duration::from_millis(200);
         let interval = Duration::from_millis(200);
-        let mut sm = Machine::new(threshold, interval);
+        let min_press = Duration::from_millis(1);
+        let mut sm = Machine::new(threshold, interval, min_press);
 
-        // Press → PotentialPress
         assert_eq!(sm.process(press()), None);
 
-        // Hold for at least min_press_duration before releasing
         std::thread::sleep(Duration::from_millis(110));
 
-        // Release → WaitSecondClick
         assert_eq!(sm.process(release()), None);
 
-        // Double-click interval expires → Idle (no command)
         std::thread::sleep(interval + Duration::from_millis(5));
         assert_eq!(sm.poll_timeout(), None);
     }
@@ -328,18 +320,16 @@ mod tests {
     fn test_continuous_recording_stop() {
         let threshold = Duration::from_millis(200);
         let interval = Duration::from_millis(200);
-        let mut sm = Machine::new(threshold, interval);
+        let min_press = Duration::from_millis(1);
+        let mut sm = Machine::new(threshold, interval, min_press);
 
-        // Double click → StartRecord
         sm.process(press());
         std::thread::sleep(Duration::from_millis(110));
         sm.process(release());
         assert_eq!(sm.process(press()), Some(Command::StartRecord));
 
-        // Release events are ignored in ContinuousRecording
         assert_eq!(sm.process(release()), None);
 
-        // Press → StopRecord
         assert_eq!(sm.process(press()), Some(Command::StopRecord));
     }
 
@@ -348,9 +338,6 @@ mod tests {
         let threshold = Duration::from_millis(300);
         let interval = Duration::from_millis(300);
 
-        // Use a separate config to set min_press_duration to 1ms so we can
-        // reliably test the spurious release rejection without depending on
-        // accurate thread::sleep timing across all platforms (e.g. ARM64).
         let mut sm = Machine {
             state: State::Idle,
             long_press_threshold: threshold,
@@ -359,17 +346,13 @@ mod tests {
             press_time: None,
         };
 
-        // Press → PotentialPress
         assert_eq!(sm.process(press()), None);
 
-        // Release immediately (elapsed << min_press_duration) → rejected, stays PotentialPress
         assert_eq!(sm.process(release()), None);
         assert_eq!(sm.state, State::PotentialPress);
 
-        // press_time should be reset so no stale timer fires
         assert!(sm.press_time.is_none());
 
-        // Without press_time, poll_timeout is a no-op
         assert_eq!(sm.poll_timeout(), None);
     }
 }

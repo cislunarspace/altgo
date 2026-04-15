@@ -37,16 +37,19 @@ pub struct WhisperApi {
     api_base_url: String,
     model: String,
     language: String,
+    temperature: f32,
+    prompt: String,
     client: Client,
 }
 
 impl WhisperApi {
-    /// 创建新的 API 语音识别器。
     pub fn new(
         api_key: String,
         api_base_url: String,
         model: String,
         language: String,
+        temperature: f32,
+        prompt: String,
         timeout: Duration,
     ) -> anyhow::Result<Self> {
         let client = Client::builder()
@@ -58,6 +61,8 @@ impl WhisperApi {
             api_base_url,
             model,
             language,
+            temperature,
+            prompt,
             client,
         })
     }
@@ -77,10 +82,15 @@ impl WhisperApi {
             .file_name("audio.wav")
             .mime_str("audio/wav")?;
 
-        let form = reqwest::multipart::Form::new()
+        let mut form = reqwest::multipart::Form::new()
             .part("file", audio_part)
             .text("model", self.model.clone())
-            .text("language", self.language.clone());
+            .text("language", self.language.clone())
+            .text("temperature", format!("{}", self.temperature));
+
+        if !self.prompt.is_empty() {
+            form = form.text("prompt", self.prompt.clone());
+        }
 
         let resp = self
             .client
@@ -282,6 +292,8 @@ mod tests {
             "http://localhost".to_string(),
             "whisper-1".to_string(),
             "zh".to_string(),
+            0.0,
+            String::new(),
             Duration::from_secs(5),
         )
         .unwrap();
@@ -297,6 +309,8 @@ mod tests {
             "http://localhost".to_string(),
             "whisper-1".to_string(),
             "zh".to_string(),
+            0.0,
+            String::new(),
             Duration::from_secs(5),
         )
         .unwrap();
@@ -327,6 +341,8 @@ mod tests {
             server.url(),
             "whisper-1".to_string(),
             "zh".to_string(),
+            0.0,
+            String::new(),
             Duration::from_secs(5),
         )
         .unwrap();
@@ -351,6 +367,8 @@ mod tests {
             server.url(),
             "whisper-1".to_string(),
             "zh".to_string(),
+            0.0,
+            String::new(),
             Duration::from_secs(5),
         )
         .unwrap();
