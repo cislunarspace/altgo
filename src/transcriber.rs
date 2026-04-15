@@ -119,6 +119,7 @@ impl WhisperApi {
 pub struct LocalWhisper {
     model_path: String,
     language: String,
+    whisper_path: String,
 }
 
 impl LocalWhisper {
@@ -126,10 +127,12 @@ impl LocalWhisper {
     ///
     /// `model_path`：whisper 模型文件路径
     /// `language`：语言代码
-    pub fn new(model_path: String, language: String) -> Self {
+    /// `whisper_path`：whisper-cli 二进制文件路径（为空时自动查找）
+    pub fn new(model_path: String, language: String, whisper_path: String) -> Self {
         Self {
             model_path,
             language,
+            whisper_path,
         }
     }
 
@@ -147,7 +150,7 @@ impl LocalWhisper {
         std::fs::write(&wav_path, audio_data).context("write temp wav file")?;
 
         // Find whisper-cli binary.
-        let whisper_bin = Self::find_whisper_binary()?;
+        let whisper_bin = find_whisper_binary(&self.whisper_path)?;
 
         let mut cmd = tokio::process::Command::new(&whisper_bin);
         cmd.arg("-m")
@@ -174,30 +177,81 @@ impl LocalWhisper {
             language: self.language.clone(),
         })
     }
+}
 
-    fn find_whisper_binary() -> anyhow::Result<std::path::PathBuf> {
-        static CACHE: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+/// 查找 whisper-cli 二进制文件。
+///
+/// 查找顺序：
+/// 1. 用户通过配置指定的路径（`whisper_path`）
+/// 2. 系统 PATH 中的 `whisper-cli` 和 `whisper-cpp`
+fn find_whisper_binary(whisper_path: &str) -> anyhow::Result<std::path::PathBuf> {
+    static CACHE: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
 
-        if let Some(cached) = CACHE.get() {
-            return Ok(cached.clone());
-        }
-
-        // Check common locations. whisper-cli/whisper-cpp rely on PATH.
-        let candidates = ["whisper-cli", "whisper-cpp"];
-
-        for candidate in &candidates {
-            let path = std::path::Path::new(candidate);
-            if path.exists() {
-                let buf = path.to_path_buf();
-                let _ = CACHE.set(buf.clone());
-                return Ok(buf);
-            }
-        }
-
-        Err(anyhow!(
-            "whisper-cli not found — build whisper.cpp and add to PATH"
-        ))
+    if let Some(cached) = CACHE.get() {
+        return Ok(cached.clone());
     }
+
+    // 1. Use explicitly configured path.
+    if !whisper_path.is_empty() {
+        let path = std::path::Path::new(whisper_path);
+        if path.exists() {
+            let buf = path.to_path_buf();
+            let _ = CACHE.set(buf.clone());
+            return Ok(buf);
+        }
+        return Err(anyhow!(
+            "whisper-cli not found at configured path: {}",
+            whisper_path
+        ));
+    }
+
+    // 2. Search on PATH using `which` (Linux/macOS) or `where` (Windows).
+    let candidates = ["whisper-cli", "whisper-cpp"];
+    for candidate in &candidates {
+        if let Ok(found) = which_binary(candidate) {
+            let _ = CACHE.set(found.clone());
+            return Ok(found);
+        }
+    }
+
+    Err(anyhow!(
+        "whisper-cli not found — set whisper_path in config or add whisper-cli to PATH"
+    ))
+}
+
+/// Search for a binary on the system PATH.
+#[cfg(unix)]
+fn which_binary(name: &str) -> anyhow::Result<std::path::PathBuf> {
+    let output = std::process::Command::new("which").arg(name).output()?;
+    if output.status.success() {
+        let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let p = std::path::PathBuf::from(path);
+        if p.exists() {
+            return Ok(p);
+        }
+    }
+    Err(anyhow!("{} not found on PATH", name))
+}
+
+/// Search for a binary on the system PATH.
+#[cfg(windows)]
+fn which_binary(name: &str) -> anyhow::Result<std::path::PathBuf> {
+    let output = std::process::Command::new("cmd")
+        .args(["/C", "where", name])
+        .output()?;
+    if output.status.success() {
+        let path = String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .next()
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        let p = std::path::PathBuf::from(path);
+        if p.exists() {
+            return Ok(p);
+        }
+    }
+    Err(anyhow!("{} not found on PATH", name))
 }
 
 /// Unified transcription backend — dispatches between API and local engines.
@@ -306,7 +360,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_local_whisper_empty_audio() {
-        let lw = LocalWhisper::new("/path/to/model".to_string(), "zh".to_string());
+        let lw = LocalWhisper::new(
+            "/path/to/model".to_string(),
+            "zh".to_string(),
+            String::new(),
+        );
         let result = lw.transcribe(&[]).await;
         assert!(result.is_err());
     }

@@ -130,7 +130,10 @@ impl ApiProtocol {
         match s.to_lowercase().as_str() {
             "openai" => Ok(ApiProtocol::OpenAi),
             "anthropic" => Ok(ApiProtocol::Anthropic),
-            other => Err(anyhow!("unknown polisher protocol: '{}'. Use 'openai' or 'anthropic'", other)),
+            other => Err(anyhow!(
+                "unknown polisher protocol: '{}'. Use 'openai' or 'anthropic'",
+                other
+            )),
         }
     }
 }
@@ -159,7 +162,14 @@ impl LLMFormatter {
         model: String,
         timeout: Duration,
     ) -> anyhow::Result<Self> {
-        Self::with_config(api_key, api_base_url, model, timeout, 1024, ApiProtocol::OpenAi)
+        Self::with_config(
+            api_key,
+            api_base_url,
+            model,
+            timeout,
+            1024,
+            ApiProtocol::OpenAi,
+        )
     }
 
     /// 创建新的润色器，指定最大 token 数和协议。
@@ -300,8 +310,10 @@ impl LLMFormatter {
             return Err(anyhow!("LLM API returned {}: {}", status, body));
         }
 
-        let anthropic_resp: AnthropicResponse =
-            resp.json().await.context("failed to parse Anthropic response")?;
+        let anthropic_resp: AnthropicResponse = resp
+            .json()
+            .await
+            .context("failed to parse Anthropic response")?;
         anthropic_resp
             .content
             .into_iter()

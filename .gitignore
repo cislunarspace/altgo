@@ -5,6 +5,9 @@ altgo
 # whisper.cpp submodule (cloned separately)
 whisper.cpp/
 
+# Downloaded dependencies (install scripts populate this)
+.deps/
+
 # IDE
 .idea/
 .vscode/

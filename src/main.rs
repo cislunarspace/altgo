@@ -117,6 +117,7 @@ async fn main() -> anyhow::Result<()> {
             transcriber::Transcriber::Local(transcriber::LocalWhisper::new(
                 cfg.transcriber.model.clone(),
                 cfg.transcriber.language.clone(),
+                cfg.transcriber.whisper_path.clone(),
             ))
         }
         engine => {
@@ -139,8 +140,8 @@ async fn main() -> anyhow::Result<()> {
         );
         polisher::PolishLevel::Medium
     });
-    let polisher_protocol = polisher::ApiProtocol::from_str(&cfg.polisher.protocol)
-        .unwrap_or_else(|e| {
+    let polisher_protocol =
+        polisher::ApiProtocol::from_str(&cfg.polisher.protocol).unwrap_or_else(|e| {
             tracing::warn!(error = %e, "invalid polisher protocol, defaulting to openai");
             polisher::ApiProtocol::OpenAi
         });

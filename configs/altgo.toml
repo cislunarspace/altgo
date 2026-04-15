@@ -22,6 +22,8 @@ api_base_url = ""
 # For "api" mode: model name (e.g. "whisper-1").
 # For "local" mode: path to GGML model file (e.g. "~/models/ggml-base.bin").
 model = ""
+# Path to whisper-cli binary. Leave empty to auto-detect on PATH.
+whisper_path = ""
 # Language hint: "zh" for Chinese, "en" for English, etc.
 language = "zh"
 timeout_seconds = 30

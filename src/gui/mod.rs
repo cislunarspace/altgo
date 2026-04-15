@@ -97,6 +97,7 @@ async fn run_pipeline(
         "local" => crate::transcriber::Transcriber::Local(crate::transcriber::LocalWhisper::new(
             cfg.transcriber.model.clone(),
             cfg.transcriber.language.clone(),
+            cfg.transcriber.whisper_path.clone(),
         )),
         _ => crate::transcriber::Transcriber::Api(crate::transcriber::WhisperApi::new(
             cfg.transcriber.api_key.clone(),

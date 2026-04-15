@@ -113,6 +113,8 @@ pub struct TranscriberConfig {
     pub model: String,
     /// 语言代码（如 `"zh"`、`"en"`）
     pub language: String,
+    /// whisper-cli 二进制文件路径（为空时自动在 PATH 中查找）
+    pub whisper_path: String,
     /// 请求超时时间（秒）
     pub timeout_seconds: u64,
 }
@@ -132,6 +134,7 @@ impl Default for TranscriberConfig {
             api_base_url: "https://api.openai.com".to_string(),
             model: String::new(),
             language: "zh".to_string(),
+            whisper_path: String::new(),
             timeout_seconds: 30,
         }
     }
