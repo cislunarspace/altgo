@@ -28,7 +28,7 @@
 ### Linux
 
 ```bash
-git clone https://github.com/user/altgo.git
+git clone https://github.com/cislunarspace/altgo.git
 cd altgo
 chmod +x install.sh
 ./install.sh            # 默认下载 base 模型
@@ -42,7 +42,7 @@ chmod +x install.sh
 ### Windows
 
 ```powershell
-git clone https://github.com/user/altgo.git
+git clone https://github.com/cislunarspace/altgo.git
 cd altgo
 .\install.ps1               # 默认下载 base 模型
 .\install.ps1 -Model small  # 或指定模型大小
@@ -71,7 +71,7 @@ cd altgo
 ### 从源码编译
 
 ```bash
-git clone https://github.com/user/altgo.git
+git clone https://github.com/cislunarspace/altgo.git
 cd altgo
 cargo build --release
 ```

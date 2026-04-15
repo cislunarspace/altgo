@@ -1,54 +1,31 @@
-# altgo configuration
-# Copy to ~/.config/altgo/altgo.toml and edit as needed.
+# altgo 配置文件
+# 复制到 ~/.config/altgo/altgo.toml 后修改
 
 [key_listener]
-# X11 keysym name for the trigger key. Default: ISO_Level3_Shift (right Alt).
-key_name = "ISO_Level3_Shift"
-# Duration in ms to distinguish long press from short click.
-long_press_threshold_ms = 300
-# Max interval in ms between two clicks to count as double click.
-double_click_interval_ms = 300
+key_name = "ISO_Level3_Shift"       # 触发键的 X11 keysym 名，默认右 Alt
+long_press_threshold_ms = 300       # 长按/短按区分阈值（毫秒）
+double_click_interval_ms = 300      # 双击判定间隔（毫秒）
 
 [recorder]
 sample_rate = 16000
 channels = 1
 
 [transcriber]
-# Engine: "api" (OpenAI Whisper API) or "local" (whisper.cpp).
-engine = "local"
-# For "api" mode: API key and base URL.
-api_key = ""
-api_base_url = ""
-# For "api" mode: model name (e.g. "whisper-1").
-# For "local" mode: path to GGML model file (e.g. "~/models/ggml-base.bin").
-model = ""
-# Path to whisper-cli binary. Leave empty to auto-detect on PATH.
-whisper_path = ""
-# Language hint: "zh" for Chinese, "en" for English, etc.
-language = "zh"
+engine = "local"                     # "api"（OpenAI Whisper API）或 "local"（whisper.cpp）
+api_key = ""                        # API 模式下的 API Key
+api_base_url = ""                   # API 模式下的 base URL
+model = ""                        # API 模式：模型名（如 "whisper-1"）；本地模式：GGML 模型文件路径
+whisper_path = ""                   # whisper-cli 路径，留空则自动查找 PATH
+language = "zh"                     # 语言提示，如 "zh"（中文）、"en"（英文）
 timeout_seconds = 30
 
 [polisher]
-# API protocol: "openai" (OpenAI-compatible) or "anthropic" (Anthropic Messages API).
-protocol = "openai"
-# API key. Can also be set via ALTGO_POLISHER_API_KEY env var.
-api_key = ""
-# API base URL. Must be set when level is not "none".
-# Examples:
-#   OpenAI:    https://api.openai.com
-#   DeepSeek:  https://api.deepseek.com
-#   Anthropic: https://api.anthropic.com
-api_base_url = ""
-# Model name. Must be set when level is not "none".
-# Examples:
-#   OpenAI:    gpt-3.5-turbo, gpt-4o-mini
-#   DeepSeek:  deepseek-chat
-#   Anthropic: claude-sonnet-4-20250514
-model = ""
-# Polish level: "none" (disabled), "light", "medium", "heavy".
-level = "none"
-# Max tokens for LLM response. Increase for long transcriptions.
-max_tokens = 1024
+protocol = "openai"                 # "openai"（OpenAI 兼容 API）或 "anthropic"（Anthropic Messages API）
+api_key = ""                        # API Key，也可通过 ALTGO_POLISHER_API_KEY 环境变量设置
+api_base_url = ""                   # API Base URL，level 不为 "none" 时必须设置
+model = ""                         # 模型名，level 不为 "none" 时必须设置
+level = "none"                      # 润色级别："none"（禁用）、"light"、"medium"、"heavy"
+max_tokens = 1024                  # LLM 响应的最大 token 数，录音较长时可调大
 timeout_seconds = 60
 
 [output]
