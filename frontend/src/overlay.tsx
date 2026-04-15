@@ -1,40 +1,59 @@
 import { createRoot } from "react-dom/client";
 import { useState, useEffect } from "react";
 import { listen } from "@tauri-apps/api/event";
+import { useTranslation } from "./i18n";
 import "./overlay.css";
 
 function Overlay() {
   const [status, setStatus] = useState("idle");
+  const [result, setResult] = useState<string | null>(null);
+  const { t } = useTranslation();
 
   useEffect(() => {
-    const unlisten = listen<string>("pipeline-status", (event) => {
+    const unlistenStatus = listen<string>("pipeline-status", (event) => {
       setStatus(event.payload);
+      if (event.payload === "idle" || event.payload === "stopped") {
+        setResult(null);
+      }
+    });
+    const unlistenResult = listen<string>("transcription-result", (event) => {
+      setResult(event.payload);
     });
     return () => {
-      unlisten.then((fn) => fn());
+      unlistenStatus.then((fn) => fn());
+      unlistenResult.then((fn) => fn());
     };
   }, []);
 
   if (status === "idle" || status === "stopped") return null;
+
+  if (result && status === "done") {
+    return (
+      <div className="island island-result">
+        <span className="check">✓</span>
+        <span className="result-text">{result}</span>
+      </div>
+    );
+  }
 
   return (
     <div className="island">
       {status === "recording" && (
         <>
           <span className="pulse" />
-          <span className="label">录音中...</span>
+          <span className="label">{t("overlay.recording")}</span>
         </>
       )}
       {status === "processing" && (
         <>
           <span className="spinner" />
-          <span className="label">处理中...</span>
+          <span className="label">{t("overlay.processing")}</span>
         </>
       )}
       {status === "done" && (
         <>
           <span className="check">✓</span>
-          <span className="label">完成</span>
+          <span className="label">{t("status.done")}</span>
         </>
       )}
     </div>

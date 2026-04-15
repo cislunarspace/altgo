@@ -8,6 +8,12 @@ use tauri::{Emitter, Manager, State};
 
 use crate::AppState;
 
+const OVERLAY_RECORDING_W: f64 = 200.0;
+const OVERLAY_RECORDING_H: f64 = 48.0;
+const OVERLAY_RESULT_W: f64 = 500.0;
+const OVERLAY_RESULT_H: f64 = 80.0;
+const OVERLAY_BOTTOM_OFFSET: f64 = 80.0;
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RecordingStatus {
@@ -17,7 +23,28 @@ pub enum RecordingStatus {
     Done,
 }
 
-impl RecordingStatus {}
+fn emit_pipeline_status(
+    app: &tauri::AppHandle,
+    status: &Arc<std::sync::RwLock<String>>,
+    value: &str,
+) {
+    let _ = app.emit("pipeline-status", value);
+    if let Ok(mut s) = status.write() {
+        *s = value.to_string();
+    }
+}
+
+fn position_overlay(overlay: &tauri::WebviewWindow, width: f64, height: f64) {
+    let _ = overlay.set_size(tauri::LogicalSize::new(width, height));
+    if let Ok(Some(monitor)) = overlay.primary_monitor() {
+        let scale = monitor.scale_factor();
+        let screen_w = monitor.size().width as f64 / scale;
+        let screen_h = monitor.size().height as f64 / scale;
+        let x = (screen_w - width) / 2.0;
+        let y = screen_h - height - OVERLAY_BOTTOM_OFFSET;
+        let _ = overlay.set_position(tauri::LogicalPosition::new(x, y));
+    }
+}
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -126,6 +153,7 @@ pub async fn start_pipeline(
     let cfg = Arc::new(cfg);
 
     let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
+    let pipeline_status = state.pipeline_status.clone();
 
     let app_clone = app.clone();
     std::thread::spawn(move || {
@@ -133,7 +161,7 @@ pub async fn start_pipeline(
             .enable_all()
             .build()
             .expect("failed to build tokio runtime");
-        rt.block_on(run_pipeline(app_clone, cfg, stop_rx));
+        rt.block_on(run_pipeline(app_clone, cfg, stop_rx, pipeline_status));
     });
 
     *pipeline = Some(crate::PipelineHandle { stop_tx });
@@ -151,11 +179,15 @@ pub async fn stop_pipeline(state: State<'_, AppState>) -> Result<(), String> {
 
 #[tauri::command]
 pub async fn get_status(state: State<'_, AppState>) -> Result<RecordingStatus, String> {
-    let pipeline = state.pipeline.lock().await;
-    if pipeline.is_some() {
-        Ok(RecordingStatus::Idle)
-    } else {
-        Ok(RecordingStatus::Idle)
+    let status = state
+        .pipeline_status
+        .read()
+        .unwrap_or_else(|e| e.into_inner());
+    match status.as_str() {
+        "recording" => Ok(RecordingStatus::Recording),
+        "processing" => Ok(RecordingStatus::Processing),
+        "done" => Ok(RecordingStatus::Done),
+        _ => Ok(RecordingStatus::Idle),
     }
 }
 
@@ -163,6 +195,7 @@ pub async fn run_pipeline(
     app: tauri::AppHandle,
     cfg: Arc<altgo::config::Config>,
     mut stop_rx: tokio::sync::oneshot::Receiver<()>,
+    pipeline_status: Arc<std::sync::RwLock<String>>,
 ) {
     let mut listener = match altgo::key_listener::PlatformListener::new(&cfg.key_listener.key_name)
     {
@@ -258,7 +291,7 @@ pub async fn run_pipeline(
     );
     let mut commands = sm.run(key_rx);
 
-    let _ = app.emit("pipeline-status", "idle");
+    emit_pipeline_status(&app, &pipeline_status, "idle");
 
     loop {
         tokio::select! {
@@ -266,14 +299,9 @@ pub async fn run_pipeline(
                 match cmd {
                     Some(altgo::state_machine::Command::StartRecord) => {
                         tracing::info!("recording started");
-                        let _ = app.emit("pipeline-status", "recording");
+                        emit_pipeline_status(&app, &pipeline_status, "recording");
                         if let Some(overlay) = app.get_webview_window("overlay") {
-                            if let Ok(Some(monitor)) = overlay.primary_monitor() {
-                                let scale = monitor.scale_factor();
-                                let screen_w = monitor.size().width as f64 / scale;
-                                let x = (screen_w - 200.0) / 2.0;
-                                let _ = overlay.set_position(tauri::LogicalPosition::new(x, 4.0));
-                            }
+                            position_overlay(&overlay, OVERLAY_RECORDING_W, OVERLAY_RECORDING_H);
                             let _ = overlay.show();
                         }
                         if let Err(e) = recorder.start() {
@@ -282,12 +310,12 @@ pub async fn run_pipeline(
                     }
                     Some(altgo::state_machine::Command::StopRecord) => {
                         tracing::info!("recording stopped, processing...");
-                        let _ = app.emit("pipeline-status", "processing");
+                        emit_pipeline_status(&app, &pipeline_status, "processing");
                         let wav_data = match recorder.stop() {
                             Ok(data) => data,
                             Err(e) => {
                                 tracing::error!(error = %e, "failed to stop recording");
-                                let _ = app.emit("pipeline-status", "idle");
+                                emit_pipeline_status(&app, &pipeline_status, "idle");
                                 continue;
                             }
                         };
@@ -296,6 +324,7 @@ pub async fn run_pipeline(
                         let formatter = formatter.clone();
                         let transcriber = transcriber.clone();
                         let app = app.clone();
+                        let pipeline_status = pipeline_status.clone();
 
                         tokio::spawn(async move {
                             match altgo::pipeline::process_audio_core(
@@ -308,23 +337,39 @@ pub async fn run_pipeline(
                             {
                                 Ok(output) => {
                                     if !output.text.is_empty() {
-                                        let _ = altgo::output::output_text(
-                                            &output.raw_text,
-                                            &output.text,
-                                            output.polish_failed,
-                                            cfg.output.inject_at_cursor,
-                                            cfg.output.prefer_polished,
-                                            cfg.output.notify_timeout_ms,
-                                        )
-                                        .await;
+                                        let text_to_use = if cfg.output.prefer_polished
+                                            && !output.polish_failed
+                                        {
+                                            &output.text
+                                        } else {
+                                            &output.raw_text
+                                        };
+                                        let _ =
+                                            altgo::output::write_clipboard(text_to_use).await;
 
-                                        let _ = app.emit("transcription-result", &output.text);
+                                        if let Some(overlay) =
+                                            app.get_webview_window("overlay")
+                                        {
+                                            position_overlay(
+                                                &overlay,
+                                                OVERLAY_RESULT_W,
+                                                OVERLAY_RESULT_H,
+                                            );
+                                            let _ = overlay.show();
+                                        }
+                                        let _ =
+                                            app.emit("transcription-result", &output.text);
                                     }
-                                    let _ = app.emit("pipeline-status", "done");
+                                    emit_pipeline_status(&app, &pipeline_status, "done");
                                     let app_h = app.clone();
                                     tokio::spawn(async move {
-                                        tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
-                                        if let Some(overlay) = app_h.get_webview_window("overlay") {
+                                        tokio::time::sleep(
+                                            tokio::time::Duration::from_secs(5),
+                                        )
+                                        .await;
+                                        if let Some(overlay) =
+                                            app_h.get_webview_window("overlay")
+                                        {
                                             let _ = overlay.hide();
                                         }
                                     });
@@ -332,7 +377,7 @@ pub async fn run_pipeline(
                                 Err(e) => {
                                     tracing::error!(error = %e, "audio processing failed");
                                     let _ = app.emit("pipeline-error", format!("processing: {}", e));
-                                    let _ = app.emit("pipeline-status", "idle");
+                                    emit_pipeline_status(&app, &pipeline_status, "idle");
                                     let app_h = app.clone();
                                     tokio::spawn(async move {
                                         tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
@@ -355,6 +400,6 @@ pub async fn run_pipeline(
     }
 
     listener.stop();
-    let _ = app.emit("pipeline-status", "stopped");
+    emit_pipeline_status(&app, &pipeline_status, "stopped");
     tracing::info!("pipeline stopped");
 }

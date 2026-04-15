@@ -34,6 +34,8 @@ const translations: Record<string, Record<string, string>> = {
     "settings.polish_heavy": "重度",
     "settings.save": "保存",
     "settings.restart_hint": "提示：部分设置需要重启后生效",
+    "overlay.recording": "录音中...",
+    "overlay.processing": "处理中...",
   },
   en: {
     "title.subtitle": "Voice to Text",
@@ -70,11 +72,15 @@ const translations: Record<string, Record<string, string>> = {
     "settings.polish_heavy": "Heavy",
     "settings.save": "Save",
     "settings.restart_hint": "Note: Some settings require restart to take effect",
+    "overlay.recording": "Recording...",
+    "overlay.processing": "Processing...",
   },
 };
 
 export function useTranslation() {
-  const [lang, setLangState] = useState<string>("zh");
+  const [lang, setLangState] = useState<string>(
+    () => localStorage.getItem("altgo-lang") || "zh"
+  );
 
   const setLang = (code: string) => {
     setLangState(code);

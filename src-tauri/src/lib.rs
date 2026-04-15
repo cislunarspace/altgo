@@ -8,6 +8,7 @@ pub struct AppState {
     config: Mutex<altgo::config::Config>,
     config_path: std::path::PathBuf,
     pipeline: Mutex<Option<PipelineHandle>>,
+    pipeline_status: std::sync::Arc<std::sync::RwLock<String>>,
 }
 
 struct PipelineHandle {
@@ -26,10 +27,13 @@ pub fn run() {
 
             let cfg_arc = std::sync::Arc::new(cfg.clone());
 
+            let pipeline_status =
+                std::sync::Arc::new(std::sync::RwLock::new(String::from("idle")));
             let state = AppState {
                 config: Mutex::new(cfg),
                 config_path,
                 pipeline: Mutex::new(None),
+                pipeline_status: pipeline_status.clone(),
             };
             app.manage(state);
 
@@ -43,7 +47,7 @@ pub fn run() {
                     .enable_all()
                     .build()
                     .expect("failed to build tokio runtime");
-                rt.block_on(cmd::run_pipeline(app_handle, cfg_arc, stop_rx));
+                rt.block_on(cmd::run_pipeline(app_handle, cfg_arc, stop_rx, pipeline_status));
             });
 
             {
