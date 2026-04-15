@@ -151,8 +151,10 @@ pub enum ApiProtocol {
     Anthropic,
 }
 
-impl ApiProtocol {
-    pub fn from_str(s: &str) -> anyhow::Result<Self> {
+impl std::str::FromStr for ApiProtocol {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> anyhow::Result<Self> {
         match s.to_lowercase().as_str() {
             "openai" => Ok(ApiProtocol::OpenAi),
             "anthropic" => Ok(ApiProtocol::Anthropic),
@@ -161,6 +163,13 @@ impl ApiProtocol {
                 other
             )),
         }
+    }
+}
+
+impl ApiProtocol {
+    #[allow(clippy::should_implement_trait)]
+    pub fn from_str(s: &str) -> anyhow::Result<Self> {
+        <Self as std::str::FromStr>::from_str(s)
     }
 }
 

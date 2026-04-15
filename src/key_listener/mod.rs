@@ -31,7 +31,7 @@ pub struct KeyEvent {
 }
 
 /// 防抖任务：过滤 IME 引起的按键抖动，将稳定的按键事件转发给状态机。
-pub(crate) async fn debounce_task(
+pub async fn debounce_task(
     mut key_events: tokio::sync::mpsc::UnboundedReceiver<KeyEvent>,
     key_tx: tokio::sync::mpsc::UnboundedSender<crate::state_machine::KeyEvent>,
     debounce_window: std::time::Duration,

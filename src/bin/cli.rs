@@ -1,39 +1,19 @@
-// On Windows, link as GUI subsystem when the gui feature is enabled.
-// This prevents the OS from allocating a console window.
-#![cfg_attr(
-    all(feature = "gui", target_os = "windows"),
-    windows_subsystem = "windows"
-)]
-
-//! altgo 入口模块。
+//! altgo CLI 入口。
 //!
-//! 负责 CLI 参数解析（clap）、初始化各子模块，并运行主事件循环。
-//! 整个程序是一个线性管道：
-//!
-//! ```text
-//! 按键监听 → 状态机 → 录音 → 语音识别 → 文本润色 → 输出（剪切板 + 通知）
-//! ```
-//!
-//! 主事件循环从状态机接收 `Command`，按需启动/停止录音，
-//! 并将录音数据交给 `process_audio` 进行异步处理（转写 → 润色 → 复制到剪切板）。
-
-mod audio;
-pub(crate) mod config;
-pub(crate) mod key_listener;
-pub(crate) mod output;
-pub(crate) mod pipeline;
-pub(crate) mod polisher;
-pub(crate) mod recorder;
-pub(crate) mod state_machine;
-pub(crate) mod transcriber;
-
-#[cfg(feature = "gui")]
-mod gui;
+//! 纯命令行模式运行语音转文字管道。
 
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 
+use altgo::config;
+use altgo::key_listener;
+use altgo::output;
+use altgo::pipeline;
+use altgo::polisher;
+use altgo::recorder;
+use altgo::state_machine;
+use altgo::transcriber;
 use clap::Parser;
 
 #[derive(Parser)]
@@ -46,14 +26,6 @@ struct Cli {
     /// Print version
     #[arg(short = 'V', long)]
     version: bool,
-
-    /// Launch the GUI (default when compiled with gui feature)
-    #[arg(long)]
-    gui: bool,
-
-    /// Force CLI mode even when GUI is available
-    #[arg(long)]
-    no_gui: bool,
 }
 
 #[tokio::main]
@@ -65,24 +37,6 @@ async fn main() -> anyhow::Result<()> {
         return Ok(());
     }
 
-    // Determine whether to launch GUI or CLI mode.
-    #[cfg(feature = "gui")]
-    let use_gui = !cli.no_gui; // Default to GUI when feature is enabled
-
-    #[cfg(not(feature = "gui"))]
-    let use_gui = cli.gui; // Only use GUI if explicitly requested
-
-    #[cfg(feature = "gui")]
-    if use_gui {
-        let state = gui::state::global_state();
-        return gui::run_gui(state);
-    }
-
-    #[cfg(not(feature = "gui"))]
-    if use_gui {
-        anyhow::bail!("GUI not available — rebuild with --features gui");
-    }
-
     let config_path = cli
         .config
         .map(std::path::PathBuf::from)
@@ -91,23 +45,19 @@ async fn main() -> anyhow::Result<()> {
     let cfg = Arc::new(config::Config::load(&config_path)?);
     cfg.as_ref().validate()?;
 
-    // Initialize logging.
     let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(&cfg.logging.level));
     tracing_subscriber::fmt().with_env_filter(env_filter).init();
 
     tracing::info!("altgo starting");
 
-    // Initialize key listener.
     let mut listener = key_listener::PlatformListener::new(&cfg.key_listener.key_name)?;
     #[cfg(target_os = "windows")]
     listener.set_poll_interval_ms(cfg.key_listener.poll_interval_ms);
 
-    // Initialize recorder.
     let mut recorder =
         recorder::PlatformRecorder::new(cfg.recorder.sample_rate, cfg.recorder.channels);
 
-    // Initialize transcriber.
     let transcriber: transcriber::Transcriber = match cfg.transcriber.engine.as_str() {
         "local" => {
             tracing::info!(
@@ -134,7 +84,6 @@ async fn main() -> anyhow::Result<()> {
         }
     };
 
-    // Initialize polisher.
     let polish_level = polisher::PolishLevel::from_str(&cfg.polisher.level).unwrap_or_else(|_| {
         tracing::warn!(
             level = %cfg.polisher.level,
@@ -159,16 +108,8 @@ async fn main() -> anyhow::Result<()> {
         cfg.polisher.system_prompt.clone(),
     )?;
 
-    // Start key listener.
     let key_events = listener.start()?;
 
-    // Convert key events for the state machine with debounce.
-    //
-    // On Windows with Chinese IME, Right Alt (VK_RMENU) can oscillate rapidly
-    // between pressed/released due to AltGr handling.  A release event that is
-    // immediately followed by a press within `debounce_window` is suppressed,
-    // preventing the state machine from seeing a spurious press-release-press
-    // sequence that would trigger continuous recording instead of long-press.
     let (key_tx, key_rx) = tokio::sync::mpsc::unbounded_channel();
     let debounce_window = cfg.key_listener.debounce_window();
     tokio::spawn(key_listener::debounce_task(
@@ -177,7 +118,6 @@ async fn main() -> anyhow::Result<()> {
         debounce_window,
     ));
 
-    // Start state machine.
     let sm = state_machine::Machine::new(
         cfg.key_listener.long_press_threshold(),
         cfg.key_listener.double_click_interval(),
@@ -187,11 +127,6 @@ async fn main() -> anyhow::Result<()> {
 
     tracing::info!("altgo initialized — waiting for trigger key");
 
-    // Main event loop with restart support.
-    //
-    // If the state machine exits (e.g., key listener subprocess crashed,
-    // channel dropped), we restart it up to MAX_RESTARTS times with a cooldown.
-    // This makes the program resilient to transient failures.
     const MAX_RESTARTS: u32 = 3;
     const RESTART_COOLDOWN: Duration = Duration::from_secs(1);
     let mut restart_count = 0u32;
@@ -217,7 +152,6 @@ async fn main() -> anyhow::Result<()> {
                         }
                     };
 
-                    // Spawn processing pipeline.
                     let cfg = Arc::clone(&cfg);
                     let formatter = formatter.clone();
                     let transcriber = transcriber.clone();
@@ -234,7 +168,6 @@ async fn main() -> anyhow::Result<()> {
             }
         }
 
-        // State machine exited (key event channel closed or command receiver dropped).
         restart_count += 1;
         if restart_count > MAX_RESTARTS {
             tracing::error!(
@@ -251,12 +184,9 @@ async fn main() -> anyhow::Result<()> {
         );
         tokio::time::sleep(RESTART_COOLDOWN).await;
 
-        // Clean up before restart: stop the old key listener subprocess
-        // and reset the recorder in case it was mid-recording.
         listener.stop();
         let _ = recorder.stop();
 
-        // Restart key listener and state machine.
         let key_events = match listener.start() {
             Ok(rx) => rx,
             Err(e) => {
@@ -287,7 +217,6 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// 语音处理管道：语音识别 → 文本润色 → 输出（注入光标或悬浮窗）。
 async fn process_audio(
     cfg: &Arc<config::Config>,
     transcriber: &transcriber::Transcriber,

@@ -20,7 +20,7 @@ pub struct PipelineOutput {
 /// 运行核心管道：转写 → 润色。
 ///
 /// 不包含剪贴板写入和通知 — 由调用方处理。
-pub(crate) async fn process_audio_core(
+pub async fn process_audio_core(
     transcriber: &Transcriber,
     formatter: &LLMFormatter,
     wav_data: &[u8],

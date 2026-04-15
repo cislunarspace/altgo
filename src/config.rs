@@ -326,8 +326,7 @@ impl Config {
         Ok(())
     }
 
-    /// 将配置保存到指定路径（仅 GUI 模式使用）。
-    #[cfg(feature = "gui")]
+    /// 将配置保存到指定路径。
     pub fn save(&self, path: &Path) -> Result<()> {
         let content = toml::to_string_pretty(self).context("failed to serialize config to TOML")?;
 

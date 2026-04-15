@@ -15,6 +15,12 @@ pub struct Buffer {
     data: Mutex<Vec<u8>>,
 }
 
+impl Default for Buffer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Buffer {
     /// 创建新的空缓冲区。
     pub fn new() -> Self {
