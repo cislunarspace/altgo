@@ -46,6 +46,34 @@ else
     echo "[OK] ffmpeg downloaded to ${FFMPEG_TARGET}"
 fi
 
+# ─── Build whisper-cli from source (fallback) ──────────────────────────────────
+build_whisper_from_source() {
+    local target="$1"
+    echo "[INFO] Building whisper-cli from source..."
+
+    TMP_BUILD=$(mktemp -d)
+    git clone --depth 1 --branch "v${WHISPER_VERSION}" https://github.com/ggml-org/whisper.cpp.git "${TMP_BUILD}/whisper"
+
+    cd "${TMP_BUILD}/whisper"
+    if [[ "${ARCH}" == "aarch64" ]]; then
+        cmake -B build -DCMAKE_C_COMPILER=aarch64-linux-gnu-gcc -DCMAKE_CXX_COMPILER=aarch64-linux-gnu-g++ .
+    else
+        cmake -B build .
+    fi
+    cmake --build build --config Release -j"$(nproc)"
+
+    WHISPER_BIN=$(find "${TMP_BUILD}/whisper/build/bin" -name "whisper-cli" -o -name "main" 2>/dev/null | head -1)
+    if [[ -n "${WHISPER_BIN}" ]]; then
+        cp "${WHISPER_BIN}" "${target}"
+        chmod +x "${target}"
+    else
+        echo "[ERROR] Failed to build whisper-cli"
+        exit 1
+    fi
+    rm -rf "${TMP_BUILD}"
+    echo "[OK] whisper-cli built from source"
+}
+
 # ─── whisper-cli ───────────────────────────────────────────────────────────────
 WHISPER_VERSION="1.7.5"
 WHISPER_TARGET="${BIN_DIR}/whisper-cli"
@@ -81,29 +109,3 @@ else
 fi
 
 echo "[OK] All dependencies ready in ${BIN_DIR}/"
-
-# ─── Build whisper-cli from source (fallback) ──────────────────────────────────
-build_whisper_from_source() {
-    local target="$1"
-    echo "[INFO] Building whisper-cli from source..."
-
-    TMP_BUILD=$(mktemp -d)
-    git clone --depth 1 --branch "v${WHISPER_VERSION}" https://github.com/ggml-org/whisper.cpp.git "${TMP_BUILD}/whisper"
-
-    cd "${TMP_BUILD}/whisper"
-    if [[ "${ARCH}" == "aarch64" ]]; then
-        cmake -B build -DCMAKE_C_COMPILER=aarch64-linux-gnu-gcc -DCMAKE_CXX_COMPILER=aarch64-linux-gnu-g++ .
-    else
-        cmake -B build .
-    fi
-    cmake --build build --config Release -j"$(nproc)"
-
-    cp build/bin/whisper-cli "${target}" 2>/dev/null || cp build/bin/main "${target}" 2>/dev/null || {
-        echo "[ERROR] Failed to build whisper-cli"
-        exit 1
-    }
-    chmod +x "${target}"
-    cd -
-    rm -rf "${TMP_BUILD}"
-    echo "[OK] whisper-cli built from source"
-}
