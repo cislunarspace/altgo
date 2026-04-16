@@ -193,7 +193,8 @@ impl LocalWhisper {
 ///
 /// 查找顺序：
 /// 1. 用户通过配置指定的路径（`whisper_path`）
-/// 2. 系统 PATH 中的 `whisper-cli` 和 `whisper-cpp`
+/// 2. 捆绑安装的二进制文件
+/// 3. 系统 PATH 中的 `whisper-cli` 和 `whisper-cpp`
 fn find_whisper_binary(whisper_path: &str) -> anyhow::Result<std::path::PathBuf> {
     static CACHE: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
 
@@ -215,7 +216,18 @@ fn find_whisper_binary(whisper_path: &str) -> anyhow::Result<std::path::PathBuf>
         ));
     }
 
-    // 2. Search on PATH using `which` (Linux/macOS) or `where` (Windows).
+    // 2. Check bundled location.
+    let bundled_name = if cfg!(windows) {
+        "whisper-cli.exe"
+    } else {
+        "whisper-cli"
+    };
+    if let Some(bundled) = crate::resource::bundled_bin(bundled_name) {
+        let _ = CACHE.set(bundled.clone());
+        return Ok(bundled);
+    }
+
+    // 3. Search on PATH using `which` (Linux/macOS) or `where` (Windows).
     let candidates = ["whisper-cli", "whisper-cpp"];
     for candidate in &candidates {
         if let Ok(found) = which_binary(candidate) {

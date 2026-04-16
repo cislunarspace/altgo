@@ -8,6 +8,7 @@ use std::time::Duration;
 
 use altgo::config;
 use altgo::key_listener;
+use altgo::model;
 use altgo::output;
 use altgo::pipeline;
 use altgo::polisher;
@@ -42,8 +43,18 @@ async fn main() -> anyhow::Result<()> {
         .map(std::path::PathBuf::from)
         .unwrap_or_else(config::Config::default_config_path);
 
-    let cfg = Arc::new(config::Config::load(&config_path)?);
-    cfg.as_ref().validate()?;
+    let mut cfg = config::Config::load(&config_path)?;
+    cfg.validate()?;
+
+    // If using local engine, check that a model is available.
+    if cfg.transcriber.engine == "local"
+        && model::resolve_model_path(&cfg.transcriber.model).is_none()
+    {
+        let model_path = model::interactive_prompt().await?;
+        cfg.transcriber.model = model_path.to_string_lossy().to_string();
+    }
+
+    let cfg = Arc::new(cfg);
 
     let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(&cfg.logging.level));

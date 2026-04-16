@@ -66,6 +66,23 @@ jobs:
       - name: Build
         run: cargo build --target ${{ matrix.target }} --release
 
+      # Download bundled dependencies (Linux)
+      - name: Download dependencies (Linux x86_64)
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        run: bash scripts/download-deps.sh x86_64
+
+      - name: Download dependencies (Linux ARM64)
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
+          bash scripts/download-deps.sh aarch64
+
+      # Download bundled dependencies (Windows)
+      - name: Download dependencies (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: pwsh scripts/download-deps.ps1
+
       # Build DEB packages
       - name: Build DEB (Linux x86_64)
         if: matrix.target == 'x86_64-unknown-linux-gnu'
@@ -88,7 +105,12 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          Compress-Archive -Path target/${{ matrix.target }}/release/altgo.exe -DestinationPath ${{ matrix.artifact }}.zip
+          $ReleaseDir = "target/${{ matrix.target }}/release"
+          $Items = @("$ReleaseDir/altgo.exe")
+          if (Test-Path "$ReleaseDir/bin") {
+            $Items += "$ReleaseDir/bin"
+          }
+          Compress-Archive -Path $Items -DestinationPath ${{ matrix.artifact }}.zip
 
       # Build MSI (Windows)
       - name: Build MSI (Windows)
@@ -98,7 +120,12 @@ jobs:
           VERSION: ${{ github.ref_name }}
         run: |
           $env:Path = "$env:USERPROFILE\.dotnet\tools;$env:Path"
-          wix build msi/Product.wxs -d Version=$($env:VERSION -replace 'v','') -d SourceDir=target/${{ matrix.target }}/release -o target/${{ matrix.artifact }}.msi
+          # Stage bundled binaries next to altgo.exe for WiX.
+          $ReleaseDir = "target/${{ matrix.target }}/release"
+          if (Test-Path "target/deps/bin") {
+            Copy-Item -Path "target/deps/bin" -Destination "$ReleaseDir/bin" -Recurse -Force
+          }
+          wix build msi/Product.wxs -d Version=$($env:VERSION -replace 'v','') -d SourceDir=$ReleaseDir -o target/${{ matrix.artifact }}.msi
 
       # Upload DEB artifacts
       - name: Upload DEB artifacts

@@ -28,7 +28,7 @@ pub struct WindowsRecorder {
     done: std::sync::Mutex<Option<JoinHandle<()>>>,
 }
 
-/// 在 PATH 和常见安装位置中查找 ffmpeg 可执行文件。
+/// 在 PATH、捆绑安装和常见安装位置中查找 ffmpeg 可执行文件。
 fn find_ffmpeg() -> String {
     // Try PATH first via cmd's `where` (more reliable than PowerShell's where).
     if let Ok(output) = std::process::Command::new("cmd")
@@ -44,6 +44,12 @@ fn find_ffmpeg() -> String {
                 return p.to_string();
             }
         }
+    }
+
+    // Check bundled location.
+    if let Some(bundled) = crate::resource::bundled_bin("ffmpeg.exe") {
+        tracing::debug!(path = %bundled.display(), "found bundled ffmpeg");
+        return bundled.to_string_lossy().to_string();
     }
 
     // Search common winget install location.

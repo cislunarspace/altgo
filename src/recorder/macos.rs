@@ -73,7 +73,13 @@ impl SoxRecorder {
                 Ok(c) => c,
                 Err(e) => {
                     tracing::warn!(error = %e, "sox not found, trying ffmpeg");
-                    match std::process::Command::new("ffmpeg")
+
+                    // Try bundled ffmpeg first, then bare "ffmpeg".
+                    let ffmpeg_cmd = crate::resource::bundled_bin("ffmpeg")
+                        .map(|p| p.to_string_lossy().to_string())
+                        .unwrap_or_else(|| "ffmpeg".to_string());
+
+                    match std::process::Command::new(&ffmpeg_cmd)
                         .args([
                             "-f",
                             "avfoundation",

@@ -17,6 +17,14 @@
                 <Component Id="MainExecutable">
                     <File Id="altgo.exe" Source="$(var.SourceDir)\altgo.exe" KeyPath="yes" />
                 </Component>
+                <Directory Id="BinFolder" Name="bin">
+                    <Component Id="FfmpegBinary">
+                        <File Id="ffmpeg.exe" Source="$(var.SourceDir)\bin\ffmpeg.exe" />
+                    </Component>
+                    <Component Id="WhisperBinary">
+                        <File Id="whisper-cli.exe" Source="$(var.SourceDir)\bin\whisper-cli.exe" />
+                    </Component>
+                </Directory>
             </Directory>
         </StandardDirectory>
 
@@ -36,6 +44,8 @@
 
         <Feature Id="ProductFeature" Title="altgo" Level="1">
             <ComponentRef Id="MainExecutable" />
+            <ComponentRef Id="FfmpegBinary" />
+            <ComponentRef Id="WhisperBinary" />
             <ComponentRef Id="ApplicationShortcut" />
         </Feature>
     </Package>

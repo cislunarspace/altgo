@@ -6,10 +6,12 @@
 pub mod audio;
 pub mod config;
 pub mod key_listener;
+pub mod model;
 pub mod output;
 pub mod pipeline;
 pub mod polisher;
 pub mod recorder;
+pub mod resource;
 pub mod state_machine;
 pub mod transcriber;
 
