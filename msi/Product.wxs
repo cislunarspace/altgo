@@ -9,6 +9,8 @@
 
         <MajorUpgrade DowngradeErrorMessage="A newer version of [ProductName] is already installed." />
 
+        <MediaTemplate EmbedCab="yes" />
+
         <Icon Id="ProductIcon" SourceFile="$(var.SourceDir)\altgo.exe" />
         <Property Id="ARPPRODUCTICON" Value="ProductIcon" />
 
