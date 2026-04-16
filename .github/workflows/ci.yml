@@ -35,13 +35,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
-            libgl1-mesa-dev \
-            libxcb1-dev \
-            libxkbcommon-dev \
-            libxkbcommon-x11-dev \
-            libspeechd-dev \
-            libasound2-dev
+          sudo apt-get install -y libspeechd-dev libasound2-dev
 
       - name: Check formatting
         run: cargo fmt --all -- --check

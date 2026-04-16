@@ -2,6 +2,10 @@
 /target/
 /src-tauri/target/
 altgo
+altgo.exe
+
+# Test artifacts
+test.*
 
 # Frontend
 /frontend/node_modules/

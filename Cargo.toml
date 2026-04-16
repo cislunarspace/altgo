@@ -7,16 +7,21 @@ homepage = "https://github.com/cislunarspace/altgo"
 
 [package.metadata.deb]
 name = "altgo"
-maintainer = "altgo"
+maintainer = "cislunarspace"
 section = "Utility"
 priority = "optional"
+depends = "libasound2, libspeechd2"
+assets = [
+    ["target/release/altgo", "usr/bin/", "755"],
+    ["configs/altgo.toml", "etc/altgo/altgo.toml", "644"],
+]
 
 [lib]
 name = "altgo"
 path = "src/lib.rs"
 
 [[bin]]
-name = "altgo-cli"
+name = "altgo"
 path = "src/bin/cli.rs"
 
 [profile.release]

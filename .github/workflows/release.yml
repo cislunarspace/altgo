@@ -47,25 +47,11 @@ jobs:
         with:
           key: ${{ matrix.target }}
 
-      # Linux system deps for GUI (glow/OpenGL)
       - name: Install system dependencies (Linux)
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
-            libgl1-mesa-dev \
-            libxcb1-dev \
-            libxkbcommon-dev \
-            libxkbcommon-x11-dev \
-            libspeechd-dev \
-            libasound2-dev
-
-      # macOS SDK setup (for tao/eframe)
-      - name: Setup macOS SDK
-        if: runner.os == 'macOS'
-        run: |
-          echo "MACOSX_DEPLOYMENT_TARGET=10.13" >> $GITHUB_ENV
-          sudo xcode-select --switch /Applications/Xcode.app/Contents/Developer
+          sudo apt-get install -y libspeechd-dev libasound2-dev
 
       # Windows WiX toolchain
       - name: Install WiX (Windows MSI)
