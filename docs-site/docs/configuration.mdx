@@ -1,0 +1,183 @@
+---
+sidebar_position: 2
+title: 配置指南
+---
+
+# 配置指南
+
+altgo 使用 TOML 格式的配置文件，所有字段都有默认值，只需修改你需要的部分。
+
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
+
+## 配置文件位置
+
+<Tabs groupId="os">
+<TabItem value="linux" label="Linux">
+
+`~/.config/altgo/altgo.toml`
+
+</TabItem>
+<TabItem value="windows" label="Windows">
+
+`%APPDATA%\altgo\altgo.toml`（通常是 `C:\Users\<用户名>\AppData\Roaming\altgo\altgo.toml`）
+
+</TabItem>
+<TabItem value="macos" label="macOS">
+
+`~/.config/altgo/altgo.toml`
+
+</TabItem>
+</Tabs>
+
+## 转写引擎配置
+
+### 本地 whisper.cpp（推荐，无需 API 密钥）
+
+```toml
+[transcriber]
+engine = "local"
+model = "~/models/ggml-base.bin"
+whisper_path = ""
+language = "zh"
+```
+
+### 云端 Whisper API
+
+```toml
+[transcriber]
+engine = "api"
+api_key = "sk-your-key"
+api_base_url = "https://api.openai.com"
+model = "whisper-1"
+language = "zh"
+```
+
+也可以通过环境变量设置密钥：
+
+```bash
+export ALTGO_TRANSCRIBER_API_KEY="sk-your-key"
+```
+
+## 润色配置
+
+altgo 支持通过 LLM 对转写文本进行润色。
+
+### 润色级别
+
+| 级别 | 效果 | 需要 API 密钥 |
+|------|------|:---:|
+| `none` | 不润色，直接输出转写文本 | 否 |
+| `light` | 修正标点和错别字 | 是 |
+| `medium` | 修正语法、改善语序通顺度 | 是 |
+| `heavy` | 结构化重写，适合正式文档 | 是 |
+
+### 配置示例
+
+```toml
+[polisher]
+level = "medium"
+protocol = "openai"
+api_key = "sk-your-key"
+api_base_url = "https://..."
+model = "your-model"
+```
+
+### 支持的 Provider
+
+#### OpenAI
+
+```toml
+[polisher]
+protocol = "openai"
+api_key = "sk-your-key"
+api_base_url = "https://api.openai.com"
+model = "gpt-3.5-turbo"
+```
+
+#### DeepSeek
+
+```toml
+[polisher]
+protocol = "openai"
+api_key = "sk-your-key"
+api_base_url = "https://api.deepseek.com"
+model = "deepseek-chat"
+```
+
+#### Anthropic
+
+```toml
+[polisher]
+protocol = "anthropic"
+api_key = "sk-ant-your-key"
+api_base_url = "https://api.anthropic.com"
+model = "claude-sonnet-4-20250514"
+```
+
+#### 本地 Ollama
+
+```toml
+[polisher]
+protocol = "openai"
+api_key = "ollama"
+api_base_url = "http://localhost:11434"
+model = "qwen2.5:7b"
+```
+
+环境变量覆盖密钥：
+
+```bash
+export ALTGO_POLISHER_API_KEY="sk-your-key"
+```
+
+## 按键配置
+
+```toml
+[key_listener]
+key_name = "ISO_Level3_Shift"      # 触发键，默认右 Alt
+long_press_threshold_ms = 200      # 长按判定阈值 (ms)
+double_click_interval_ms = 300     # 双击判定间隔 (ms)
+min_press_duration_ms = 100        # 最短按下时长，过滤 IME 抖动
+```
+
+## 录音配置
+
+```toml
+[recorder]
+sample_rate = 16000                # 采样率
+channels = 1                       # 声道数
+```
+
+## 输出配置
+
+```toml
+[output]
+enable_notify = true               # 桌面通知
+notify_timeout_ms = 5000
+inject_at_cursor = true            # 尝试注入到光标位置（仅 Windows）
+prefer_polished = true             # 优先使用润色后的文本
+```
+
+## 日志配置
+
+```toml
+[logging]
+level = "info"                     # debug / info / warn / error
+```
+
+也可以通过环境变量：
+
+```bash
+RUST_LOG=altgo=debug altgo
+```
+
+## 优先级
+
+**环境变量 > 配置文件 > 代码默认值**
+
+| 环境变量 | 覆盖字段 |
+|---------|---------|
+| `ALTGO_TRANSCRIBER_API_KEY` | `transcriber.api_key` |
+| `ALTGO_POLISHER_API_KEY` | `polisher.api_key` |
+| `RUST_LOG` | 日志级别 |

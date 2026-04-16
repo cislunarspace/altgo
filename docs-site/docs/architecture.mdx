@@ -1,0 +1,103 @@
+---
+sidebar_position: 4
+title: 架构设计
+---
+
+# 架构设计
+
+## 整体流水线
+
+altgo 采用线性流水线架构，由键盘事件驱动：
+
+```
+按键监听 → 状态机 → 录音 → ASR 转写 → LLM 润色 → 剪贴板 + 通知
+```
+
+各模块之间通过 `tokio::sync::mpsc` 异步通道解耦，每个处理阶段作为独立的 `tokio::spawn` 任务运行。
+
+## 模块结构
+
+```
+src/
+├── main.rs            # 入口，CLI 解析，事件循环
+├── config.rs          # TOML 配置加载（serde）
+├── state_machine.rs   # 按键状态机
+├── audio.rs           # WAV 编解码，线程安全 Buffer
+├── transcriber.rs     # Whisper API + 本地 whisper.cpp
+├── polisher.rs        # LLM 文本润色
+├── pipeline.rs        # 音频处理流水线
+├── key_listener/      # 跨平台按键监听
+│   ├── mod.rs         # 公共接口 + 去抖逻辑
+│   ├── linux.rs       # xinput test-xi2
+│   ├── macos.rs       # CGEvent tap
+│   └── windows.rs     # PowerShell GetAsyncKeyState
+├── recorder/          # 跨平台音频录制
+│   ├── mod.rs         # 公共接口
+│   ├── linux.rs       # parecord
+│   ├── macos.rs       # sox / ffmpeg
+│   └── windows.rs     # ffmpeg / sox
+└── output/            # 跨平台剪贴板 + 通知
+    ├── mod.rs         # 公共接口
+    ├── linux.rs       # xclip / xsel / wl-copy + notify-send
+    ├── macos.rs       # pbcopy + osascript
+    └── windows.rs     # clip.exe + PowerShell toast
+```
+
+## 按键状态机
+
+状态机管理 5 个状态之间的转换：
+
+```
+         按下
+  Idle ──────→ PotentialPress
+   ↑               │
+   │          长按超时         双击超时
+   │               ↓               ↓
+   │          Recording      WaitSecondClick
+   │               │               │
+   │          松开            再次按下
+   │               ↓               ↓
+   └──────── ContinuousRecording ←─┘
+```
+
+- **长按**（> 200ms）→ 进入 `Recording`，松开停止
+- **双击**（< 300ms 间隔）→ 进入 `ContinuousRecording`，单击停止
+- 使用 `tokio::select!` 同时等待按键事件和超时
+
+## 跨平台策略
+
+每个平台模块（`key_listener`、`recorder`、`output`）通过 `#[cfg(target_os = ...)]` 条件编译：
+
+```rust
+// recorder/mod.rs
+#[cfg(target_os = "linux")]
+pub type PlatformRecorder = LinuxRecorder;
+#[cfg(target_os = "macos")]
+pub type PlatformRecorder = MacOSRecorder;
+#[cfg(target_os = "windows")]
+pub type PlatformRecorder = WindowsRecorder;
+```
+
+- **静态分派**，不使用 trait 对象
+- 所有平台交互通过 **子进程调用** CLI 工具，而非 FFI
+- 简化了跨编译和平台适配
+
+## 转写引擎
+
+通过 `Transcriber` 枚举分派：
+
+- `WhisperApi` — HTTP multipart 上传到 OpenAI 兼容端点
+- `LocalWhisper` — 子进程调用 `whisper-cli` 二进制
+
+## 润色引擎
+
+- 支持 4 个级别：`none` / `light` / `medium` / `heavy`
+- 使用 OpenAI 兼容 chat API
+- 指数退避重试（最多 3 次）
+
+## 测试策略
+
+- `config.rs` / `audio.rs` — 全面的单元测试
+- `transcriber.rs` / `polisher.rs` — 使用 `mockito` 进行 HTTP 级别 mock
+- 平台模块 — 仅构造/冒烟测试
+- CI 在三个平台（Linux / macOS / Windows）上运行：`fmt`、`clippy`、`build --release`、`test`

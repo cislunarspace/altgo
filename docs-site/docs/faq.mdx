@@ -1,0 +1,140 @@
+---
+sidebar_position: 5
+title: 常见问题
+---
+
+# 常见问题
+
+## 录音相关
+
+### 录音没有声音 / 转写结果为空
+
+1. 检查麦克风是否被系统识别
+2. 确认录音工具已安装（Linux: `parecord`, macOS: `sox`, Windows: `ffmpeg`）
+3. 查看日志输出：`RUST_LOG=altgo=debug altgo`
+
+### ffmpeg 录音启动很慢
+
+ffmpeg 的 `dshow` 设备初始化需要时间。首次启动时会自动预热设备缓存，后续录音会更快。
+
+## 按键相关
+
+### 按右 Alt 没有反应
+
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
+
+<Tabs groupId="os">
+<TabItem value="linux" label="Linux">
+
+1. 确认 `xinput` 已安装：`which xinput`
+2. 检查按键名称：`xmodmap -pke | grep Alt`，确认 `ISO_Level3_Shift` 绑定正确
+3. 如果使用 Wayland，按键监听可能不可用
+
+</TabItem>
+<TabItem value="windows" label="Windows">
+
+1. PowerShell 窗口需要保持前台
+2. 如果使用 IME，可能需要增加 `min_press_duration_ms`
+
+</TabItem>
+<TabItem value="macos" label="macOS">
+
+1. 确认已在 **系统设置 → 隐私与安全性 → 辅助功能** 中授权
+2. 首次运行需要手动添加授权
+
+</TabItem>
+</Tabs>
+
+### 误触发 / IME 冲突
+
+增加 `min_press_duration_ms` 的值（默认 100ms）来过滤短按抖动：
+
+```toml
+[key_listener]
+min_press_duration_ms = 200
+```
+
+## 转写相关
+
+### 中文识别效果不好
+
+1. 使用更大的模型（推荐 `medium` 或 `large`）
+2. 确认 `language = "zh"` 设置正确
+3. 如果使用 API 模式，可以设置 `prompt` 提供领域词汇
+
+```toml
+[transcriber]
+language = "zh"
+prompt = "技术会议，产品讨论"
+```
+
+### 本地模型在哪里下载？
+
+从 Hugging Face 下载 GGML 格式模型：
+
+| 模型 | 大小 | 中文效果 |
+|------|------|---------|
+| tiny | ~75 MB | 一般 |
+| base | ~148 MB | 日常够用 |
+| small | ~488 MB | 较好 |
+| medium | ~1.5 GB | 推荐 |
+| large | ~3 GB | 最佳 |
+
+下载地址：`https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-{size}.bin`
+
+## 润色相关
+
+### 润色太慢
+
+1. 降低润色级别（`heavy` → `medium` → `light`）
+2. 使用更快的模型或本地 Ollama
+3. 设置 `level = "none"` 关闭润色
+
+### 润色改变了原意
+
+使用 `light` 级别，只修正标点和错别字，不改变内容。或者使用自定义 system prompt：
+
+```toml
+[polisher]
+level = "light"
+system_prompt = "只修正标点和错别字，不要改变原文的意思和语气"
+```
+
+## 通用
+
+### 如何后台运行？
+
+<Tabs groupId="os">
+<TabItem value="linux" label="Linux">
+
+```bash
+nohup altgo &
+# 或使用 systemd user service
+```
+
+</TabItem>
+<TabItem value="windows" label="Windows">
+
+```powershell
+Start-Process -WindowStyle Hidden .\altgo.exe
+```
+
+</TabItem>
+<TabItem value="macos" label="macOS">
+
+```bash
+# 使用 launchd 或直接
+nohup altgo &
+```
+
+</TabItem>
+</Tabs>
+
+### 如何查看日志？
+
+```bash
+RUST_LOG=altgo=debug altgo
+```
+
+可用的日志级别：`debug`、`info`、`warn`、`error`

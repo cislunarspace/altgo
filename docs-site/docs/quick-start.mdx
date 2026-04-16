@@ -1,0 +1,218 @@
+---
+sidebar_position: 1
+title: 快速开始
+---
+
+# 快速开始
+
+altgo 支持 Linux、macOS 和 Windows。选择你的平台：
+
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
+
+## 一键安装
+
+<Tabs groupId="os">
+<TabItem value="linux" label="Linux">
+
+```bash
+git clone https://github.com/cislunarspace/altgo.git
+cd altgo
+chmod +x install.sh
+./install.sh            # 默认下载 base 模型
+# ./install.sh --model small   # 或指定模型大小
+```
+
+脚本会自动：检查 Rust 工具链 → 编译 altgo → 编译 whisper.cpp → 下载模型 → 生成配置文件。
+
+如缺少系统依赖（xinput、parecord 等），脚本会提示安装命令，不会自动执行 `sudo`。
+
+</TabItem>
+<TabItem value="windows" label="Windows">
+
+```powershell
+git clone https://github.com/cislunarspace/altgo.git
+cd altgo
+.\install.ps1               # 默认下载 base 模型
+# .\install.ps1 -Model small  # 或指定模型大小
+```
+
+脚本会自动：检查 Rust 工具链 → 编译 altgo → 下载 whisper.cpp 预编译二进制 → 下载模型 → 生成配置文件。
+
+</TabItem>
+<TabItem value="macos" label="macOS">
+
+macOS 暂无一键安装脚本，请参考下方手动安装步骤。
+
+</TabItem>
+</Tabs>
+
+## 手动安装
+
+### 1. 安装系统依赖
+
+<Tabs groupId="os">
+<TabItem value="linux" label="Linux">
+
+```bash
+# Debian/Ubuntu
+sudo apt install xinput xdotool pulseaudio-utils xclip libnotify-bin
+
+# Arch
+sudo pacman -S xorg-xinput pulseaudio xclip libnotify
+```
+
+</TabItem>
+<TabItem value="windows" label="Windows">
+
+```powershell
+# 安装 Rust（从源码编译时需要）
+winget install Rustlang.Rustup
+
+# 安装音频录制工具（推荐 ffmpeg）
+winget install ffmpeg
+```
+
+</TabItem>
+<TabItem value="macos" label="macOS">
+
+```bash
+brew install sox
+```
+
+:::info 辅助功能权限
+altgo 使用 CGEvent tap 监听按键，需要在 **系统设置 → 隐私与安全性 → 辅助功能** 中授权终端或 altgo 应用。
+:::
+
+</TabItem>
+</Tabs>
+
+### 2. 编译 altgo
+
+```bash
+git clone https://github.com/cislunarspace/altgo.git
+cd altgo
+cargo build --release
+```
+
+Linux / macOS 可使用 `sudo make install` 安装到系统路径。
+
+### 3. 安装 whisper.cpp
+
+<Tabs groupId="os">
+<TabItem value="linux" label="Linux">
+
+```bash
+git clone https://github.com/ggerganov/whisper.cpp.git
+cd whisper.cpp
+make -j
+sudo cp main /usr/local/bin/whisper-cli
+```
+
+</TabItem>
+<TabItem value="windows" label="Windows">
+
+前往 [whisper.cpp Releases](https://github.com/ggerganov/whisper.cpp/releases) 下载最新的 `whisper-bin-x64.zip`。
+
+```powershell
+mkdir "C:\Program Files\whisper"
+# 将解压的 exe 和 dll 全部复制过去
+copy bin\* "C:\Program Files\whisper\"
+```
+
+</TabItem>
+<TabItem value="macos" label="macOS">
+
+```bash
+git clone https://github.com/ggerganov/whisper.cpp.git
+cd whisper.cpp
+make -j
+sudo cp main /usr/local/bin/whisper-cli
+```
+
+</TabItem>
+</Tabs>
+
+### 4. 下载模型
+
+<Tabs groupId="os">
+<TabItem value="linux" label="Linux">
+
+```bash
+mkdir -p ~/models
+wget https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin \
+  -O ~/models/ggml-base.bin
+```
+
+</TabItem>
+<TabItem value="windows" label="Windows">
+
+```powershell
+mkdir "$env:USERPROFILE\models"
+Invoke-WebRequest -Uri `
+  "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin" `
+  -OutFile "$env:USERPROFILE\models\ggml-base.bin"
+```
+
+</TabItem>
+<TabItem value="macos" label="macOS">
+
+```bash
+mkdir -p ~/models
+curl -L -o ~/models/ggml-base.bin \
+  https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin
+```
+
+</TabItem>
+</Tabs>
+
+### 5. 创建配置文件
+
+<Tabs groupId="os">
+<TabItem value="linux" label="Linux">
+
+```bash
+mkdir -p ~/.config/altgo
+cp configs/altgo.toml ~/.config/altgo/altgo.toml
+```
+
+</TabItem>
+<TabItem value="windows" label="Windows">
+
+```powershell
+mkdir "$env:APPDATA\altgo"
+copy configs\altgo.toml "$env:APPDATA\altgo\altgo.toml"
+```
+
+</TabItem>
+<TabItem value="macos" label="macOS">
+
+```bash
+mkdir -p ~/.config/altgo
+cp configs/altgo.toml ~/.config/altgo/altgo.toml
+```
+
+</TabItem>
+</Tabs>
+
+编辑配置文件，设置本地模型路径：
+
+```toml
+[transcriber]
+engine = "local"
+model = "~/models/ggml-base.bin"
+language = "zh"
+
+[polisher]
+level = "none"
+```
+
+## 启动
+
+安装完成后，直接运行：
+
+```bash
+altgo
+```
+
+按住 **右 Alt** 键开始说话，松开后文字自动出现在剪贴板中。
