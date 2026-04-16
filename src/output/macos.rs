@@ -70,6 +70,32 @@ pub fn notify_result(text: &str, timeout_ms: u64) -> anyhow::Result<()> {
     notify("altgo", &truncated, timeout_ms)
 }
 
+pub fn show_recording_window() -> anyhow::Result<()> {
+    Ok(())
+}
+
+pub fn close_recording_window() -> anyhow::Result<()> {
+    Ok(())
+}
+
+pub async fn output_text(
+    raw_text: &str,
+    polished_text: &str,
+    polish_failed: bool,
+    _inject_at_cursor: bool,
+    prefer_polished: bool,
+    timeout_ms: u64,
+) -> anyhow::Result<&'static str> {
+    let text_to_use = if prefer_polished && !polish_failed {
+        polished_text
+    } else {
+        raw_text
+    };
+    write_clipboard(text_to_use).await?;
+    notify_result(text_to_use, timeout_ms)?;
+    Ok("clipboard")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

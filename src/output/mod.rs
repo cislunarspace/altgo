@@ -18,10 +18,16 @@ mod windows;
 
 // Re-export platform-specific functions with a uniform API.
 #[cfg(target_os = "linux")]
-pub use linux::{notify, notify_processing, notify_result, write_clipboard};
+pub use linux::{
+    close_recording_window, notify, notify_processing, notify_result, output_text,
+    show_recording_window, write_clipboard,
+};
 
 #[cfg(target_os = "macos")]
-pub use macos::{notify, notify_processing, notify_result, write_clipboard};
+pub use macos::{
+    close_recording_window, notify, notify_processing, notify_result, output_text,
+    show_recording_window, write_clipboard,
+};
 
 #[cfg(target_os = "windows")]
 #[allow(unused_imports)]
