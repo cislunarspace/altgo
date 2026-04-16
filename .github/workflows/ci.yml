@@ -29,7 +29,7 @@ jobs:
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
         with:
-          key: ${{ matrix.target }}-gui
+          key: ${{ matrix.target }}
 
       - name: Install system dependencies (Linux)
         if: runner.os == 'Linux'
@@ -49,8 +49,8 @@ jobs:
       - name: Clippy
         run: cargo clippy --target ${{ matrix.target }} -- -D warnings
 
-      - name: Build (with GUI)
-        run: cargo build --target ${{ matrix.target }} --release --features gui
+      - name: Build
+        run: cargo build --target ${{ matrix.target }} --release
 
       - name: Run tests
-        run: cargo test --target ${{ matrix.target }} --features gui
+        run: cargo test --target ${{ matrix.target }}

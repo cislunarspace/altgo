@@ -45,7 +45,7 @@ jobs:
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
         with:
-          key: ${{ matrix.target }}-gui
+          key: ${{ matrix.target }}
 
       # Linux system deps for GUI (glow/OpenGL)
       - name: Install system dependencies (Linux)
@@ -77,9 +77,8 @@ jobs:
         if: matrix.deb == true
         run: cargo install cargo-deb --locked
 
-      # Build with GUI feature
       - name: Build
-        run: cargo build --target ${{ matrix.target }} --release --features gui
+        run: cargo build --target ${{ matrix.target }} --release
 
       # Build DEB packages
       - name: Build DEB (Linux x86_64)
