@@ -22,7 +22,7 @@
                         <File Id="ffmpeg.exe" Source="$(var.SourceDir)\bin\ffmpeg.exe" />
                     </Component>
                     <Component Id="WhisperBinary">
-                        <File Id="whisper-cli.exe" Source="$(var.SourceDir)\bin\whisper-cli.exe" />
+                        <File Id="whisper_cli_exe" Source="$(var.SourceDir)\bin\whisper-cli.exe" />
                     </Component>
                 </Directory>
             </Directory>
