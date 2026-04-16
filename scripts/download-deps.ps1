@@ -49,7 +49,7 @@ if (Test-Path $FfmpegTarget) {
 }
 
 # --- whisper-cli ---
-$WhisperVersion = "1.7.5"
+$WhisperVersion = "1.8.4"
 $WhisperTarget = "$BinDir/whisper-cli.exe"
 
 if (Test-Path $WhisperTarget) {
@@ -57,7 +57,7 @@ if (Test-Path $WhisperTarget) {
 } else {
     Write-Host "[INFO] Downloading whisper-cli $WhisperVersion..."
 
-    $WhisperUrl = "https://github.com/ggml-org/whisper.cpp/releases/download/v$WhisperVersion/whisper-windows-x64.zip"
+    $WhisperUrl = "https://github.com/ggml-org/whisper.cpp/releases/download/v$WhisperVersion/whisper-bin-x64.zip"
     $TmpDir = New-Item -ItemType Directory -Path (Join-Path $env:TEMP "altgo-deps-whisper-$(Get-Random)")
 
     try {
@@ -88,7 +88,7 @@ if (Test-Path $WhisperTarget) {
         Write-Host "[INFO] Trying alternative download..."
 
         # Try the AVX2 build as fallback.
-        $AltUrl = "https://github.com/ggml-org/whisper.cpp/releases/download/v$WhisperVersion/whisper-avx2-windows-x64.zip"
+        $AltUrl = "https://github.com/ggml-org/whisper.cpp/releases/download/v$WhisperVersion/whisper-bin-x64.zip"
         try {
             Invoke-WebRequest -Uri $AltUrl -OutFile "$TmpDir/whisper-alt.zip" -UseBasicParsing
             Expand-Archive -Path "$TmpDir/whisper-alt.zip" -DestinationPath "$TmpDir/alt" -Force
