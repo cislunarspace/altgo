@@ -67,6 +67,7 @@ engine = "local"
 model = "~/models/ggml-base.bin"   # 模型文件路径
 whisper_path = ""                   # 留空自动在 PATH 中查找 whisper-cli
 language = "zh"
+timeout_seconds = 30                # 请求超时时间 (s)
 ```
 
 需要单独安装 [whisper.cpp](https://github.com/ggerganov/whisper.cpp) 并下载模型文件。
@@ -80,6 +81,9 @@ api_key = "sk-your-key"
 api_base_url = "https://api.openai.com"
 model = "whisper-1"
 language = "zh"
+timeout_seconds = 30
+temperature = 0.0               # Whisper API temperature (0.0-1.0)
+prompt = ""                      # 提示词，提供领域词汇以提升识别率
 ```
 
 ### 润色（可选）
@@ -91,6 +95,10 @@ api_key = "sk-your-key"
 api_base_url = "https://api.openai.com"
 model = "gpt-3.5-turbo"
 level = "medium"               # "none" / "light" / "medium" / "heavy"
+max_tokens = 1024              # LLM 响应的最大 token 数
+timeout_seconds = 60           # 请求超时时间 (s)
+temperature = 0.3              # LLM temperature (0.0-2.0)
+system_prompt = ""             # 自定义 system prompt，为空则使用内置 prompt
 ```
 
 | 级别 | 效果 | 需要 API 密钥 |
@@ -121,8 +129,11 @@ level = "medium"               # "none" / "light" / "medium" / "heavy"
 ```toml
 [key_listener]
 key_name = "ISO_Level3_Shift"      # 触发键，默认右 Alt
-long_press_threshold_ms = 300      # 长按判定阈值 (ms)
+long_press_threshold_ms = 200      # 长按判定阈值 (ms)
 double_click_interval_ms = 300     # 双击判定间隔 (ms)
+debounce_window_ms = 100           # 防抖窗口 (ms)，过滤 Windows 中文输入法抖动
+poll_interval_ms = 30              # Windows 轮询间隔 (ms)
+min_press_duration_ms = 100        # 最短按下时长 (ms)，过滤 IME 抖动
 
 [recorder]
 sample_rate = 16000                # 采样率
@@ -130,7 +141,9 @@ channels = 1                       # 声道数
 
 [output]
 enable_notify = true               # 是否显示桌面通知
-notify_timeout_ms = 3000
+notify_timeout_ms = 5000           # 通知显示时长 (ms)
+inject_at_cursor = true            # 尝试将文本注入到当前光标位置（仅 Windows）
+prefer_polished = true             # 注入/复制时优先使用润色后的文本
 
 [logging]
 level = "info"                     # "debug" / "info" / "warn" / "error"
@@ -142,13 +155,43 @@ level = "info"                     # "debug" / "info" / "warn" / "error"
 按键事件 → 状态机 → 录音 → ASR 转写 → LLM 润色 → 剪贴板 + 通知
 ```
 
+项目包含两种运行模式：
+
+| 模式 | 入口 | 说明 |
+|------|------|------|
+| **CLI** | `src/bin/cli.rs` | 纯命令行，无 UI，适合后台运行 |
+| **Tauri GUI** | `src-tauri/` + `frontend/` | 桌面应用，React 前端 + Rust 后端 |
+
+核心逻辑在 `src/` 库中共享，CLI 和 GUI 共用同一套管道。
+
 ## 开发
+
+### 前置依赖
+
+- Rust toolchain
+- Node.js（前端开发需要）
+- Tauri CLI：`cargo install tauri-cli --version "^2"`
+
+### CLI 模式
 
 ```bash
 cargo build --release         # 构建
 cargo test                    # 测试
 cargo fmt -- --check          # 格式检查
 cargo clippy -- -D warnings   # Lint
+```
+
+### GUI 模式（Tauri）
+
+```bash
+cargo tauri dev               # 启动开发模式（自动启动前端 dev server + 打开桌面窗口）
+cargo tauri build             # 生产构建
+```
+
+首次启动前安装前端依赖：
+```bash
+cd frontend
+npm install
 ```
 
 ## 许可证
