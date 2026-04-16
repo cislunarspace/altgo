@@ -39,6 +39,7 @@ jobs:
         run: cargo tauri build --target x86_64-pc-windows-msvc
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          FRONTEND_DIR: ${{ github.workspace }}/frontend
 
       - name: Upload MSI artifact
         uses: actions/upload-artifact@v5
