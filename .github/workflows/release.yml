@@ -31,6 +31,10 @@ jobs:
         run: npm ci
         working-directory: frontend
 
+      - name: Build frontend
+        run: npm run build
+        working-directory: frontend
+
       - name: Download dependencies
         shell: pwsh
         run: pwsh scripts/download-deps.ps1
@@ -39,7 +43,6 @@ jobs:
         run: cargo tauri build --target x86_64-pc-windows-msvc
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          FRONTEND_DIR: ${{ github.workspace }}/frontend
 
       - name: Upload MSI artifact
         uses: actions/upload-artifact@v5
