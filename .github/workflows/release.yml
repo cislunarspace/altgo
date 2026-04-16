@@ -24,46 +24,35 @@ jobs:
         with:
           key: x86_64-pc-windows-msvc
 
-      - name: Install WiX
-        run: dotnet tool install --global wix --version 5.0.0 || echo "WiX already installed"
+      - name: Install Tauri CLI
+        run: cargo install tauri-cli --version "^2" --locked
 
-      - name: Build
-        run: cargo build --target x86_64-pc-windows-msvc --release
+      - name: Install frontend dependencies
+        run: npm ci
+        working-directory: frontend
 
       - name: Download dependencies
         shell: pwsh
         run: pwsh scripts/download-deps.ps1
 
-      - name: Package zip
-        shell: pwsh
-        run: |
-          $ReleaseDir = "target/x86_64-pc-windows-msvc/release"
-          $Items = @("$ReleaseDir/altgo.exe")
-          if (Test-Path "$ReleaseDir/bin") {
-            $Items += "$ReleaseDir/bin"
-          }
-          Compress-Archive -Path $Items -DestinationPath altgo-x86_64-windows.zip
-
-      - name: Build MSI
-        shell: pwsh
+      - name: Build Tauri app
+        run: cargo tauri build --target x86_64-pc-windows-msvc
         env:
-          VERSION: ${{ github.ref_name }}
-        run: |
-          $env:Path = "$env:USERPROFILE\.dotnet\tools;$env:Path"
-          $ReleaseDir = "target/x86_64-pc-windows-msvc/release"
-          if (Test-Path "target/deps/bin") {
-            Copy-Item -Path "target/deps/bin" -Destination "$ReleaseDir/bin" -Recurse -Force
-          }
-          wix build msi/Product.wxs -d Version=$($env:VERSION -replace 'v','') -d SourceDir=$ReleaseDir -o target/altgo-x86_64-windows.msi
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Upload artifact
+      - name: Upload MSI artifact
         uses: actions/upload-artifact@v5
         with:
-          name: altgo-x86_64-windows
-          path: |
-            altgo-x86_64-windows.zip
-            target/altgo-x86_64-windows.msi
+          name: altgo-x86_64-windows-msi
+          path: src-tauri/target/x86_64-pc-windows-msvc/release/bundle/msi/*.msi
           if-no-files-found: error
+
+      - name: Upload zip artifact
+        uses: actions/upload-artifact@v5
+        with:
+          name: altgo-x86_64-windows-zip
+          path: src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.zip
+          if-no-files-found: ignore
 
   release:
     name: Create Release
@@ -91,4 +80,3 @@ jobs:
           files: |
             artifacts/**/*
             checksums.txt
-
