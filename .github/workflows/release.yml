@@ -6,144 +6,63 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 permissions:
   contents: write
 
 jobs:
   build:
-    name: Build ${{ matrix.target }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        include:
-          - os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-            artifact: altgo-x86_64-linux
-            ext: .tar.gz
-            deb: true
-          - os: ubuntu-24.04-arm
-            target: aarch64-unknown-linux-gnu
-            artifact: altgo-aarch64-linux
-            ext: .tar.gz
-            deb: true
-          - os: macos-latest
-            target: aarch64-apple-darwin
-            artifact: altgo-aarch64-macos
-            ext: .tar.gz
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-            artifact: altgo-x86_64-windows
-            ext: .zip
-            msi_ext: .msi
+    name: Build
+    runs-on: windows-latest
 
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.target }}
+          targets: x86_64-pc-windows-msvc
       - uses: Swatinem/rust-cache@v2
         with:
-          key: ${{ matrix.target }}
+          key: x86_64-pc-windows-msvc
 
-      - name: Install system dependencies (Linux)
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libspeechd-dev libasound2-dev
-
-      # Windows WiX toolchain
-      - name: Install WiX (Windows MSI)
-        if: runner.os == 'Windows'
+      - name: Install WiX
         run: dotnet tool install --global wix --version 5.0.0 || echo "WiX already installed"
 
-      # Install cargo-deb for Linux targets
-      - name: Install cargo-deb (Linux)
-        if: matrix.deb == true
-        run: cargo install cargo-deb --locked
-
       - name: Build
-        run: cargo build --target ${{ matrix.target }} --release
+        run: cargo build --target x86_64-pc-windows-msvc --release
 
-      # Download bundled dependencies (Linux)
-      - name: Download dependencies (Linux x86_64)
-        if: matrix.target == 'x86_64-unknown-linux-gnu'
-        run: bash scripts/download-deps.sh x86_64
-
-      - name: Download dependencies (Linux ARM64)
-        if: matrix.target == 'aarch64-unknown-linux-gnu'
-        run: |
-          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
-          bash scripts/download-deps.sh aarch64
-
-      # Download bundled dependencies (Windows)
-      - name: Download dependencies (Windows)
-        if: runner.os == 'Windows'
+      - name: Download dependencies
         shell: pwsh
         run: pwsh scripts/download-deps.ps1
 
-      # Build DEB packages
-      - name: Build DEB (Linux x86_64)
-        if: matrix.target == 'x86_64-unknown-linux-gnu'
-        run: cargo deb --no-build --target x86_64-unknown-linux-gnu --manifest-path Cargo.toml
-
-      - name: Build DEB (Linux ARM64)
-        if: matrix.target == 'aarch64-unknown-linux-gnu'
-        run: cargo deb --no-build --target aarch64-unknown-linux-gnu --manifest-path Cargo.toml
-
-      # Package tar.gz (Linux/macOS)
-      - name: Package (Linux/macOS tar.gz)
-        if: runner.os != 'Windows'
-        run: |
-          cd target/${{ matrix.target }}/release
-          tar czf ../../../${{ matrix.artifact }}.tar.gz altgo
-          cd ../../..
-
-      # Package zip (Windows)
-      - name: Package (Windows zip)
-        if: runner.os == 'Windows'
+      - name: Package zip
         shell: pwsh
         run: |
-          $ReleaseDir = "target/${{ matrix.target }}/release"
+          $ReleaseDir = "target/x86_64-pc-windows-msvc/release"
           $Items = @("$ReleaseDir/altgo.exe")
           if (Test-Path "$ReleaseDir/bin") {
             $Items += "$ReleaseDir/bin"
           }
-          Compress-Archive -Path $Items -DestinationPath ${{ matrix.artifact }}.zip
+          Compress-Archive -Path $Items -DestinationPath altgo-x86_64-windows.zip
 
-      # Build MSI (Windows)
-      - name: Build MSI (Windows)
-        if: runner.os == 'Windows'
+      - name: Build MSI
         shell: pwsh
         env:
           VERSION: ${{ github.ref_name }}
         run: |
           $env:Path = "$env:USERPROFILE\.dotnet\tools;$env:Path"
-          # Stage bundled binaries next to altgo.exe for WiX.
-          $ReleaseDir = "target/${{ matrix.target }}/release"
+          $ReleaseDir = "target/x86_64-pc-windows-msvc/release"
           if (Test-Path "target/deps/bin") {
             Copy-Item -Path "target/deps/bin" -Destination "$ReleaseDir/bin" -Recurse -Force
           }
-          wix build msi/Product.wxs -d Version=$($env:VERSION -replace 'v','') -d SourceDir=$ReleaseDir -o target/${{ matrix.artifact }}.msi
+          wix build msi/Product.wxs -d Version=$($env:VERSION -replace 'v','') -d SourceDir=$ReleaseDir -o target/altgo-x86_64-windows.msi
 
-      # Upload DEB artifacts
-      - name: Upload DEB artifacts
-        if: matrix.deb == true
-        uses: actions/upload-artifact@v5
-        with:
-          name: ${{ matrix.artifact }}-deb
-          path: target/${{ matrix.target }}/release/debian/*.deb
-          if-no-files-found: warn
-
-      # Upload main artifact (tar.gz/zip + MSI)
       - name: Upload artifact
         uses: actions/upload-artifact@v5
         with:
-          name: ${{ matrix.artifact }}
+          name: altgo-x86_64-windows
           path: |
-            ${{ matrix.artifact }}${{ matrix.ext }}
-            ${{ matrix.msi_ext && format('target/{0}{1}', matrix.artifact, matrix.msi_ext) }}
+            altgo-x86_64-windows.zip
+            target/altgo-x86_64-windows.msi
           if-no-files-found: error
 
   release:
@@ -172,3 +91,4 @@ jobs:
           files: |
             artifacts/**/*
             checksums.txt
+

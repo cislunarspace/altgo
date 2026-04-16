@@ -8,43 +8,30 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   check:
     name: Check
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-        include:
-          - os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
+    runs-on: windows-latest
+
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.target }}
+          targets: x86_64-pc-windows-msvc
       - uses: Swatinem/rust-cache@v2
         with:
-          key: ${{ matrix.target }}
-
-      - name: Install system dependencies (Linux)
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libspeechd-dev libasound2-dev
+          key: x86_64-pc-windows-msvc
 
       - name: Check formatting
         run: cargo fmt --all -- --check
 
       - name: Clippy
-        run: cargo clippy --target ${{ matrix.target }} -- -D warnings
+        run: cargo clippy --target x86_64-pc-windows-msvc -- -D warnings
 
       - name: Build
-        run: cargo build --target ${{ matrix.target }} --release
+        run: cargo build --target x86_64-pc-windows-msvc --release
 
       - name: Run tests
-        run: cargo test --target ${{ matrix.target }}
+        run: cargo test --target x86_64-pc-windows-msvc
+
