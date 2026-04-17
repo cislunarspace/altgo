@@ -44,14 +44,17 @@ const config: Config = {
   themeConfig: {
     image: 'img/docusaurus-social-card.jpg',
     colorMode: {
+      defaultMode: 'dark',
       respectPrefersColorScheme: true,
     },
     navbar: {
+      hideOnScroll: false,
       title: 'altgo',
       logo: {
         alt: 'altgo',
         src: 'img/logo.svg',
       },
+      style: 'dark',
       items: [
         {
           type: 'docSidebar',
@@ -91,12 +94,17 @@ const config: Config = {
           ],
         },
       ],
-      copyright: `Copyright © ${new Date().getFullYear()} cislunarspace. MIT License.`,
+      copyright: `Copyright © ${new Date().getFullYear()} cislunarspace. MIT License. Built with Docusaurus.`,
     },
     prism: {
       theme: prismThemes.github,
       darkTheme: prismThemes.dracula,
       additionalLanguages: ['toml', 'bash', 'powershell'],
+    },
+    docs: {
+      sidebar: {
+        hideable: true,
+      },
     },
   } satisfies Preset.ThemeConfig,
 };
