@@ -9,31 +9,28 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Build & Test Commands
 
 ```bash
-cargo build --release         # Optimized build
-cargo test                    # Run all tests
-cargo test -- --nocapture     # Run tests with println output
-cargo test test_name          # Run tests matching pattern
-cargo fmt                     # Format code
-cargo fmt -- --check          # Check formatting (CI uses this)
-cargo clippy -- -D warnings   # Lint with warnings as errors
-make build                    # Build + copy binary to ./
-make install                  # Install to /usr/local/bin + /etc/altgo/
+# Rust only (no GUI)
+cargo build --release --manifest-path=src-tauri/Cargo.toml
+cargo test --manifest-path=src-tauri/Cargo.toml
+cargo fmt --manifest-path=src-tauri/Cargo.toml -- --check
+cargo clippy --manifest-path=src-tauri/Cargo.toml -- -D warnings
 
 # Tauri GUI mode
 cargo tauri dev               # Dev mode (frontend dev server + desktop window)
-cargo tauri build             # Production GUI build
-```
+cargo tauri build            # Production GUI build
 
-CI runs on all three platforms (Linux, macOS, Windows) and checks: `fmt`, `clippy`, `build --release`, `test`.
+make build                    # Build + copy binary to ./
+make install                  # Install to /usr/local/bin + /etc/altgo/
+```
 
 ## Architecture
 
-Two-mode architecture sharing core logic:
+Single-mode architecture (Tauri desktop app) with core logic in `src-tauri/src/`:
 
-| Mode | Entry point | Description |
-|------|-------------|-------------|
-| **CLI** | `src/bin/cli.rs` | Pure command-line, no UI |
-| **Tauri GUI** | `src-tauri/` + `frontend/` | Desktop app with React frontend |
+| Component | Path |
+|-----------|------|
+| **Tauri GUI** | `src-tauri/` + `frontend/` |
+| **Core modules** | `src-tauri/src/` |
 
 Core pipeline driven by keyboard events:
 
@@ -41,9 +38,10 @@ Core pipeline driven by keyboard events:
 Key Listener → State Machine → Recorder → Transcriber → Polisher → Output
 ```
 
-### Modules
+### Modules (in `src-tauri/src/`)
 
-- **`main.rs`** — CLI parsing (`clap`), wires all modules together, runs the main event loop. The `Transcriber` enum dispatches between API and local backends.
+- **`lib.rs`** — Tauri app entry point, `AppState` struct, run loop setup.
+- **`cmd.rs`** — Tauri commands exposed to frontend via IPC.
 - **`config.rs`** — TOML config loading with `serde(default)` for every field. API keys overridable via `ALTGO_TRANSCRIBER_API_KEY` and `ALTGO_POLISHER_API_KEY` env vars.
 - **`state_machine.rs`** — 5-state enum (`Idle`, `PotentialPress`, `Recording`, `WaitSecondClick`, `ContinuousRecording`). Long-press records, double-click enters continuous mode. Uses `tokio::select!` to race key events vs timeouts.
 - **`audio.rs`** — Thread-safe PCM buffer (`Mutex<Vec<u8>>`), WAV encode/decode (44-byte header + PCM).
@@ -82,4 +80,3 @@ cd frontend && npm install
 - `config.rs` and `audio.rs` have comprehensive tests.
 - `transcriber.rs` and `polisher.rs` use `mockito` for HTTP-level mocking.
 - Platform-specific modules have minimal tests (construction/smoke tests only).
-- No integration test directory (`tests/`) exists yet.

@@ -7,7 +7,10 @@ use std::sync::Arc;
 use serde::Serialize;
 use tauri::{Emitter, Manager, State};
 
-use crate::AppState;
+use crate::{
+    config, key_listener, output, pipeline, polisher, recorder, state_machine, transcriber,
+    AppState,
+};
 
 const OVERLAY_RECORDING_W: f64 = 200.0;
 const OVERLAY_RECORDING_H: f64 = 48.0;
@@ -325,7 +328,7 @@ pub async fn get_status(state: State<'_, AppState>) -> Result<RecordingStatus, S
 
 #[tauri::command]
 pub async fn copy_text(text: String) -> Result<(), String> {
-    altgo::output::write_clipboard(&text)
+    output::write_clipboard(&text)
         .await
         .map_err(|e| e.to_string())
 }
@@ -340,7 +343,7 @@ pub async fn hide_overlay(app: tauri::AppHandle) -> Result<(), String> {
 
 pub async fn run_pipeline(
     app: tauri::AppHandle,
-    cfg: Arc<altgo::config::Config>,
+    cfg: Arc<config::Config>,
     mut stop_rx: tokio::sync::oneshot::Receiver<()>,
     pipeline_status: Arc<std::sync::RwLock<String>>,
 ) {
@@ -371,9 +374,9 @@ pub async fn run_pipeline(
             while poll_running.load(Ordering::SeqCst) {
                 let is_down = is_key_pressed(vk_code);
                 if is_down && !was_down {
-                    let _ = raw_key_tx.send(altgo::key_listener::KeyEvent { pressed: true });
+                    let _ = raw_key_tx.send(key_listener::KeyEvent { pressed: true });
                 } else if !is_down && was_down {
-                    let _ = raw_key_tx.send(altgo::key_listener::KeyEvent { pressed: false });
+                    let _ = raw_key_tx.send(key_listener::KeyEvent { pressed: false });
                 }
                 was_down = is_down;
                 std::thread::sleep(std::time::Duration::from_millis(poll_interval_ms));
@@ -384,7 +387,7 @@ pub async fn run_pipeline(
     #[cfg(not(target_os = "windows"))]
     {
         let mut listener =
-            match altgo::key_listener::PlatformListener::new(&cfg.key_listener.key_name) {
+            match key_listener::PlatformListener::new(&cfg.key_listener.key_name) {
                 Ok(l) => l,
                 Err(e) => {
                     tracing::error!(error = %e, "failed to create key listener");
@@ -415,15 +418,15 @@ pub async fn run_pipeline(
     }
 
     let mut recorder =
-        altgo::recorder::PlatformRecorder::new(cfg.recorder.sample_rate, cfg.recorder.channels);
+        recorder::PlatformRecorder::new(cfg.recorder.sample_rate, cfg.recorder.channels);
 
-    let transcriber: altgo::transcriber::Transcriber = match cfg.transcriber.engine.as_str() {
-        "local" => altgo::transcriber::Transcriber::Local(altgo::transcriber::LocalWhisper::new(
+    let transcriber: transcriber::Transcriber = match cfg.transcriber.engine.as_str() {
+        "local" => transcriber::Transcriber::Local(transcriber::LocalWhisper::new(
             cfg.transcriber.model.clone(),
             cfg.transcriber.language.clone(),
             cfg.transcriber.whisper_path.clone(),
         )),
-        _ => match altgo::transcriber::WhisperApi::new(
+        _ => match transcriber::WhisperApi::new(
             cfg.transcriber.api_key.clone(),
             cfg.transcriber.api_base_url.clone(),
             cfg.transcriber.model.clone(),
@@ -432,7 +435,7 @@ pub async fn run_pipeline(
             cfg.transcriber.prompt.clone(),
             cfg.transcriber.timeout(),
         ) {
-            Ok(api) => altgo::transcriber::Transcriber::Api(api),
+            Ok(api) => transcriber::Transcriber::Api(api),
             Err(e) => {
                 tracing::error!(error = %e, "failed to create transcriber");
                 let _ = app.emit("pipeline-error", format!("transcriber: {}", e));
@@ -442,16 +445,16 @@ pub async fn run_pipeline(
     };
 
     let polish_level =
-        altgo::polisher::PolishLevel::from_str(&cfg.polisher.level).unwrap_or_else(|_| {
+        polisher::PolishLevel::from_str(&cfg.polisher.level).unwrap_or_else(|_| {
             tracing::warn!("invalid polish level, using medium");
-            altgo::polisher::PolishLevel::Medium
+            polisher::PolishLevel::Medium
         });
-    let polisher_protocol = altgo::polisher::ApiProtocol::from_str(&cfg.polisher.protocol)
+    let polisher_protocol = polisher::ApiProtocol::from_str(&cfg.polisher.protocol)
         .unwrap_or_else(|e| {
             tracing::warn!(error = %e, "invalid polisher protocol, defaulting to openai");
-            altgo::polisher::ApiProtocol::OpenAi
+            polisher::ApiProtocol::OpenAi
         });
-    let formatter = match altgo::polisher::LLMFormatter::with_config(
+    let formatter = match polisher::LLMFormatter::with_config(
         cfg.polisher.api_key.clone(),
         cfg.polisher.api_base_url.clone(),
         cfg.polisher.model.clone(),
@@ -472,13 +475,13 @@ pub async fn run_pipeline(
 
     let (key_tx, key_rx) = tokio::sync::mpsc::unbounded_channel();
     let debounce_window = cfg.key_listener.debounce_window();
-    tokio::spawn(altgo::key_listener::debounce_task(
+    tokio::spawn(key_listener::debounce_task(
         raw_key_rx,
         key_tx,
         debounce_window,
     ));
 
-    let sm = altgo::state_machine::Machine::new(
+    let sm = state_machine::Machine::new(
         cfg.key_listener.long_press_threshold(),
         cfg.key_listener.double_click_interval(),
         cfg.key_listener.min_press_duration(),
@@ -491,7 +494,7 @@ pub async fn run_pipeline(
         tokio::select! {
             cmd = commands.recv() => {
                 match cmd {
-                    Some(altgo::state_machine::Command::StartRecord) => {
+                    Some(state_machine::Command::StartRecord) => {
                         tracing::info!("recording started");
                         if let Err(e) = recorder.start() {
                             tracing::error!(error = %e, "failed to start recording");
@@ -503,7 +506,7 @@ pub async fn run_pipeline(
                             let _ = overlay.show();
                         }
                     }
-                    Some(altgo::state_machine::Command::StopRecord) => {
+                    Some(state_machine::Command::StopRecord) => {
                         tracing::info!("recording stopped, processing...");
                         if let Some(overlay) = app.get_webview_window("overlay") {
                             let _ = overlay.hide();
@@ -532,7 +535,7 @@ pub async fn run_pipeline(
                         let pipeline_status = pipeline_status.clone();
 
                         tokio::spawn(async move {
-                            match altgo::pipeline::process_audio_core(
+                            match pipeline::process_audio_core(
                                 &transcriber,
                                 &formatter,
                                 &wav_data,
@@ -552,7 +555,7 @@ pub async fn run_pipeline(
                                         let display_text = text_to_use.clone();
 
                                         let _ =
-                                            altgo::output::write_clipboard(text_to_use).await;
+                                            output::write_clipboard(text_to_use).await;
 
                                         emit_pipeline_status(&app, &pipeline_status, "done");
                                         if let Some(overlay) =
