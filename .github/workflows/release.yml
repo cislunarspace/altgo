@@ -12,61 +12,56 @@ permissions:
 
 jobs:
   build:
-    name: Build
-    runs-on: windows-latest
+    name: Build Linux
+    runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libasound2-dev libayatana-appindicator3-dev
+
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: x86_64-pc-windows-msvc
+          targets: x86_64-unknown-linux-gnu
       - uses: Swatinem/rust-cache@v2
         with:
-          key: x86_64-pc-windows-msvc
+          key: x86_64-unknown-linux-gnu
 
       - name: Install Tauri CLI
         run: cargo install tauri-cli --version "^2" --locked
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
 
       - name: Install frontend dependencies
         run: npm ci
         working-directory: frontend
 
-      - name: Build frontend
-        run: npm run build
-        working-directory: frontend
-
-      - name: Download dependencies
-        shell: pwsh
-        run: pwsh scripts/download-deps.ps1
-
       - name: Build Tauri app
-        run: cargo tauri build --target x86_64-pc-windows-msvc
+        run: cargo tauri build --bundles deb
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Upload MSI artifact
-        uses: actions/upload-artifact@v5
+      - name: Upload deb artifact
+        uses: actions/upload-artifact@v4
         with:
-          name: altgo-x86_64-windows-msi
-          path: src-tauri/target/x86_64-pc-windows-msvc/release/bundle/msi/*.msi
+          name: altgo-amd64-deb
+          path: src-tauri/target/release/bundle/deb/*.deb
           if-no-files-found: error
-
-      - name: Upload zip artifact
-        uses: actions/upload-artifact@v5
-        with:
-          name: altgo-x86_64-windows-zip
-          path: src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.zip
-          if-no-files-found: ignore
 
   release:
     name: Create Release
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v4
 
       - name: Download all artifacts
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v4
         with:
           path: artifacts
 
@@ -78,7 +73,7 @@ jobs:
           cat checksums.txt
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
           files: |
