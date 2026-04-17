@@ -1,37 +1,5 @@
-:root {
-  --bg: #0f0f0f;
-  --bg-card: #1a1a1a;
-  --bg-input: #242424;
-  --text: #f0f0f0;
-  --text-muted: #888;
-  --accent: #4a9fff;
-  --accent-green: #4aff9f;
-  --accent-red: #ff5555;
-  --accent-yellow: #ffcc00;
-  --border: #333;
-  --radius: 10px;
-}
-
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
-}
-
-body {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
-    "Microsoft YaHei", sans-serif;
-  background: var(--bg);
-  color: var(--text);
-  overflow: hidden;
-  user-select: none;
-}
-
-#root {
-  height: 100vh;
-  display: flex;
-  flex-direction: column;
-}
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+@import './design-system.css';
 
 button {
   font-family: inherit;

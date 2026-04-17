@@ -1,39 +1,66 @@
 import { useStatus, useLatestTranscription } from "../hooks/useTauri";
 import { useTranslation } from "../i18n";
+import { StatusIndicator } from "../components/StatusIndicator";
+import { Copy, Check } from "lucide-react";
+import { useState } from "react";
+import "../styles/components.css";
 
 export default function Home() {
   const { t } = useTranslation();
   const status = useStatus();
   const transcription = useLatestTranscription();
+  const [copied, setCopied] = useState(false);
 
-  const statusConfig: Record<string, { emoji: string; color: string; text: string }> = {
-    idle: { emoji: "🎤", color: "var(--text-muted)", text: t("status.idle") },
-    recording: { emoji: "🔴", color: "var(--accent-red)", text: t("status.recording") },
-    processing: { emoji: "⚙️", color: "var(--accent-yellow)", text: t("status.processing") },
-    done: { emoji: "✅", color: "var(--accent-green)", text: t("status.done") },
+  const handleCopy = async () => {
+    if (transcription) {
+      try {
+        await navigator.clipboard.writeText(transcription);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      } catch {
+        // Clipboard failed silently
+      }
+    }
   };
 
-  const current = statusConfig[status] || statusConfig.idle;
+  const statusMap: Record<string, 'idle' | 'recording' | 'processing' | 'done'> = {
+    idle: 'idle',
+    recording: 'recording',
+    processing: 'processing',
+    done: 'done',
+  };
+
+  const mappedStatus = statusMap[status] || 'idle';
 
   return (
-    <div className="home">
+    <div className="home-page">
       {!transcription ? (
         <div className="home-idle">
-          <span className="home-emoji" style={{ color: current.color }}>
-            {current.emoji}
-          </span>
-          <p className="home-status" style={{ color: current.color }}>
-            {current.text}
-          </p>
+          <StatusIndicator status={mappedStatus} size="lg" />
           <p className="home-hint">{t("main.hint")}</p>
         </div>
       ) : (
         <div className="home-result">
-          <p className="result-label">{t("main.result_label")}</p>
-          <div className="result-box">
-            <p className="result-text">{transcription}</p>
+          <span className="home-result-label">{t("main.result_label")}</span>
+          <div className="home-result-card">
+            <p className="home-result-text">{transcription}</p>
           </div>
-          <p className="result-copied">{t("main.copied")}</p>
+          <button
+            className={`home-copy-btn ${copied ? 'copied' : ''}`}
+            onClick={handleCopy}
+          >
+            {copied ? (
+              <>
+                <Check size={16} color="var(--color-accent-green)" />
+                <span style={{ color: 'var(--color-accent-green)' }}>已复制</span>
+              </>
+            ) : (
+              <>
+                <Copy size={16} />
+                <span>{t("main.copy")}</span>
+              </>
+            )}
+          </button>
         </div>
       )}
     </div>

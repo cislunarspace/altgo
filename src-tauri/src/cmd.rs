@@ -61,74 +61,124 @@ fn emit_pipeline_status(
     }
 }
 
-fn position_overlay(overlay: &tauri::WebviewWindow, width: f64, height: f64) {
-    let _ = overlay.set_size(tauri::LogicalSize::new(width, height));
-
-    // Use cached primary monitor info for fast positioning.
-    let (screen_x, screen_w, screen_h) = get_cached_monitor_info();
-
-    // Position at bottom center of primary monitor.
-    let x = screen_x + (screen_w - width) / 2.0;
-    let y = screen_h - height - OVERLAY_BOTTOM_OFFSET;
-
-    let _ = overlay.set_position(tauri::LogicalPosition::new(x, y));
-}
-
-// Cache for monitor info to avoid calling xrandr every time.
-static MONITOR_CACHE: std::sync::OnceLock<(f64, f64, f64)> = std::sync::OnceLock::new();
-
-fn get_cached_monitor_info() -> (f64, f64, f64) {
-    *MONITOR_CACHE.get_or_init(|| {
-        get_primary_monitor_info().unwrap_or_else(|| (0.0, 1920.0, 1080.0))
-    })
-}
-
-#[cfg(target_os = "linux")]
-fn get_primary_monitor_info() -> Option<(f64, f64, f64)> {
-    // Use xrandr to find the primary monitor.
-    let output = std::process::Command::new("xrandr")
-        .output()
-        .ok()?;
-
-    if !output.status.success() {
+/// Parse monitor geometry from xrandr --listmonitors output.
+/// Format: " <idx>: +[*]<name> <W>/<pw>x<H>/<ph>+<X>+<Y>  <output>"
+fn parse_monitor_geom(line: &str) -> Option<(f64, f64, f64, f64)> {
+    // Find the geometry part: look for pattern like "6144/697x3456/392+3840+0"
+    let line = line.trim_start();
+    // Skip "N: +*name " prefix — find the geometry after the second space
+    let mut spaces = 0;
+    let mut geom_start = 0;
+    for (i, c) in line.char_indices() {
+        if c == ' ' {
+            spaces += 1;
+            if spaces == 2 {
+                geom_start = i + 1;
+                break;
+            }
+        }
+    }
+    if geom_start == 0 {
         return None;
     }
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
+    // Find end of geometry (next space or end of line)
+    let geom_end = line[geom_start..]
+        .find(' ')
+        .map(|p| geom_start + p)
+        .unwrap_or(line.len());
+    let geom = &line[geom_start..geom_end];
 
-    // Find the line with "connected primary".
-    for line in stdout.lines() {
-        if line.contains("connected primary") {
-            // Parse line like: "HDMI-0 connected primary 6144x3456+3840+0 ..."
-            if let Some(geom_start) = line.find(" x ") {
-                // Look backwards from " x " to find the resolution string like "6144x3456+3840+0"
-                let search = &line[..geom_start];
-                if let Some(geom_pos) = search.rfind(' ') {
-                    let geom = &line[geom_pos + 1..geom_start + 4]; // Include " x H"
-                    // geom is like "6144x3456+3840+0"
-                    if let Some(x_idx) = geom.find('x') {
-                        if let Some(p1) = geom[x_idx + 1..].find('+') {
-                            let w: f64 = geom[..x_idx].parse().ok()?;
-                            let h_and_rest = &geom[x_idx + 1..];
-                            let h: f64 = h_and_rest[..p1].parse().ok()?;
-                            let rest = &h_and_rest[p1 + 1..];
-                            if let Some(p2) = rest.find('+') {
-                                let x: f64 = rest[..p2].parse().ok()?;
-                                return Some((x, w, h));
-                            }
-                        }
-                    }
-                }
+    // Parse "6144/697x3456/392+3840+0"
+    let (w_part, rest) = geom.split_once('x')?;
+    let w: f64 = w_part.split('/').next()?.parse().ok()?;
+
+    // rest = "3456/392+3840+0"
+    let parts: Vec<&str> = rest.split('+').collect();
+    if parts.len() < 3 {
+        return None;
+    }
+    let h: f64 = parts[0].split('/').next()?.parse().ok()?;
+    let x: f64 = parts[1].parse().ok()?;
+    let y: f64 = parts[2].parse().ok()?;
+
+    Some((x, y, w, h))
+}
+
+/// Get monitor info for the screen where the mouse cursor is.
+/// Returns (monitor_x, monitor_y, monitor_width, monitor_height).
+#[cfg(target_os = "linux")]
+fn get_focused_monitor_info() -> Option<(f64, f64, f64, f64)> {
+    // Use mouse position to determine which monitor the user is on
+    let mouse_out = std::process::Command::new("xdotool")
+        .args(["getmouselocation", "--shell"])
+        .output()
+        .ok()?;
+
+    if !mouse_out.status.success() {
+        return None;
+    }
+
+    let mouse_str = String::from_utf8_lossy(&mouse_out.stdout);
+    let mut mouse_x: i32 = 0;
+    let mut mouse_y: i32 = 0;
+
+    for line in mouse_str.lines() {
+        if let Some(val) = line.strip_prefix("X=") {
+            mouse_x = val.parse().ok()?;
+        } else if let Some(val) = line.strip_prefix("Y=") {
+            mouse_y = val.parse().ok()?;
+        }
+    }
+
+    tracing::info!("mouse position: ({}, {})", mouse_x, mouse_y);
+
+    // Parse xrandr --listmonitors for reliable monitor geometry
+    let xrandr = std::process::Command::new("xrandr")
+        .args(["--listmonitors"])
+        .output()
+        .ok()?;
+
+    if !xrandr.status.success() {
+        return None;
+    }
+
+    let xrandr_str = String::from_utf8_lossy(&xrandr.stdout);
+
+    for line in xrandr_str.lines() {
+        if let Some((m_x, m_y, m_w, m_h)) = parse_monitor_geom(line) {
+            tracing::info!(
+                "monitor: x={}, y={}, w={}, h={}",
+                m_x, m_y, m_w, m_h
+            );
+            if mouse_x >= m_x as i32
+                && mouse_x < (m_x + m_w) as i32
+                && mouse_y >= m_y as i32
+                && mouse_y < (m_y + m_h) as i32
+            {
+                tracing::info!("matched monitor at ({}, {})", m_x, m_y);
+                return Some((m_x, m_y, m_w, m_h));
             }
         }
     }
 
+    tracing::warn!("no monitor matched for mouse ({}, {})", mouse_x, mouse_y);
     None
 }
 
 #[cfg(not(target_os = "linux"))]
-fn get_primary_monitor_info() -> Option<(f64, f64, f64)> {
+fn get_focused_monitor_info() -> Option<(f64, f64, f64, f64)> {
     None
+}
+
+fn position_overlay(overlay: &tauri::WebviewWindow, width: f64, height: f64) {
+    let _ = overlay.set_size(tauri::LogicalSize::new(width, height));
+
+    if let Some((screen_x, screen_y, screen_w, screen_h)) = get_focused_monitor_info() {
+        let x = screen_x + (screen_w - width) / 2.0;
+        let y = screen_y + screen_h - height - OVERLAY_BOTTOM_OFFSET;
+        let _ = overlay.set_position(tauri::LogicalPosition::new(x, y));
+    }
 }
 
 #[derive(Serialize)]

@@ -1,3 +1,7 @@
+/* ============================================
+   Overlay Styles — Clean Glass Design
+   ============================================ */
+
 * {
   margin: 0;
   padding: 0;
@@ -15,107 +19,231 @@ body {
   display: flex;
   align-items: flex-end;
   justify-content: center;
+  padding-bottom: 80px;
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
 }
+
+/* ============================================
+   Island Container
+   ============================================ */
 
 .island {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  background: rgba(28, 28, 30, 0.95);
+  gap: 10px;
+  padding: 12px 20px;
+  background: rgba(20, 20, 24, 0.9);
+  backdrop-filter: blur(24px) saturate(160%);
+  -webkit-backdrop-filter: blur(24px) saturate(160%);
   border-radius: 999px;
-  padding: 8px 24px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
   color: #fff;
-  font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, sans-serif;
   font-size: 13px;
-  letter-spacing: 0.3px;
-  animation: island-in 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  font-weight: 500;
+  letter-spacing: 0.2px;
+  animation: island-in 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
 .island-result {
-  padding: 12px 20px;
-  border-radius: 999px;
-  gap: 10px;
-  max-width: 520px;
+  padding: 14px 18px;
+  border-radius: 20px;
+  gap: 12px;
+  max-width: 480px;
+  min-width: 200px;
+  animation: island-result-in 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
+
+/* ============================================
+   Animations
+   ============================================ */
 
 @keyframes island-in {
   from {
-    transform: scaleX(0.4) scaleY(0.8);
+    transform: scale(0.5) translateY(20px);
     opacity: 0;
   }
   to {
-    transform: scaleX(1) scaleY(1);
+    transform: scale(1) translateY(0);
     opacity: 1;
   }
 }
 
-.pulse {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: #ff3b30;
-  flex-shrink: 0;
-  animation: pulse 1s ease-in-out infinite;
+@keyframes island-result-in {
+  from {
+    transform: scale(0.8) translateY(16px);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1) translateY(0);
+    opacity: 1;
+  }
 }
 
-@keyframes pulse {
+@keyframes pulse-recording {
   0%, 100% {
-    opacity: 1;
     transform: scale(1);
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7);
   }
   50% {
-    opacity: 0.3;
-    transform: scale(1.5);
+    transform: scale(1.1);
+    box-shadow: 0 0 12px 4px rgba(239, 68, 68, 0.4);
   }
 }
 
-.spinner {
-  width: 14px;
-  height: 14px;
-  border: 2px solid rgba(255, 255, 255, 0.2);
-  border-top-color: #fff;
-  border-radius: 50%;
-  flex-shrink: 0;
-  animation: spin 0.7s linear infinite;
+@keyframes pulse-ring {
+  0% {
+    transform: scale(1);
+    opacity: 0.6;
+  }
+  100% {
+    transform: scale(2.5);
+    opacity: 0;
+  }
 }
 
 @keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
   to {
     transform: rotate(360deg);
   }
 }
 
-.check {
-  color: #34c759;
-  font-size: 14px;
-  font-weight: 700;
-  flex-shrink: 0;
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateX(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
 }
+
+/* ============================================
+   Recording Indicator
+   ============================================ */
+
+.recording-indicator {
+  position: relative;
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.recording-core {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #ef4444;
+  animation: pulse-recording 1.2s ease-in-out infinite;
+}
+
+.recording-glow {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid #ef4444;
+  transform: translate(-50%, -50%);
+  animation: pulse-ring 1.2s ease-out infinite;
+}
+
+/* ============================================
+   Processing Indicator
+   ============================================ */
+
+.processing-indicator {
+  position: relative;
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.processing-ring {
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(255, 255, 255, 0.15);
+  border-top-color: #f59e0b;
+  border-radius: 50%;
+  animation: spin 0.9s linear infinite;
+}
+
+/* ============================================
+   Done Indicator
+   ============================================ */
+
+.done-indicator {
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(34, 197, 94, 0.2);
+  border-radius: 50%;
+  flex-shrink: 0;
+  animation: fade-in 0.3s ease-out;
+}
+
+.done-icon {
+  color: #22c55e;
+}
+
+/* ============================================
+   Labels
+   ============================================ */
 
 .label {
   white-space: nowrap;
   user-select: none;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+/* ============================================
+   Result Display
+   ============================================ */
+
+.result-content {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  flex: 1;
+  min-width: 0;
+  max-width: 340px;
 }
 
 .result-text {
   color: #e5e5e7;
   font-size: 13px;
-  line-height: 1.4;
+  line-height: 1.5;
   overflow: hidden;
   display: -webkit-box;
-  -webkit-line-clamp: 3;
+  -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
-  word-break: break-all;
-  flex: 1;
-  min-width: 0;
+  word-break: break-word;
+  animation: fade-in 0.3s ease-out 0.1s both;
 }
+
+/* ============================================
+   Action Buttons
+   ============================================ */
 
 .result-actions {
   display: flex;
   gap: 6px;
   flex-shrink: 0;
+  animation: fade-in 0.3s ease-out 0.15s both;
 }
 
 .btn-copy,
@@ -123,25 +251,45 @@ body {
   border: none;
   cursor: pointer;
   font-size: 12px;
-  border-radius: 999px;
-  padding: 6px 14px;
+  font-weight: 500;
+  border-radius: 16px;
+  padding: 5px 12px;
   font-family: inherit;
-  transition: background 0.15s;
+  transition: all 0.15s ease;
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .btn-copy {
-  background: rgba(52, 199, 89, 0.2);
-  color: #34c759;
+  background: rgba(34, 197, 94, 0.15);
+  color: #22c55e;
+  border: 1px solid rgba(34, 197, 94, 0.25);
 }
+
 .btn-copy:hover {
-  background: rgba(52, 199, 89, 0.35);
+  background: rgba(34, 197, 94, 0.25);
+  border-color: rgba(34, 197, 94, 0.4);
+}
+
+.btn-copy:active,
+.btn-close:active {
+  transform: scale(0.95);
 }
 
 .btn-close {
-  background: rgba(255, 255, 255, 0.1);
-  color: rgba(255, 255, 255, 0.6);
-  padding: 4px 8px;
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 5px 8px;
 }
+
 .btn-close:hover {
-  background: rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.btn-copy.copied {
+  background: rgba(34, 197, 94, 0.2);
+  color: #4ade80;
 }
