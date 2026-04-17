@@ -18,13 +18,24 @@ cargo fmt -- --check          # Check formatting (CI uses this)
 cargo clippy -- -D warnings   # Lint with warnings as errors
 make build                    # Build + copy binary to ./
 make install                  # Install to /usr/local/bin + /etc/altgo/
+
+# Tauri GUI mode
+cargo tauri dev               # Dev mode (frontend dev server + desktop window)
+cargo tauri build             # Production GUI build
 ```
 
 CI runs on all three platforms (Linux, macOS, Windows) and checks: `fmt`, `clippy`, `build --release`, `test`.
 
 ## Architecture
 
-Linear pipeline driven by keyboard events:
+Two-mode architecture sharing core logic:
+
+| Mode | Entry point | Description |
+|------|-------------|-------------|
+| **CLI** | `src/bin/cli.rs` | Pure command-line, no UI |
+| **Tauri GUI** | `src-tauri/` + `frontend/` | Desktop app with React frontend |
+
+Core pipeline driven by keyboard events:
 
 ```
 Key Listener → State Machine → Recorder → Transcriber → Polisher → Output
@@ -57,6 +68,13 @@ Key Listener → State Machine → Recorder → Transcriber → Polisher → Out
 - **Linux**: `xinput`, `xmodmap`, `parecord`, `xclip`/`xsel`/`wl-copy`, `notify-send`
 - **macOS**: `sox`, Swift CLI tools, `pbcopy`, `osascript`
 - **Windows**: `ffmpeg` or `sox`, PowerShell
+
+### Tauri GUI Development
+
+Before first run, install frontend dependencies:
+```bash
+cd frontend && npm install
+```
 
 ## Testing Notes
 

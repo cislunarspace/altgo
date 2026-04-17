@@ -10,7 +10,18 @@
 use anyhow::{anyhow, Context};
 use reqwest::Client;
 use serde::Deserialize;
+use std::path::PathBuf;
 use std::time::Duration;
+
+/// Expand tilde in path to home directory.
+fn expand_tilde(path: &str) -> PathBuf {
+    if path.starts_with("~/") {
+        if let Some(home) = dirs::home_dir() {
+            return home.join(path.trim_start_matches("~/"));
+        }
+    }
+    PathBuf::from(path)
+}
 
 /// 语音识别结果。
 #[derive(Debug)]
@@ -162,9 +173,12 @@ impl LocalWhisper {
         // Find whisper-cli binary.
         let whisper_bin = find_whisper_binary(&self.whisper_path)?;
 
+        // Expand tilde in model path.
+        let model_path = expand_tilde(&self.model_path);
+
         let mut cmd = tokio::process::Command::new(&whisper_bin);
         cmd.arg("-m")
-            .arg(&self.model_path)
+            .arg(model_path)
             .arg("-l")
             .arg(&self.language)
             .arg("-f")

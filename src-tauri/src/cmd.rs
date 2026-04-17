@@ -63,14 +63,72 @@ fn emit_pipeline_status(
 
 fn position_overlay(overlay: &tauri::WebviewWindow, width: f64, height: f64) {
     let _ = overlay.set_size(tauri::LogicalSize::new(width, height));
-    if let Ok(Some(monitor)) = overlay.primary_monitor() {
-        let scale = monitor.scale_factor();
-        let screen_w = monitor.size().width as f64 / scale;
-        let screen_h = monitor.size().height as f64 / scale;
-        let x = (screen_w - width) / 2.0;
-        let y = screen_h - height - OVERLAY_BOTTOM_OFFSET;
-        let _ = overlay.set_position(tauri::LogicalPosition::new(x, y));
+
+    // Use cached primary monitor info for fast positioning.
+    let (screen_x, screen_w, screen_h) = get_cached_monitor_info();
+
+    // Position at bottom center of primary monitor.
+    let x = screen_x + (screen_w - width) / 2.0;
+    let y = screen_h - height - OVERLAY_BOTTOM_OFFSET;
+
+    let _ = overlay.set_position(tauri::LogicalPosition::new(x, y));
+}
+
+// Cache for monitor info to avoid calling xrandr every time.
+static MONITOR_CACHE: std::sync::OnceLock<(f64, f64, f64)> = std::sync::OnceLock::new();
+
+fn get_cached_monitor_info() -> (f64, f64, f64) {
+    *MONITOR_CACHE.get_or_init(|| {
+        get_primary_monitor_info().unwrap_or_else(|| (0.0, 1920.0, 1080.0))
+    })
+}
+
+#[cfg(target_os = "linux")]
+fn get_primary_monitor_info() -> Option<(f64, f64, f64)> {
+    // Use xrandr to find the primary monitor.
+    let output = std::process::Command::new("xrandr")
+        .output()
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
     }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // Find the line with "connected primary".
+    for line in stdout.lines() {
+        if line.contains("connected primary") {
+            // Parse line like: "HDMI-0 connected primary 6144x3456+3840+0 ..."
+            if let Some(geom_start) = line.find(" x ") {
+                // Look backwards from " x " to find the resolution string like "6144x3456+3840+0"
+                let search = &line[..geom_start];
+                if let Some(geom_pos) = search.rfind(' ') {
+                    let geom = &line[geom_pos + 1..geom_start + 4]; // Include " x H"
+                    // geom is like "6144x3456+3840+0"
+                    if let Some(x_idx) = geom.find('x') {
+                        if let Some(p1) = geom[x_idx + 1..].find('+') {
+                            let w: f64 = geom[..x_idx].parse().ok()?;
+                            let h_and_rest = &geom[x_idx + 1..];
+                            let h: f64 = h_and_rest[..p1].parse().ok()?;
+                            let rest = &h_and_rest[p1 + 1..];
+                            if let Some(p2) = rest.find('+') {
+                                let x: f64 = rest[..p2].parse().ok()?;
+                                return Some((x, w, h));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    None
+}
+
+#[cfg(not(target_os = "linux"))]
+fn get_primary_monitor_info() -> Option<(f64, f64, f64)> {
+    None
 }
 
 #[derive(Serialize)]
@@ -284,7 +342,7 @@ pub async fn run_pipeline(
                     return;
                 }
             };
-        let key_events = match listener.start() {
+        let mut key_events = match listener.start() {
             Ok(rx) => rx,
             Err(e) => {
                 tracing::error!(error = %e, "failed to start key listener");

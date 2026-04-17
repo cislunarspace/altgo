@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "identifier": "com.altgo.app",
   "build": {
-    "beforeDevCommand": "npm run dev --prefix ./frontend",
+    "beforeDevCommand": null,
     "devUrl": "http://localhost:1420",
     "beforeBuildCommand": null,
     "frontendDist": "../frontend/dist"
@@ -32,7 +32,8 @@
         "skipTaskbar": true,
         "visible": false,
         "resizable": false,
-        "focusable": false
+        "focusable": false,
+        "shadow": false
       }
     ],
     "security": {
@@ -53,9 +54,6 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ],
-    "resources": {
-      "target/deps/bin/*": "./bin/"
-    }
+    ]
   }
 }
