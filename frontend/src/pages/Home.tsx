@@ -3,6 +3,7 @@ import { useTranslation } from "../i18n";
 import { StatusIndicator } from "../components/StatusIndicator";
 import { Copy, Check } from "lucide-react";
 import { useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import "../styles/components.css";
 
 export default function Home() {
@@ -14,7 +15,7 @@ export default function Home() {
   const handleCopy = async () => {
     if (transcription) {
       try {
-        await navigator.clipboard.writeText(transcription);
+        await invoke("copy_text", { text: transcription });
         setCopied(true);
         setTimeout(() => setCopied(false), 2000);
       } catch {
