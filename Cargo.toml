@@ -1,6 +1,6 @@
 [package]
 name = "altgo"
-version = "1.3.3"
+version = "1.3.4"
 edition = "2021"
 description = "无需打字，言出法随 — 跨平台语音转文字工具"
 homepage = "https://github.com/cislunarspace/altgo"
