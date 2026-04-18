@@ -458,3 +458,153 @@
   color: var(--color-text-muted);
   font-size: var(--text-sm);
 }
+
+/* ============================================
+   PyQt-style Settings Form
+   ============================================ */
+
+.settings-form {
+  background: #1a1a1a;
+  padding: 16px;
+}
+
+.settings-form-section {
+  padding: 16px 0;
+  border-bottom: 1px solid #333;
+}
+
+.settings-form-section:last-child {
+  border-bottom: none;
+}
+
+.settings-form-section-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #ccc;
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.settings-form-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 0;
+  gap: 16px;
+}
+
+.settings-form-label {
+  font-size: 13px;
+  color: #ccc;
+  flex-shrink: 0;
+}
+
+.settings-form-control {
+  flex: 1;
+  max-width: 280px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.settings-form-input {
+  width: 100%;
+  padding: 6px 10px;
+  background: #252525;
+  border: 1px solid #444;
+  border-radius: 2px;
+  color: #fff;
+  font-size: 13px;
+  font-family: inherit;
+  transition: border-color 0.15s;
+}
+
+.settings-form-input:focus {
+  outline: none;
+  border-color: #6366f1;
+}
+
+.settings-form-input:hover {
+  border-color: #555;
+}
+
+.settings-form-input:disabled {
+  background: #1a1a1a;
+  color: #555;
+}
+
+.settings-form-select {
+  width: 100%;
+  padding: 6px 10px;
+  background: #252525;
+  border: 1px solid #444;
+  border-radius: 2px;
+  color: #fff;
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: border-color 0.15s;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%23999' stroke-width='2'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  padding-right: 28px;
+}
+
+.settings-form-select:focus {
+  outline: none;
+  border-color: #6366f1;
+}
+
+.settings-form-btn {
+  padding: 6px 16px;
+  background: #333;
+  border: 1px solid #444;
+  border-radius: 2px;
+  color: #ccc;
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.settings-form-btn:hover {
+  background: #444;
+  border-color: #555;
+}
+
+.settings-form-btn:focus {
+  outline: none;
+  border-color: #6366f1;
+}
+
+.settings-form-btn:disabled {
+  background: #222;
+  color: #666;
+  cursor: not-allowed;
+}
+
+.settings-form-btn-primary {
+  background: #6366f1;
+  border-color: #6366f1;
+  color: #fff;
+}
+
+.settings-form-btn-primary:hover {
+  background: #818cf8;
+  border-color: #818cf8;
+}
+
+.settings-form-checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.settings-form-checkbox {
+  width: 16px;
+  height: 16px;
+  accent-color: #6366f1;
+  cursor: pointer;
+}
