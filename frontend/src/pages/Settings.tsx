@@ -186,13 +186,13 @@ export default function Settings() {
         <div className="settings-form-section">
           <h3 className="settings-form-section-title">
             <Download size={14} />
-            {"Model Management"}
+            {t("settings.model_management")}
           </h3>
           <div className="settings-form-row">
-            <span className="settings-form-label">{"Current Model"}</span>
+            <span className="settings-form-label">{t("settings.current_model")}</span>
             <div className="settings-form-control">
               <span style={{ color: '#888', fontSize: '13px' }}>
-                {config.model || "Not configured"}
+                {config.model || t("settings.no_model_configured")}
               </span>
             </div>
           </div>
@@ -200,7 +200,7 @@ export default function Settings() {
             <span className="settings-form-label">{"Status"}</span>
             <div className="settings-form-control">
               <span style={{ color: config.model ? '#22c55e' : '#888', fontSize: '13px' }}>
-                {config.model ? "Downloaded" : "Not downloaded"}
+                {config.model ? t("settings.model_downloaded") : t("settings.model_not_downloaded")}
               </span>
             </div>
           </div>
@@ -208,10 +208,10 @@ export default function Settings() {
             <span className="settings-form-label"></span>
             <div className="settings-form-control" style={{ gap: '8px', justifyContent: 'flex-end' }}>
               <button className="settings-form-btn settings-form-btn-primary">
-                <Download size={12} /> {"Download Model"}
+                <Download size={12} /> {t("settings.download_model")}
               </button>
               <button className="settings-form-btn" disabled={!config.model}>
-                <Trash2 size={12} /> {"Delete"}
+                <Trash2 size={12} /> {t("settings.delete_model")}
               </button>
             </div>
           </div>
@@ -280,10 +280,10 @@ export default function Settings() {
         <div className="settings-form-section">
           <h3 className="settings-form-section-title">
             <Sparkles size={14} />
-            {"About"}
+            {t("settings.about")}
           </h3>
           <div className="settings-form-row">
-            <span className="settings-form-label">{"Version"}</span>
+            <span className="settings-form-label">{t("settings.version")}</span>
             <div className="settings-form-control">
               <span style={{ color: '#888', fontSize: '13px' }}>1.4.0</span>
             </div>
@@ -292,7 +292,7 @@ export default function Settings() {
             <span className="settings-form-label"></span>
             <div className="settings-form-control">
               <button className="settings-form-btn">
-                {"Check for Updates"}
+                {t("settings.check_updates")}
               </button>
             </div>
           </div>
