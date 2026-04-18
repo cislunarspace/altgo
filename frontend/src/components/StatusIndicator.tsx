@@ -33,7 +33,7 @@ export function StatusIndicator({ status, size = 'md' }: StatusIndicatorProps) {
   useEffect(() => {
     if (status === 'recording') {
       const animate = () => {
-        setPulseScale(1.15);
+        setPulseScale(1.05);
         setGlowActive(true);
         setTimeout(() => {
           setPulseScale(1);
@@ -41,7 +41,7 @@ export function StatusIndicator({ status, size = 'md' }: StatusIndicatorProps) {
         }, 500);
       };
       animate();
-      const interval = setInterval(animate, 1500);
+      const interval = setInterval(animate, 800);
       return () => clearInterval(interval);
     }
   }, [status]);
