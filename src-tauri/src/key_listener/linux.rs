@@ -1,13 +1,14 @@
 //! Linux 按键监听器。
 //!
-//! 使用 `xinput test-xi2` 命令捕获全局键盘事件，依赖 XInput2 扩展，
-//! 无需 root 权限即可在所有现代 X11 系统上工作。
+//! 优先使用 `xinput test-xi2` 命令捕获全局键盘事件，依赖 XInput2 扩展。
+//! 在 XWayland 上失败时，回退到使用 `evtest` 读取 `/dev/input/event*` 设备。
 //!
 //! 通过 `xmodmap -pke` 解析按键名称到 keycode 的映射。
 
 use super::KeyEvent;
 use anyhow::{Context, Result};
 use std::io::BufRead;
+use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
@@ -16,6 +17,14 @@ use tokio::sync::mpsc;
 /// Cache for xmodmap keycode mappings. Parsing xmodmap output is expensive,
 /// so we cache the entire keycode table on first use.
 static XMODMAP_CACHE: OnceLock<std::collections::HashMap<String, u8>> = OnceLock::new();
+
+/// evdev keycode for Alt keys (used by evtest fallback).
+const EVDEV_KEY_ALT: u16 = 56; // KEY_LEFTALT
+const EVDEV_KEY_ALT_R: u16 = 100; // KEY_RIGHTALT
+
+/// X11 keycode for Alt_L (from xmodmap output).
+#[allow(dead_code)]
+const X11_KEYCODE_ALT: u8 = 64;
 
 /// X11 按键监听器，使用 `xinput test-xi2` 捕获全局按键事件。
 ///
@@ -45,20 +54,66 @@ impl X11Listener {
 
     /// 开始监听按键事件，返回事件通道。
     pub fn start(&mut self) -> Result<mpsc::UnboundedReceiver<KeyEvent>> {
-        let keycode = self.resolve_keycode()?;
+        // Check if we're on Wayland/XWayland - xinput test-xi2 doesn't work there
+        let is_wayland = std::env::var("WAYLAND_DISPLAY").is_ok()
+            || std::env::var("XDG_SESSION_TYPE").map(|v| v == "wayland").unwrap_or(false);
 
+        let evdev_keycode = match self.key_name.as_str() {
+            "Alt_L" => EVDEV_KEY_ALT,
+            "Alt_R" => EVDEV_KEY_ALT_R,
+            _ => EVDEV_KEY_ALT, // Default to LeftAlt
+        };
+
+        if is_wayland {
+            tracing::info!("detected Wayland/XWayland session, using evtest for key detection");
+            let (tx, rx) = mpsc::unbounded_channel();
+            let running = Arc::new(AtomicBool::new(true));
+            self.start_evtest_fallback(evdev_keycode, tx, running)?;
+            return Ok(rx);
+        }
+
+        // On native X11, use xinput test-xi2
+        let keycode = self.resolve_keycode()?;
         tracing::info!("resolved key '{}' to keycode {}", self.key_name, keycode);
 
         let (tx, rx) = mpsc::unbounded_channel();
         let running = Arc::clone(&self.running);
         running.store(true, Ordering::SeqCst);
 
+        let child = self.try_start_xinput(keycode, tx, running)?;
+        self.child = Some(child);
+        Ok(rx)
+    }
+
+    /// 尝试启动 xinput test-xi2。
+    /// 如果检测到 XWayland (BadAccess)，返回错误触发 fallback。
+    fn try_start_xinput(
+        &mut self,
+        keycode: u8,
+        tx: tokio::sync::mpsc::UnboundedSender<KeyEvent>,
+        running: Arc<AtomicBool>,
+    ) -> Result<Child> {
         let mut child = Command::new("xinput")
             .args(["test-xi2", "--root"])
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
+            .stderr(Stdio::piped())
             .spawn()
             .context("failed to start xinput test-xi2")?;
+
+        // Check stderr for XWayland warning
+        let stderr = child.stderr.take();
+        if let Some(stderr) = stderr {
+            std::thread::spawn(move || {
+                let reader = std::io::BufReader::new(stderr);
+                for line in reader.lines().take(10) {
+                    if let Ok(line) = line {
+                        if line.contains("Xwayland") || line.contains("BadAccess") {
+                            tracing::warn!("detected XWayland, xinput test-xi2 will not work");
+                        }
+                    }
+                }
+            });
+        }
 
         let stdout = child.stdout.take().context("no stdout from xinput")?;
 
@@ -112,8 +167,131 @@ impl X11Listener {
             tracing::warn!("xinput stdout closed, key listener thread exiting");
         });
 
-        self.child = Some(child);
-        Ok(rx)
+        Ok(child)
+    }
+
+    /// 启动 evtest fallback 监听器。
+    /// evtest 需要读取 /dev/input/event* 设备，需要用户属于 input 组。
+    fn start_evtest_fallback(
+        &mut self,
+        evdev_keycode: u16,
+        tx: tokio::sync::mpsc::UnboundedSender<KeyEvent>,
+        running: Arc<AtomicBool>,
+    ) -> Result<()> {
+        // Find keyboard devices
+        let keyboard_devices = self.find_keyboard_devices()?;
+        if keyboard_devices.is_empty() {
+            return Err(anyhow::anyhow!("no keyboard devices found for evtest fallback"));
+        }
+
+        tracing::info!("using evtest fallback with {} keyboard devices", keyboard_devices.len());
+
+        for device in keyboard_devices {
+            let running = Arc::clone(&running);
+            let tx = tx.clone();
+            let device_path = device.clone();
+
+            std::thread::spawn(move || {
+                // evtest outputs: Event: time..., type 1 (EV_KEY), code 56 (KEY_LEFTALT), value 1
+                // evtest writes events to stderr by default
+                let mut child = match Command::new("evtest")
+                    .arg(&device_path)
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::piped())
+                    .spawn()
+                {
+                    Ok(c) => c,
+                    Err(e) => {
+                        tracing::warn!(error = %e, device = %device_path.display(), "failed to spawn evtest");
+                        return;
+                    }
+                };
+
+                let stderr = child.stderr.take().expect("evtest stderr captured");
+                let reader = std::io::BufReader::new(stderr);
+
+                for line in reader.lines() {
+                    if !running.load(Ordering::SeqCst) {
+                        break;
+                    }
+
+                    let line = match line {
+                        Ok(l) => l,
+                        Err(_) => continue,
+                    };
+
+                    // Parse evtest output: "Event: time 1234567890.123456, type 1 (EV_KEY), code 56 (KEY_LEFTALT), value 1"
+                    if line.contains("EV_KEY") {
+                        // Extract code and value
+                        if let Some(code_start) = line.find("code ") {
+                            if let Some(code_end) = line[code_start..].find(' ') {
+                                let code_str = &line[code_start + 5..code_start + code_end];
+                                if let Ok(code) = code_str.parse::<u16>() {
+                                    if code == evdev_keycode || code == EVDEV_KEY_ALT || code == EVDEV_KEY_ALT_R {
+                                        if let Some(value_start) = line.find("value ") {
+                                            let value_str = line[value_start + 6..].trim();
+                                            let pressed = value_str == "1";
+                                            if tx.send(KeyEvent { pressed }).is_err() {
+                                                tracing::warn!("evtest: receiver dropped, exiting");
+                                                break;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        Ok(())
+    }
+
+    /// 查找键盘设备。
+    fn find_keyboard_devices(&self) -> Result<Vec<PathBuf>> {
+        let by_id_path = PathBuf::from("/dev/input/by-id");
+        let mut devices = Vec::new();
+
+        if by_id_path.exists() {
+            for entry in std::fs::read_dir(&by_id_path)? {
+                let entry = entry?;
+                let name = entry.file_name();
+                let name_str = name.to_string_lossy();
+                // Keyboard devices have "-kbd" suffix
+                if name_str.ends_with("-kbd") {
+                    let path = entry.path();
+                    // by-id symlinks point to event devices - resolve symlinks
+                    if let Ok(real_path) = std::fs::canonicalize(&path) {
+                        devices.push(real_path);
+                    }
+                }
+            }
+        }
+
+        // Fallback: enumerate all /dev/input/event* devices and check with evtest --info
+        if devices.is_empty() {
+            for entry in std::fs::read_dir("/dev/input")? {
+                let entry = entry?;
+                let name = entry.file_name().to_string_lossy().to_string();
+                if name.starts_with("event") {
+                    let path = entry.path();
+                    // Check if this is a keyboard using evtest --info
+                    let output = Command::new("sh")
+                        .arg("-c")
+                        .arg(format!("evtest --info {} 2>&1 | grep -q 'EV_KEY.*KEY' && echo YES || echo NO", path.display()))
+                        .output();
+
+                    if let Ok(output) = output {
+                        if String::from_utf8_lossy(&output.stdout).contains("YES") {
+                            devices.push(path);
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(devices)
     }
 
     /// 停止监听。
