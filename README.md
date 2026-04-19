@@ -18,8 +18,12 @@
 | 平台 | 按键监听 | 录音 | 剪贴板 | 通知 |
 |------|---------|------|--------|------|
 | Linux (X11/Wayland) | xinput | parecord | xclip/xsel/wl-copy | notify-send |
-| macOS | CGEvent tap | sox/ffmpeg | pbcopy | osascript |
-| Windows | PowerShell hook | ffmpeg/sox | clip.exe | PowerShell toast |
+| macOS | CGEvent tap | sox | pbcopy | osascript |
+| Windows | PowerShell hook | ffmpeg | clip.exe | PowerShell toast |
+
+## 系统托盘
+
+启动后会在系统托盘显示图标，点击图标可显示/隐藏主窗口，右键菜单提供"显示窗口"和"退出"选项。
 
 ## 安装
 
@@ -39,9 +43,16 @@
 3. 安装系统依赖：`sudo apt install xinput xdotool pulseaudio-utils xclip libnotify-bin`
 4. [配置语音识别和润色](#配置)
 
+### Linux (AppImage)
+
+1. 前往 [Releases](../../releases) 下载最新的 `.AppImage` 文件
+2. 赋予执行权限：`chmod +x altgo_*.AppImage`
+3. 直接运行：`./altgo_*.AppImage`
+4. 或使用 [AppImageLauncher](https://github.com/TheAssassin/AppImageLauncher) 集成到桌面菜单
+
 ### macOS
 
-1. 前往 [Releases](../../releases) 下载 tar.gz 包
+1. 前往 [Releases](../../releases) 下载 tar.gz 包（支持 Apple Silicon 和 Intel）
 2. 解压并放入 PATH：`sudo cp altgo /usr/local/bin/`
 3. 安装音频工具：`brew install sox`
 4. 在 **系统设置 → 隐私与安全性 → 辅助功能** 中授权终端或 altgo
@@ -155,37 +166,32 @@ level = "info"                     # "debug" / "info" / "warn" / "error"
 按键事件 → 状态机 → 录音 → ASR 转写 → LLM 润色 → 剪贴板 + 通知
 ```
 
-项目包含两种运行模式：
-
-| 模式 | 入口 | 说明 |
-|------|------|------|
-| **CLI** | `src/bin/cli.rs` | 纯命令行，无 UI，适合后台运行 |
-| **Tauri GUI** | `src-tauri/` + `frontend/` | 桌面应用，React 前端 + Rust 后端 |
-
-核心逻辑在 `src/` 库中共享，CLI 和 GUI 共用同一套管道。
+altgo 是基于 Tauri 的桌面应用，前端使用 React，后端使用 Rust。
 
 ## 开发
 
 ### 前置依赖
 
-- Rust toolchain
+- Rust 1.75+
 - Node.js（前端开发需要）
 - Tauri CLI：`cargo install tauri-cli --version "^2"`
 
-### CLI 模式
+### 构建
 
 ```bash
-cargo build --release         # 构建
-cargo test                    # 测试
-cargo fmt -- --check          # 格式检查
-cargo clippy -- -D warnings   # Lint
-```
+# Rust 后端
+cargo build --release --manifest-path=src-tauri/Cargo.toml
+cargo test --manifest-path=src-tauri/Cargo.toml
+cargo fmt --manifest-path=src-tauri/Cargo.toml -- --check
+cargo clippy --manifest-path=src-tauri/Cargo.toml -- -D warnings
 
-### GUI 模式（Tauri）
-
-```bash
-cargo tauri dev               # 启动开发模式（自动启动前端 dev server + 打开桌面窗口）
+# Tauri GUI
+cargo tauri dev               # 启动开发模式（前端 dev server + 桌面窗口）
 cargo tauri build             # 生产构建
+
+# 简化构建（使用 Make）
+make build                    # 构建 + 复制 binary 到当前目录
+make install                  # 安装到 /usr/local/bin + /etc/altgo/
 ```
 
 首次启动前安装前端依赖：

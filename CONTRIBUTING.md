@@ -20,9 +20,9 @@
 3. 编写代码和测试
 4. 确保通过所有检查：
    ```bash
-   cargo fmt -- --check
-   cargo clippy -- -D warnings
-   cargo test
+   cargo fmt --manifest-path=src-tauri/Cargo.toml -- --check
+   cargo clippy --manifest-path=src-tauri/Cargo.toml -- -D warnings
+   cargo test --manifest-path=src-tauri/Cargo.toml
    ```
 5. 提交变更 (`git commit`)
 6. 推送分支 (`git push origin feat/my-feature`)
@@ -43,7 +43,7 @@ type: 简短描述
 - 运行 `cargo fmt` 格式化代码
 - `cargo clippy -- -D warnings` 零警告
 - 公开 API 添加文档注释
-- 函数 < 50 行，文件 < 800 行
+- 函数 < 50 行，文件 < 1000 行
 
 ## 测试
 
@@ -56,7 +56,7 @@ type: 简短描述
 
 添加平台特定代码时：
 - 使用 `#[cfg(target_os = "linux")]` / `#[cfg(target_os = "macos")]` / `#[cfg(target_os = "windows")]`
-- 在对应平台的模块文件中实现
+- 在对应平台的模块文件中实现（如 `key_listener/linux.rs`）
 - 确保 `mod.rs` 导出统一的公共接口
 - 尽可能使用子进程调用系统工具，避免 FFI
 

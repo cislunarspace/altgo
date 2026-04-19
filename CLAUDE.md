@@ -25,7 +25,7 @@ make install                  # Install to /usr/local/bin + /etc/altgo/
 
 ## Architecture
 
-Single-mode architecture (Tauri desktop app) with core logic in `src-tauri/src/`:
+Tauri desktop app with core logic in `src-tauri/src/`:
 
 | Component | Path |
 |-----------|------|
@@ -41,15 +41,39 @@ Key Listener → State Machine → Recorder → Transcriber → Polisher → Out
 ### Modules (in `src-tauri/src/`)
 
 - **`lib.rs`** — Tauri app entry point, `AppState` struct, run loop setup.
-- **`cmd.rs`** — Tauri commands exposed to frontend via IPC.
+- **`cmd.rs`** — Tauri commands exposed to frontend via IPC (get_config, save_config, start_pipeline, stop_pipeline, get_status, copy_text, hide_overlay).
 - **`config.rs`** — TOML config loading with `serde(default)` for every field. API keys overridable via `ALTGO_TRANSCRIBER_API_KEY` and `ALTGO_POLISHER_API_KEY` env vars.
 - **`state_machine.rs`** — 5-state enum (`Idle`, `PotentialPress`, `Recording`, `WaitSecondClick`, `ContinuousRecording`). Long-press records, double-click enters continuous mode. Uses `tokio::select!` to race key events vs timeouts.
 - **`audio.rs`** — Thread-safe PCM buffer (`Mutex<Vec<u8>>`), WAV encode/decode (44-byte header + PCM).
 - **`transcriber.rs`** — `WhisperApi` (HTTP multipart to OpenAI-compatible endpoint) and `LocalWhisper` (subprocess to `whisper-cli` binary).
 - **`polisher.rs`** — LLM text polishing with 4 levels (`none`/`light`/`medium`/`heavy`). Retries with exponential backoff (3 attempts). Uses OpenAI-compatible chat API.
+- **`pipeline.rs`** — Core processing pipeline (transcribe + polish). Caller handles output (clipboard, notifications, GUI updates).
+- **`model.rs`** — whisper.cpp GGML model management (download, switch, storage in `~/.config/altgo/models/`).
+- **`tray.rs`** — System tray configuration (show window, quit menu).
+- **`resource.rs`** — Resource file management.
 - **`key_listener/`** — Platform-specific key detection. Linux: `xinput test-xi2`. macOS: CGEvent tap via inline Swift. Windows: PowerShell + `GetAsyncKeyState`.
-- **`recorder/`** — Platform-specific audio capture. Linux: `parecord`. macOS: `sox`. Windows: `ffmpeg` (primary) or `sox` (fallback).
+- **`recorder/`** — Platform-specific audio capture. Linux: `parecord`. macOS: `sox`. Windows: `ffmpeg`.
 - **`output/`** — Platform-specific clipboard + notifications. Linux: `xclip`/`xsel`/`wl-copy` + `notify-send`. macOS: `pbcopy` + `osascript`. Windows: `clip.exe`/PowerShell + BurntToast.
+
+### Frontend Structure (`frontend/src/`)
+
+```
+├── App.tsx              # App entry
+├── main.tsx             # React render entry
+├── overlay.tsx          # Floating window component
+├── overlay.css          # Overlay styles
+├── components/
+│   ├── ui/              # Base UI components (Input, Button, Card)
+│   ├── Layout.tsx       # Layout component
+│   └── StatusIndicator.tsx # Status indicator
+├── pages/
+│   ├── Home.tsx         # Home page
+│   └── Settings.tsx     # Settings page
+├── hooks/
+│   └── useTauri.ts      # Tauri integration hook
+├── i18n/                # Internationalization
+└── styles/              # CSS styles
+```
 
 ### Key Patterns
 
@@ -64,8 +88,8 @@ Key Listener → State Machine → Recorder → Transcriber → Polisher → Out
 ### Platform System Requirements
 
 - **Linux**: `xinput`, `xmodmap`, `parecord`, `xclip`/`xsel`/`wl-copy`, `notify-send`
-- **macOS**: `sox`, Swift CLI tools, `pbcopy`, `osascript`
-- **Windows**: `ffmpeg` or `sox`, PowerShell
+- **macOS**: `sox`, `pbcopy`, `osascript`
+- **Windows**: `ffmpeg`, PowerShell
 
 ### Tauri GUI Development
 
@@ -77,6 +101,6 @@ cd frontend && npm install
 ## Testing Notes
 
 - Unit tests live in `#[cfg(test)]` modules within each source file.
-- `config.rs` and `audio.rs` have comprehensive tests.
+- `config.rs`, `audio.rs`, and `model.rs` have comprehensive tests.
 - `transcriber.rs` and `polisher.rs` use `mockito` for HTTP-level mocking.
 - Platform-specific modules have minimal tests (construction/smoke tests only).
