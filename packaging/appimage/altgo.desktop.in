@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=altgo
+Comment=按 Alt 键语音转文字 — Hold Alt to transcribe speech
+Exec=altgo
+Icon=altgo
+Terminal=false
+Type=Application
+Categories=Utility;Audio;
+Keywords=voice;speech;transcribe;whisper;
