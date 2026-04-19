@@ -3,11 +3,10 @@ AppImage.appname: altgo
 AppImage.id: com.altgo.app
 AppImage.version: "@VERSION@"
 AppImage.architectures: ["@ARCH@"]
-AppImage.debates: []
 
 script: |
   # Copy application binary
-  cp "@CMAKE_CURRENT_BINARY_DIR@/../altgo" "@APPDIR@/usr/bin/altgo"
+  cp "@CMAKE_CURRENT_BINARY_DIR@/altgo" "@APPDIR@/usr/bin/altgo"
   chmod 755 "@APPDIR@/usr/bin/altgo"
 
   # Copy ffmpeg
