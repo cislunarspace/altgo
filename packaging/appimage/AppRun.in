@@ -1,0 +1,15 @@
+#!/bin/bash
+# AppRun — launch script for altgo AppImage
+
+HERE="$(dirname "$(readlink -f "${0}")")"
+export PATH="${HERE}/usr/bin:${PATH}"
+
+# Check for WebKit
+if ! ldconfig -p | grep -q "libwebkit2gtk-4.1"; then
+    echo "ERROR: altgo requires libwebkit2gtk-4.1-0"
+    echo "Please install it with: sudo apt install libwebkit2gtk-4.1-dev"
+    exit 1
+fi
+
+# Launch altgo
+exec "${HERE}/usr/bin/altgo" "$@"
