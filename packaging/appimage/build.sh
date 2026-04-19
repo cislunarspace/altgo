@@ -5,6 +5,18 @@ ARCH="${1:-x86_64}"
 VERSION="${2:-}"
 APPIMAGE_BUILDER="${3:-appimage-builder}"
 
+if [[ ! "${ARCH}" =~ ^(x86_64|aarch64)$ ]]; then
+    echo "ERROR: ARCH must be x86_64 or aarch64"
+    exit 1
+fi
+
+# Initialize cleanup variables
+TMP_DIR=""
+TMP_BUILD=""
+
+# Cleanup trap for temp directories
+trap 'rm -rf "${TMP_DIR}" "${TMP_BUILD}" 2>/dev/null || true' EXIT
+
 # Validate inputs
 if [[ -z "$VERSION" ]]; then
     echo "ERROR: VERSION is required (e.g., v1.4.0)"
@@ -109,7 +121,7 @@ npm ci --prefix "${PROJECT_ROOT}/frontend"
 
 # ─── Step 4: Build Tauri app (no bundle) ─────────────────────────────────────
 echo "[INFO] Building Tauri app..."
-cargo install tauri-cli --version "^2" --locked --quiet 2>/dev/null || true
+cargo install tauri-cli --version "^2" --locked --quiet
 
 cargo tauri build --no-bundle --manifest-path="${PROJECT_ROOT}/src-tauri/Cargo.toml"
 
@@ -126,7 +138,7 @@ echo "[INFO] Assembling AppImage..."
 
 # Write effective VERSION and ARCH to a temp file for appimage-builder
 TEMP_APPIMAGEBuilder_YML="${BUILD_APPIMAGE_DIR}/appimage-builder.yml"
-sed "s/@VERSION@/${VERSION}/g; s/@ARCH@/${ARCH}/g" \
+sed "s|@VERSION@|${VERSION}|g; s|@ARCH@|${ARCH}|g" \
     "${SCRIPT_DIR}/appimage-builder.yml" > "${TEMP_APPIMAGEBuilder_YML}"
 
 TEMP_APPRUN="${BUILD_APPIMAGE_DIR}/AppRun"
