@@ -421,7 +421,7 @@ pub async fn run_pipeline(
         recorder::PlatformRecorder::new(cfg.recorder.sample_rate, cfg.recorder.channels);
 
     let model_path = if cfg.transcriber.engine == "local" {
-        match altgo::model::resolve_model_path(&cfg.transcriber.model) {
+        match crate::model::resolve_model_path(&cfg.transcriber.model) {
             Some(p) => p.to_string_lossy().to_string(),
             None => {
                 let msg = format!(
@@ -629,8 +629,8 @@ pub struct ModelEntry {
 
 #[tauri::command]
 pub async fn list_models() -> Result<Vec<ModelEntry>, String> {
-    let downloaded = altgo::model::list_downloaded();
-    let entries = altgo::model::models_info()
+    let downloaded = crate::model::list_downloaded();
+    let entries = crate::model::models_info()
         .iter()
         .map(|m| ModelEntry {
             name: m.name.to_string(),
@@ -648,7 +648,7 @@ pub async fn download_model(
     app: tauri::AppHandle,
     name: String,
 ) -> Result<String, String> {
-    altgo::model::download_with_progress(&name, {
+    crate::model::download_with_progress(&name, {
         let app = app.clone();
         let name_clone = name.clone();
         move |downloaded, total| {
@@ -666,11 +666,11 @@ pub async fn download_model(
 
 #[tauri::command]
 pub async fn delete_model(name: String) -> Result<(), String> {
-    let info = altgo::model::models_info()
+    let info = crate::model::models_info()
         .iter()
         .find(|m| m.name == name)
         .ok_or_else(|| format!("unknown model: {}", name))?;
-    let path = altgo::model::models_dir().join(info.filename);
+    let path = crate::model::models_dir().join(info.filename);
     if path.exists() {
         std::fs::remove_file(&path).map_err(|e| e.to_string())?;
     }
@@ -679,6 +679,6 @@ pub async fn delete_model(name: String) -> Result<(), String> {
 
 #[tauri::command]
 pub async fn resolve_model(model: String) -> Result<Option<String>, String> {
-    Ok(altgo::model::resolve_model_path(&model)
+    Ok(crate::model::resolve_model_path(&model)
         .map(|p| p.to_string_lossy().to_string()))
 }
