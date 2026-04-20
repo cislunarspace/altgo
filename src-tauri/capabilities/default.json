@@ -10,6 +10,8 @@
     "core:window:allow-close",
     "core:window:allow-hide",
     "core:window:allow-show",
-    "core:window:allow-set-title"
+    "core:window:allow-set-title",
+    "core:window:allow-set-size",
+    "core:window:allow-set-position"
   ]
 }

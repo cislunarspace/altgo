@@ -10,10 +10,18 @@
 use anyhow::{anyhow, Context};
 use reqwest::Client;
 use serde::Deserialize;
+use std::path::PathBuf;
 use std::time::Duration;
 
-#[cfg(target_os = "windows")]
-use std::os::windows::process::CommandExt;
+/// Expand tilde in path to home directory.
+fn expand_tilde(path: &str) -> PathBuf {
+    if path.starts_with("~/") {
+        if let Some(home) = dirs::home_dir() {
+            return home.join(path.trim_start_matches("~/"));
+        }
+    }
+    PathBuf::from(path)
+}
 
 /// 语音识别结果。
 #[derive(Debug)]
@@ -165,9 +173,12 @@ impl LocalWhisper {
         // Find whisper-cli binary.
         let whisper_bin = find_whisper_binary(&self.whisper_path)?;
 
+        // Expand tilde in model path.
+        let model_path = expand_tilde(&self.model_path);
+
         let mut cmd = tokio::process::Command::new(&whisper_bin);
         cmd.arg("-m")
-            .arg(&self.model_path)
+            .arg(model_path)
             .arg("-l")
             .arg(&self.language)
             .arg("-f")
@@ -175,11 +186,6 @@ impl LocalWhisper {
             .arg("--no-timestamps")
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped());
-
-        #[cfg(target_os = "windows")]
-        {
-            cmd.creation_flags(0x08000000);
-        }
 
         let output = cmd.output().await.context("failed to run whisper-cli")?;
 
@@ -268,7 +274,6 @@ fn which_binary(name: &str) -> anyhow::Result<std::path::PathBuf> {
 fn which_binary(name: &str) -> anyhow::Result<std::path::PathBuf> {
     let output = std::process::Command::new("cmd")
         .args(["/C", "where", name])
-        .creation_flags(0x08000000)
         .output()?;
     if output.status.success() {
         let path = String::from_utf8_lossy(&output.stdout)

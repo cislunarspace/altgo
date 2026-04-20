@@ -2,7 +2,10 @@ import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useTranslation } from "../i18n";
 import { useModelDownloadProgress } from "../hooks/useTauri";
+import { Save, Globe, Mic, Sparkles, Check, Download, Trash2 } from "lucide-react";
+import "../styles/components.css";
 
+// Config interface - keep same as before
 interface Config {
   key_name: string;
   language: string;
@@ -13,6 +16,9 @@ interface Config {
   polish_model: string;
   polish_api_base_url: string;
   gui_language: string;
+  // API keys (not in config returned to frontend, use empty string)
+  transcriber_api_key: string;
+  polisher_api_key: string;
 }
 
 interface ModelEntry {
@@ -130,7 +136,7 @@ export default function Settings() {
   }, []);
 
   if (!config) {
-    return <div className="settings-loading">{t("settings.loading")}</div>;
+    return <div className="loading-container">{t("settings.loading")}</div>;
   }
 
   const update = (key: keyof Config, value: string) => {
@@ -155,7 +161,7 @@ export default function Settings() {
         },
       });
       setLang(config.gui_language);
-      setMessage(t("settings.saved"));
+      setMessage("saved");
     } catch (e) {
       setMessage(String(e));
     } finally {
@@ -164,152 +170,260 @@ export default function Settings() {
   };
 
   return (
-    <div className="settings">
-      <h2 className="settings-title">{t("settings.title")}</h2>
+    <div className="settings-page">
+      <div className="settings-form">
+        {/* Section 1: Basic Settings */}
+        <div className="settings-form-section">
+          <h3 className="settings-form-section-title">
+            <Globe size={14} />
+            {t("settings.gui_language")}
+          </h3>
+          <div className="settings-form-row">
+            <span className="settings-form-label">{t("settings.gui_language")}</span>
+            <div className="settings-form-control">
+              <select
+                className="settings-form-select"
+                value={config.gui_language}
+                onChange={(e) => update("gui_language", e.target.value)}
+              >
+                <option value="zh">中文</option>
+                <option value="en">English</option>
+              </select>
+            </div>
+          </div>
+        </div>
 
-      <div className="settings-section">
-        <h3 className="section-label">{t("settings.gui_language")}</h3>
-        <select
-          value={config.gui_language}
-          onChange={(e) => update("gui_language", e.target.value)}
-          className="input"
-        >
-          <option value="zh">中文</option>
-          <option value="en">English</option>
-        </select>
-      </div>
+        {/* Section 1: GUI Language */}
+        <div className="settings-form-section">
+          <h3 className="settings-form-section-title">
+            <Globe size={14} />
+            {t("settings.gui_language")}
+          </h3>
+          <div className="settings-form-row">
+            <span className="settings-form-label">{t("settings.gui_language")}</span>
+            <div className="settings-form-control">
+              <select
+                className="settings-form-select"
+                value={config.gui_language}
+                onChange={(e) => update("gui_language", e.target.value)}
+              >
+                <option value="zh">中文</option>
+                <option value="en">English</option>
+              </select>
+            </div>
+          </div>
+        </div>
 
-      <div className="settings-section">
-        <h3 className="section-label">{t("settings.recording")}</h3>
-        <label className="field">
-          <span>{t("settings.key_name")}</span>
-          <select
-            className="input"
-            value={config.key_name}
-            onChange={(e) => update("key_name", e.target.value)}
-          >
-            <option value="ISO_Level3_Shift">Right Alt</option>
-            <option value="Alt_L">Left Alt</option>
-            <option value="Super_L">Left Win</option>
-            <option value="Super_R">Right Win</option>
-            <option value="Control_R">Right Ctrl</option>
-            <option value="Shift_R">Right Shift</option>
-          </select>
-        </label>
-      </div>
+        {/* Section 2: Recording */}
 
-      <div className="settings-section">
-        <h3 className="section-label">{t("settings.transcription")}</h3>
-        <label className="field">
-          <span>{t("settings.engine")}</span>
-          <select
-            className="input"
-            value={config.engine}
-            onChange={(e) => update("engine", e.target.value)}
-          >
-            <option value="local">{t("settings.engine_local")}</option>
-            <option value="api">{t("settings.engine_api")}</option>
-          </select>
-        </label>
-        <label className="field">
-          <span>{t("settings.language")}</span>
-          <select
-            className="input"
-            value={config.language}
-            onChange={(e) => update("language", e.target.value)}
-          >
-            <option value="zh">中文</option>
-            <option value="en">English</option>
-            <option value="ja">日本語</option>
-            <option value="ko">한국어</option>
-            <option value="auto">Auto</option>
-          </select>
-        </label>
-        {config.engine === "api" ? (
-          <>
-            <label className="field">
-              <span>{t("settings.api_url")}</span>
+        <div className="settings-form-section">
+          <h3 className="settings-form-section-title">
+            <Mic size={14} />
+            {t("settings.recording")}
+          </h3>
+          <div className="settings-form-row">
+            <span className="settings-form-label">{t("settings.key_name")}</span>
+            <div className="settings-form-control">
               <input
-                className="input"
-                value={config.api_base_url}
-                onChange={(e) => update("api_base_url", e.target.value)}
-                placeholder="https://api.openai.com"
+                type="text"
+                className="settings-form-input"
+                value={config.key_name}
+                onChange={(e) => update("key_name", e.target.value)}
+                placeholder="Alt_R"
               />
-            </label>
-            <label className="field">
-              <span>{t("settings.model")}</span>
-              <input
-                className="input"
-                value={config.model}
-                onChange={(e) => update("model", e.target.value)}
-                placeholder="whisper-1"
-              />
-            </label>
-          </>
-        ) : (
-          <>
-            <ModelSection t={t} />
-            <label className="field">
-              <span>{t("settings.active_model")}</span>
-              <input
-                className="input"
-                value={config.model}
-                onChange={(e) => update("model", e.target.value)}
-                placeholder={t("settings.active_model_placeholder")}
-              />
-            </label>
-            <p className="field-hint">{t("settings.active_model_hint")}</p>
-          </>
-        )}
-      </div>
+            </div>
+          </div>
+        </div>
 
-      <div className="settings-section">
-        <h3 className="section-label">{t("settings.polishing")}</h3>
-        <label className="field">
-          <span>{t("settings.polish_level")}</span>
-          <select
-            className="input"
-            value={config.polish_level}
-            onChange={(e) => update("polish_level", e.target.value)}
-          >
-            <option value="none">{t("settings.polish_none")}</option>
-            <option value="light">{t("settings.polish_light")}</option>
-            <option value="medium">{t("settings.polish_medium")}</option>
-            <option value="heavy">{t("settings.polish_heavy")}</option>
-          </select>
-        </label>
-        {config.polish_level !== "none" && (
-          <>
-            <label className="field">
-              <span>{t("settings.api_url")}</span>
+        {/* Section 3: Transcription */}
+        <div className="settings-form-section">
+          <h3 className="settings-form-section-title">
+            <Sparkles size={14} />
+            {t("settings.transcription")}
+          </h3>
+          <div className="settings-form-row">
+            <span className="settings-form-label">{t("settings.engine")}</span>
+            <div className="settings-form-control">
+              <select
+                className="settings-form-select"
+                value={config.engine}
+                onChange={(e) => update("engine", e.target.value)}
+              >
+                <option value="api">{t("settings.engine_api")}</option>
+                <option value="local">{t("settings.engine_local")}</option>
+              </select>
+            </div>
+          </div>
+          <div className="settings-form-row">
+            <span className="settings-form-label">{t("settings.language")}</span>
+            <div className="settings-form-control">
               <input
-                className="input"
+                type="text"
+                className="settings-form-input"
+                value={config.language}
+                onChange={(e) => update("language", e.target.value)}
+                placeholder="zh"
+              />
+            </div>
+          </div>
+          {config.engine === "api" ? (
+            <>
+              <div className="settings-form-row">
+                <span className="settings-form-label">{t("settings.api_url")}</span>
+                <div className="settings-form-control">
+                  <input
+                    type="text"
+                    className="settings-form-input"
+                    value={config.api_base_url}
+                    onChange={(e) => update("api_base_url", e.target.value)}
+                    placeholder="https://api.openai.com"
+                  />
+                </div>
+              </div>
+              <div className="settings-form-row">
+                <span className="settings-form-label">{t("settings.api_key")}</span>
+                <div className="settings-form-control">
+                  <input
+                    type="password"
+                    className="settings-form-input"
+                    value={config.transcriber_api_key || ""}
+                    onChange={(e) => update("transcriber_api_key", e.target.value)}
+                    placeholder="sk-..."
+                  />
+                </div>
+              </div>
+            </>
+          ) : (
+            <div className="settings-form-row">
+              <span className="settings-form-label">{t("settings.model_path")}</span>
+              <div className="settings-form-control">
+                <input
+                  type="text"
+                  className="settings-form-input"
+                  value={config.model}
+                  onChange={(e) => update("model", e.target.value)}
+                  placeholder="~/models/whisper.bin"
+                />
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Section 4: Model Management (functional) */}
+        <div className="settings-form-section">
+          <h3 className="settings-form-section-title">
+            <Download size={14} />
+            {t("settings.model_management")}
+          </h3>
+          <ModelSection t={t} />
+        </div>
+
+        {/* Section 5: Polishing */}
+        <div className="settings-form-section">
+          <h3 className="settings-form-section-title">
+            <Sparkles size={14} />
+            {t("settings.polishing")}
+          </h3>
+          <div className="settings-form-row">
+            <span className="settings-form-label">{t("settings.polish_level")}</span>
+            <div className="settings-form-control">
+              <select
+                className="settings-form-select"
+                value={config.polish_level}
+                onChange={(e) => update("polish_level", e.target.value)}
+              >
+                <option value="none">{t("settings.polish_none")}</option>
+                <option value="light">{t("settings.polish_light")}</option>
+                <option value="medium">{t("settings.polish_medium")}</option>
+                <option value="heavy">{t("settings.polish_heavy")}</option>
+              </select>
+            </div>
+          </div>
+          <div className="settings-form-row">
+            <span className="settings-form-label">{t("settings.api_url")}</span>
+            <div className="settings-form-control">
+              <input
+                type="text"
+                className="settings-form-input"
                 value={config.polish_api_base_url}
                 onChange={(e) => update("polish_api_base_url", e.target.value)}
                 placeholder="https://api.openai.com"
               />
-            </label>
-            <label className="field">
-              <span>{t("settings.model")}</span>
+            </div>
+          </div>
+          <div className="settings-form-row">
+            <span className="settings-form-label">{t("settings.model")}</span>
+            <div className="settings-form-control">
               <input
-                className="input"
+                type="text"
+                className="settings-form-input"
                 value={config.polish_model}
                 onChange={(e) => update("polish_model", e.target.value)}
                 placeholder="gpt-4o-mini"
               />
-            </label>
-          </>
-        )}
-      </div>
+            </div>
+          </div>
+          <div className="settings-form-row">
+            <span className="settings-form-label">{t("settings.api_key")}</span>
+            <div className="settings-form-control">
+              <input
+                type="password"
+                className="settings-form-input"
+                value={config.polisher_api_key || ""}
+                onChange={(e) => update("polisher_api_key", e.target.value)}
+                placeholder="sk-..."
+              />
+            </div>
+          </div>
+        </div>
 
-      <div className="settings-actions">
-        <button className="btn btn-primary" onClick={save} disabled={saving}>
-          {saving ? t("settings.saving") : t("settings.save")}
-        </button>
-        {message && <p className="settings-message">{message}</p>}
-      </div>
+        {/* Section 6: About */}
+        <div className="settings-form-section">
+          <h3 className="settings-form-section-title">
+            <Sparkles size={14} />
+            {t("settings.about")}
+          </h3>
+          <div className="settings-form-row">
+            <span className="settings-form-label">{t("settings.version")}</span>
+            <div className="settings-form-control">
+              <span style={{ color: '#888', fontSize: '13px' }}>1.4.0</span>
+            </div>
+          </div>
+          <div className="settings-form-row">
+            <span className="settings-form-label"></span>
+            <div className="settings-form-control">
+              <button className="settings-form-btn">
+                {t("settings.check_updates")}
+              </button>
+            </div>
+          </div>
+        </div>
 
-      <p className="settings-hint">{t("settings.restart_hint")}</p>
+        {/* Save Button */}
+        <div className="settings-form-row" style={{ marginTop: '16px', borderTop: '1px solid #333', paddingTop: '16px' }}>
+          <span className="settings-form-label"></span>
+          <div className="settings-form-control">
+            <button
+              className="settings-form-btn settings-form-btn-primary"
+              onClick={save}
+              disabled={saving}
+            >
+              <Save size={12} />
+              {saving ? t("settings.saving") : t("settings.save")}
+            </button>
+            {message === "saved" && (
+              <span style={{ color: '#22c55e', fontSize: '13px', marginLeft: '12px' }}>
+                <Check size={12} /> {t("settings.saved")}
+              </span>
+            )}
+            {message && message !== "saved" && (
+              <span style={{ color: '#ef4444', fontSize: '13px', marginLeft: '12px' }}>
+                {message}
+              </span>
+            )}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

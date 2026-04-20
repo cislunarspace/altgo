@@ -1,0 +1,366 @@
+//! Linux 按键监听器。
+//!
+//! 优先使用 `xinput test-xi2` 命令捕获全局键盘事件，依赖 XInput2 扩展。
+//! 在 XWayland 上失败时，回退到使用 `evtest` 读取 `/dev/input/event*` 设备。
+//!
+//! 通过 `xmodmap -pke` 解析按键名称到 keycode 的映射。
+
+use super::KeyEvent;
+use anyhow::{Context, Result};
+use std::io::BufRead;
+use std::path::PathBuf;
+use std::process::{Child, Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, OnceLock};
+use tokio::sync::mpsc;
+
+/// Cache for xmodmap keycode mappings. Parsing xmodmap output is expensive,
+/// so we cache the entire keycode table on first use.
+static XMODMAP_CACHE: OnceLock<std::collections::HashMap<String, u8>> = OnceLock::new();
+
+/// evdev keycode for Alt keys (used by evtest fallback).
+const EVDEV_KEY_ALT: u16 = 56; // KEY_LEFTALT
+const EVDEV_KEY_ALT_R: u16 = 100; // KEY_RIGHTALT
+
+/// X11 keycode for Alt_L (from xmodmap output).
+#[allow(dead_code)]
+const X11_KEYCODE_ALT: u8 = 64;
+
+/// X11 按键监听器，使用 `xinput test-xi2` 捕获全局按键事件。
+///
+/// 无需 root 权限，依赖 XInput2 扩展。
+pub struct X11Listener {
+    key_name: String,
+    running: Arc<AtomicBool>,
+    child: Option<Child>,
+}
+
+impl X11Listener {
+    /// 创建新的 X11 监听器，验证 `xinput` 是否可用。
+    pub fn new(key_name: &str) -> Result<Self> {
+        Command::new("xinput")
+            .arg("version")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .context("xinput not found — install xinput package")?;
+
+        Ok(Self {
+            key_name: key_name.to_string(),
+            running: Arc::new(AtomicBool::new(false)),
+            child: None,
+        })
+    }
+
+    /// 开始监听按键事件，返回事件通道。
+    pub fn start(&mut self) -> Result<mpsc::UnboundedReceiver<KeyEvent>> {
+        // Check if we're on Wayland/XWayland - xinput test-xi2 doesn't work there
+        let is_wayland = std::env::var("WAYLAND_DISPLAY").is_ok()
+            || std::env::var("XDG_SESSION_TYPE").map(|v| v == "wayland").unwrap_or(false);
+
+        let evdev_keycode = match self.key_name.as_str() {
+            "Alt_L" => EVDEV_KEY_ALT,
+            "Alt_R" => EVDEV_KEY_ALT_R,
+            _ => EVDEV_KEY_ALT, // Default to LeftAlt
+        };
+
+        if is_wayland {
+            tracing::info!("detected Wayland/XWayland session, using evtest for key detection");
+            let (tx, rx) = mpsc::unbounded_channel();
+            let running = Arc::new(AtomicBool::new(true));
+            self.start_evtest_fallback(evdev_keycode, tx, running)?;
+            return Ok(rx);
+        }
+
+        // On native X11, use xinput test-xi2
+        let keycode = self.resolve_keycode()?;
+        tracing::info!("resolved key '{}' to keycode {}", self.key_name, keycode);
+
+        let (tx, rx) = mpsc::unbounded_channel();
+        let running = Arc::clone(&self.running);
+        running.store(true, Ordering::SeqCst);
+
+        let child = self.try_start_xinput(keycode, tx, running)?;
+        self.child = Some(child);
+        Ok(rx)
+    }
+
+    /// 尝试启动 xinput test-xi2。
+    /// 如果检测到 XWayland (BadAccess)，返回错误触发 fallback。
+    fn try_start_xinput(
+        &mut self,
+        keycode: u8,
+        tx: tokio::sync::mpsc::UnboundedSender<KeyEvent>,
+        running: Arc<AtomicBool>,
+    ) -> Result<Child> {
+        let mut child = Command::new("xinput")
+            .args(["test-xi2", "--root"])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .context("failed to start xinput test-xi2")?;
+
+        // Check stderr for XWayland warning
+        let stderr = child.stderr.take();
+        if let Some(stderr) = stderr {
+            std::thread::spawn(move || {
+                let reader = std::io::BufReader::new(stderr);
+                for line in reader.lines().take(10) {
+                    if let Ok(line) = line {
+                        if line.contains("Xwayland") || line.contains("BadAccess") {
+                            tracing::warn!("detected XWayland, xinput test-xi2 will not work");
+                        }
+                    }
+                }
+            });
+        }
+
+        let stdout = child.stdout.take().context("no stdout from xinput")?;
+
+        std::thread::spawn(move || {
+            let reader = std::io::BufReader::new(stdout);
+            let mut event_type: Option<bool> = None; // true=press, false=release
+
+            for line in reader.lines() {
+                if !running.load(Ordering::SeqCst) {
+                    tracing::info!("key listener thread stopped by user");
+                    break;
+                }
+
+                let line = match line {
+                    Ok(l) => l,
+                    Err(e) => {
+                        tracing::warn!(error = %e, "xinput stdout read error, key listener thread exiting");
+                        break;
+                    }
+                };
+
+                let trimmed = line.trim();
+
+                if trimmed.contains("KeyPress") && trimmed.starts_with("EVENT") {
+                    event_type = Some(true);
+                } else if trimmed.contains("KeyRelease") && trimmed.starts_with("EVENT") {
+                    event_type = Some(false);
+                } else if let Some(detail_str) = trimmed.strip_prefix("detail:") {
+                    if let Some(pressed) = event_type.take() {
+                        if let Ok(detail) = detail_str.trim().parse::<u8>() {
+                            if detail == keycode && tx.send(KeyEvent { pressed }).is_err() {
+                                tracing::warn!(
+                                    "key event receiver dropped, key listener thread exiting"
+                                );
+                                break;
+                            }
+                        }
+                    } else {
+                        tracing::debug!(
+                            line = %trimmed,
+                            "detail line without preceding event type, skipping"
+                        );
+                    }
+                } else if !trimmed.is_empty()
+                    && !trimmed.starts_with("EVENT")
+                    && !trimmed.contains(':')
+                {
+                    tracing::trace!(line = %trimmed, "unparsed xinput line");
+                }
+            }
+            tracing::warn!("xinput stdout closed, key listener thread exiting");
+        });
+
+        Ok(child)
+    }
+
+    /// 启动 evtest fallback 监听器。
+    /// evtest 需要读取 /dev/input/event* 设备，需要用户属于 input 组。
+    fn start_evtest_fallback(
+        &mut self,
+        evdev_keycode: u16,
+        tx: tokio::sync::mpsc::UnboundedSender<KeyEvent>,
+        running: Arc<AtomicBool>,
+    ) -> Result<()> {
+        // Find keyboard devices
+        let keyboard_devices = self.find_keyboard_devices()?;
+        if keyboard_devices.is_empty() {
+            return Err(anyhow::anyhow!("no keyboard devices found for evtest fallback"));
+        }
+
+        tracing::info!("using evtest fallback with {} keyboard devices", keyboard_devices.len());
+
+        for device in keyboard_devices {
+            let running = Arc::clone(&running);
+            let tx = tx.clone();
+            let device_path = device.clone();
+
+            std::thread::spawn(move || {
+                // evtest outputs: Event: time..., type 1 (EV_KEY), code 56 (KEY_LEFTALT), value 1
+                // evtest writes events to stderr by default
+                let mut child = match Command::new("evtest")
+                    .arg(&device_path)
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::piped())
+                    .spawn()
+                {
+                    Ok(c) => c,
+                    Err(e) => {
+                        tracing::warn!(error = %e, device = %device_path.display(), "failed to spawn evtest");
+                        return;
+                    }
+                };
+
+                let stderr = child.stderr.take().expect("evtest stderr captured");
+                let reader = std::io::BufReader::new(stderr);
+
+                for line in reader.lines() {
+                    if !running.load(Ordering::SeqCst) {
+                        break;
+                    }
+
+                    let line = match line {
+                        Ok(l) => l,
+                        Err(_) => continue,
+                    };
+
+                    // Parse evtest output: "Event: time 1234567890.123456, type 1 (EV_KEY), code 56 (KEY_LEFTALT), value 1"
+                    if line.contains("EV_KEY") {
+                        // Extract code and value
+                        if let Some(code_start) = line.find("code ") {
+                            if let Some(code_end) = line[code_start..].find(' ') {
+                                let code_str = &line[code_start + 5..code_start + code_end];
+                                if let Ok(code) = code_str.parse::<u16>() {
+                                    if code == evdev_keycode || code == EVDEV_KEY_ALT || code == EVDEV_KEY_ALT_R {
+                                        if let Some(value_start) = line.find("value ") {
+                                            let value_str = line[value_start + 6..].trim();
+                                            let pressed = value_str == "1";
+                                            if tx.send(KeyEvent { pressed }).is_err() {
+                                                tracing::warn!("evtest: receiver dropped, exiting");
+                                                break;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        Ok(())
+    }
+
+    /// 查找键盘设备。
+    fn find_keyboard_devices(&self) -> Result<Vec<PathBuf>> {
+        let by_id_path = PathBuf::from("/dev/input/by-id");
+        let mut devices = Vec::new();
+
+        if by_id_path.exists() {
+            for entry in std::fs::read_dir(&by_id_path)? {
+                let entry = entry?;
+                let name = entry.file_name();
+                let name_str = name.to_string_lossy();
+                // Keyboard devices have "-kbd" suffix
+                if name_str.ends_with("-kbd") {
+                    let path = entry.path();
+                    // by-id symlinks point to event devices - resolve symlinks
+                    if let Ok(real_path) = std::fs::canonicalize(&path) {
+                        devices.push(real_path);
+                    }
+                }
+            }
+        }
+
+        // Fallback: enumerate all /dev/input/event* devices and check with evtest --info
+        if devices.is_empty() {
+            for entry in std::fs::read_dir("/dev/input")? {
+                let entry = entry?;
+                let name = entry.file_name().to_string_lossy().to_string();
+                if name.starts_with("event") {
+                    let path = entry.path();
+                    // Check if this is a keyboard using evtest --info
+                    let output = Command::new("sh")
+                        .arg("-c")
+                        .arg(format!("evtest --info {} 2>&1 | grep -q 'EV_KEY.*KEY' && echo YES || echo NO", path.display()))
+                        .output();
+
+                    if let Ok(output) = output {
+                        if String::from_utf8_lossy(&output.stdout).contains("YES") {
+                            devices.push(path);
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(devices)
+    }
+
+    /// 停止监听。
+    pub fn stop(&mut self) {
+        self.running.store(false, Ordering::SeqCst);
+        if let Some(child) = self.child.as_mut() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
+
+    fn resolve_keycode(&self) -> Result<u8> {
+        let keycode_map = XMODMAP_CACHE.get_or_init(|| {
+            let output = match Command::new("xmodmap").arg("-pke").output() {
+                Ok(o) => o,
+                Err(e) => {
+                    tracing::error!(error = %e, "xmodmap not found or failed to run");
+                    return std::collections::HashMap::new();
+                }
+            };
+
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            if stdout.trim().is_empty() {
+                tracing::error!("xmodmap returned empty output");
+                return std::collections::HashMap::new();
+            }
+
+            let mut map = std::collections::HashMap::new();
+
+            // xmodmap -pke output format: keycode <N> = keysym ...
+            // e.g., "keycode  64 = Alt_L Meta_L Alt_L Meta_L"
+            for line in stdout.lines() {
+                if let Some(keycode_str) = line.split_whitespace().nth(1) {
+                    if let Ok(keycode) = keycode_str.parse::<u8>() {
+                        // Extract all keysyms from the line (skip "keycode N =")
+                        for keysym in line.split_whitespace().skip(3) {
+                            // Skip "=" if present
+                            let keysym = keysym.trim_end_matches('=');
+                            if !keysym.is_empty() && !map.contains_key(keysym) {
+                                map.insert(keysym.to_string(), keycode);
+                            }
+                        }
+                    }
+                }
+            }
+            if map.is_empty() {
+                tracing::error!("xmodmap output contained no parseable keycode mappings");
+            }
+            map
+        });
+
+        if keycode_map.is_empty() {
+            return Err(anyhow::anyhow!(
+                "xmodmap failed to produce keycode mappings — is xmodmap installed and DISPLAY set?"
+            ));
+        }
+
+        keycode_map.get(&self.key_name).copied().ok_or_else(|| {
+            anyhow::anyhow!(
+                "keycode for '{}' not found in xmodmap output (key '{}' may not exist on this keyboard layout)",
+                self.key_name,
+                self.key_name
+            )
+        })
+    }
+}
+
+impl Drop for X11Listener {
+    fn drop(&mut self) {
+        self.stop();
+    }
+}

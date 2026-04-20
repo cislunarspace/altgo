@@ -1,12 +1,12 @@
 {
   "$schema": "https://raw.githubusercontent.com/tauri-apps/tauri/dev/crates/tauri-cli/schema.json",
   "productName": "altgo",
-  "version": "1.0.0",
+  "version": "1.4.0",
   "identifier": "com.altgo.app",
   "build": {
-    "beforeDevCommand": "npm run dev --prefix ./frontend",
+    "beforeDevCommand": null,
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": null,
+    "beforeBuildCommand": "npm --prefix ../frontend run build",
     "frontendDist": "../frontend/dist"
   },
   "app": {
@@ -32,7 +32,8 @@
         "skipTaskbar": true,
         "visible": false,
         "resizable": false,
-        "focusable": false
+        "focusable": false,
+        "shadow": false
       }
     ],
     "security": {
@@ -46,7 +47,7 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": ["deb"],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -56,6 +57,12 @@
     ],
     "resources": {
       "../.deps/bin/*": "./bin/"
+    },
+    "linux": {
+      "deb": {
+        "depends": ["libwebkit2gtk-4.1-0", "libgtk-3-0", "libayatana-appindicator3-1", "xdotool", "xclip", "pulseaudio-utils", "libnotify-bin"]
+      }
+    }
     }
   }
 }

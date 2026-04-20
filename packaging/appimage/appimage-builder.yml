@@ -1,0 +1,22 @@
+version: 1
+AppImage.appname: altgo
+AppImage.id: com.altgo.app
+AppImage.version: "@VERSION@"
+AppImage.architectures: ["@ARCH@"]
+
+script: |
+  # Copy application binary
+  cp "@CMAKE_CURRENT_BINARY_DIR@/altgo" "@APPDIR@/usr/bin/altgo"
+  chmod 755 "@APPDIR@/usr/bin/altgo"
+
+  # Copy ffmpeg
+  cp "@DEPS_DIR@/bin/ffmpeg" "@APPDIR@/usr/bin/ffmpeg"
+  chmod 755 "@APPDIR@/usr/bin/ffmpeg"
+
+  # Copy whisper-cli
+  cp "@DEPS_DIR@/bin/whisper-cli" "@APPDIR@/usr/bin/whisper-cli"
+  chmod 755 "@APPDIR@/usr/bin/whisper-cli"
+
+  # Copy icons
+  mkdir -p "@APPDIR@/usr/share/altgo/icons"
+  cp -r "@CMAKE_SOURCE_DIR@/src-tauri/icons/"* "@APPDIR@/usr/share/altgo/icons/"

@@ -1,18 +1,37 @@
-use tauri::{Manager, RunEvent};
+//! altgo 核心库。
+//!
+//! 包含所有平台的语音转文字管道逻辑：
+//! 按键监听 → 状态机 → 录音 → 语音识别 → 文本润色 → 输出
+
+pub mod audio;
+pub mod cmd;
+pub mod config;
+pub mod key_listener;
+pub mod model;
+pub mod output;
+pub mod pipeline;
+pub mod polisher;
+pub mod recorder;
+pub mod resource;
+pub mod state_machine;
+pub mod transcriber;
+pub mod tray;
+
+pub use pipeline::PipelineOutput;
+
+use std::sync::Arc;
+use tauri::Manager;
 use tokio::sync::Mutex;
 
-mod cmd;
-mod tray;
-
 pub struct AppState {
-    config: Mutex<altgo::config::Config>,
-    config_path: std::path::PathBuf,
-    pipeline: Mutex<Option<PipelineHandle>>,
-    pipeline_status: std::sync::Arc<std::sync::RwLock<String>>,
+    pub config: Mutex<config::Config>,
+    pub config_path: std::path::PathBuf,
+    pub pipeline: Mutex<Option<PipelineHandle>>,
+    pub pipeline_status: Arc<std::sync::RwLock<String>>,
 }
 
-struct PipelineHandle {
-    stop_tx: tokio::sync::oneshot::Sender<()>,
+pub struct PipelineHandle {
+    pub stop_tx: tokio::sync::oneshot::Sender<()>,
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -20,13 +39,13 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
-            let config_path = altgo::config::Config::default_config_path();
-            let cfg = altgo::config::Config::load(&config_path).expect("failed to load config");
+            let config_path = config::Config::default_config_path();
+            let cfg = config::Config::load(&config_path).expect("failed to load config");
             cfg.validate().expect("invalid config");
 
-            let cfg_arc = std::sync::Arc::new(cfg.clone());
+            let cfg_arc = Arc::new(cfg.clone());
 
-            let pipeline_status = std::sync::Arc::new(std::sync::RwLock::new(String::from("idle")));
+            let pipeline_status = Arc::new(std::sync::RwLock::new(String::from("idle")));
             let state = AppState {
                 config: Mutex::new(cfg),
                 config_path,
@@ -40,7 +59,7 @@ pub fn run() {
             #[cfg(target_os = "windows")]
             {
                 std::thread::spawn(|| {
-                    altgo::recorder::warmup_device();
+                    recorder::warmup_device();
                     tracing::info!("audio device warmup complete");
                 });
             }
@@ -84,7 +103,7 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|_app_handle, event| {
-            if let RunEvent::ExitRequested { .. } = event {
+            if let tauri::RunEvent::ExitRequested { .. } = event {
                 // TODO: stop pipeline on exit
             }
         });

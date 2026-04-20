@@ -9,38 +9,71 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Build & Test Commands
 
 ```bash
-cargo build --release         # Optimized build
-cargo test                    # Run all tests
-cargo test -- --nocapture     # Run tests with println output
-cargo test test_name          # Run tests matching pattern
-cargo fmt                     # Format code
-cargo fmt -- --check          # Check formatting (CI uses this)
-cargo clippy -- -D warnings   # Lint with warnings as errors
+# Rust only (no GUI)
+cargo build --release --manifest-path=src-tauri/Cargo.toml
+cargo test --manifest-path=src-tauri/Cargo.toml
+cargo fmt --manifest-path=src-tauri/Cargo.toml -- --check
+cargo clippy --manifest-path=src-tauri/Cargo.toml -- -D warnings
+
+# Tauri GUI mode
+cargo tauri dev               # Dev mode (frontend dev server + desktop window)
+cargo tauri build            # Production GUI build
+
 make build                    # Build + copy binary to ./
 make install                  # Install to /usr/local/bin + /etc/altgo/
 ```
 
-CI runs on all three platforms (Linux, macOS, Windows) and checks: `fmt`, `clippy`, `build --release`, `test`.
-
 ## Architecture
 
-Linear pipeline driven by keyboard events:
+Tauri desktop app with core logic in `src-tauri/src/`:
+
+| Component | Path |
+|-----------|------|
+| **Tauri GUI** | `src-tauri/` + `frontend/` |
+| **Core modules** | `src-tauri/src/` |
+
+Core pipeline driven by keyboard events:
 
 ```
 Key Listener → State Machine → Recorder → Transcriber → Polisher → Output
 ```
 
-### Modules
+### Modules (in `src-tauri/src/`)
 
-- **`main.rs`** — CLI parsing (`clap`), wires all modules together, runs the main event loop. The `Transcriber` enum dispatches between API and local backends.
+- **`lib.rs`** — Tauri app entry point, `AppState` struct, run loop setup.
+- **`cmd.rs`** — Tauri commands exposed to frontend via IPC (get_config, save_config, start_pipeline, stop_pipeline, get_status, copy_text, hide_overlay).
 - **`config.rs`** — TOML config loading with `serde(default)` for every field. API keys overridable via `ALTGO_TRANSCRIBER_API_KEY` and `ALTGO_POLISHER_API_KEY` env vars.
 - **`state_machine.rs`** — 5-state enum (`Idle`, `PotentialPress`, `Recording`, `WaitSecondClick`, `ContinuousRecording`). Long-press records, double-click enters continuous mode. Uses `tokio::select!` to race key events vs timeouts.
 - **`audio.rs`** — Thread-safe PCM buffer (`Mutex<Vec<u8>>`), WAV encode/decode (44-byte header + PCM).
 - **`transcriber.rs`** — `WhisperApi` (HTTP multipart to OpenAI-compatible endpoint) and `LocalWhisper` (subprocess to `whisper-cli` binary).
 - **`polisher.rs`** — LLM text polishing with 4 levels (`none`/`light`/`medium`/`heavy`). Retries with exponential backoff (3 attempts). Uses OpenAI-compatible chat API.
+- **`pipeline.rs`** — Core processing pipeline (transcribe + polish). Caller handles output (clipboard, notifications, GUI updates).
+- **`model.rs`** — whisper.cpp GGML model management (download, switch, storage in `~/.config/altgo/models/`).
+- **`tray.rs`** — System tray configuration (show window, quit menu).
+- **`resource.rs`** — Resource file management.
 - **`key_listener/`** — Platform-specific key detection. Linux: `xinput test-xi2`. macOS: CGEvent tap via inline Swift. Windows: PowerShell + `GetAsyncKeyState`.
-- **`recorder/`** — Platform-specific audio capture. Linux: `parecord`. macOS: `sox`. Windows: `ffmpeg` (primary) or `sox` (fallback).
+- **`recorder/`** — Platform-specific audio capture. Linux: `parecord`. macOS: `sox`. Windows: `ffmpeg`.
 - **`output/`** — Platform-specific clipboard + notifications. Linux: `xclip`/`xsel`/`wl-copy` + `notify-send`. macOS: `pbcopy` + `osascript`. Windows: `clip.exe`/PowerShell + BurntToast.
+
+### Frontend Structure (`frontend/src/`)
+
+```
+├── App.tsx              # App entry
+├── main.tsx             # React render entry
+├── overlay.tsx          # Floating window component
+├── overlay.css          # Overlay styles
+├── components/
+│   ├── ui/              # Base UI components (Input, Button, Card)
+│   ├── Layout.tsx       # Layout component
+│   └── StatusIndicator.tsx # Status indicator
+├── pages/
+│   ├── Home.tsx         # Home page
+│   └── Settings.tsx     # Settings page
+├── hooks/
+│   └── useTauri.ts      # Tauri integration hook
+├── i18n/                # Internationalization
+└── styles/              # CSS styles
+```
 
 ### Key Patterns
 
@@ -55,13 +88,19 @@ Key Listener → State Machine → Recorder → Transcriber → Polisher → Out
 ### Platform System Requirements
 
 - **Linux**: `xinput`, `xmodmap`, `parecord`, `xclip`/`xsel`/`wl-copy`, `notify-send`
-- **macOS**: `sox`, Swift CLI tools, `pbcopy`, `osascript`
-- **Windows**: `ffmpeg` or `sox`, PowerShell
+- **macOS**: `sox`, `pbcopy`, `osascript`
+- **Windows**: `ffmpeg`, PowerShell
+
+### Tauri GUI Development
+
+Before first run, install frontend dependencies:
+```bash
+cd frontend && npm install
+```
 
 ## Testing Notes
 
 - Unit tests live in `#[cfg(test)]` modules within each source file.
-- `config.rs` and `audio.rs` have comprehensive tests.
+- `config.rs`, `audio.rs`, and `model.rs` have comprehensive tests.
 - `transcriber.rs` and `polisher.rs` use `mockito` for HTTP-level mocking.
 - Platform-specific modules have minimal tests (construction/smoke tests only).
-- No integration test directory (`tests/`) exists yet.

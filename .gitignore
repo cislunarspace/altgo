@@ -33,3 +33,4 @@ whisper.cpp/
 
 # Claude Code
 .claude/
+.worktrees/

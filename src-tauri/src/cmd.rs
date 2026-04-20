@@ -7,7 +7,10 @@ use std::sync::Arc;
 use serde::Serialize;
 use tauri::{Emitter, Manager, State};
 
-use crate::AppState;
+use crate::{
+    config, key_listener, output, pipeline, polisher, recorder, state_machine, transcriber,
+    AppState,
+};
 
 const OVERLAY_RECORDING_W: f64 = 200.0;
 const OVERLAY_RECORDING_H: f64 = 48.0;
@@ -61,14 +64,122 @@ fn emit_pipeline_status(
     }
 }
 
+/// Parse monitor geometry from xrandr --listmonitors output.
+/// Format: " <idx>: +[*]<name> <W>/<pw>x<H>/<ph>+<X>+<Y>  <output>"
+fn parse_monitor_geom(line: &str) -> Option<(f64, f64, f64, f64)> {
+    // Find the geometry part: look for pattern like "6144/697x3456/392+3840+0"
+    let line = line.trim_start();
+    // Skip "N: +*name " prefix — find the geometry after the second space
+    let mut spaces = 0;
+    let mut geom_start = 0;
+    for (i, c) in line.char_indices() {
+        if c == ' ' {
+            spaces += 1;
+            if spaces == 2 {
+                geom_start = i + 1;
+                break;
+            }
+        }
+    }
+    if geom_start == 0 {
+        return None;
+    }
+
+    // Find end of geometry (next space or end of line)
+    let geom_end = line[geom_start..]
+        .find(' ')
+        .map(|p| geom_start + p)
+        .unwrap_or(line.len());
+    let geom = &line[geom_start..geom_end];
+
+    // Parse "6144/697x3456/392+3840+0"
+    let (w_part, rest) = geom.split_once('x')?;
+    let w: f64 = w_part.split('/').next()?.parse().ok()?;
+
+    // rest = "3456/392+3840+0"
+    let parts: Vec<&str> = rest.split('+').collect();
+    if parts.len() < 3 {
+        return None;
+    }
+    let h: f64 = parts[0].split('/').next()?.parse().ok()?;
+    let x: f64 = parts[1].parse().ok()?;
+    let y: f64 = parts[2].parse().ok()?;
+
+    Some((x, y, w, h))
+}
+
+/// Get monitor info for the screen where the mouse cursor is.
+/// Returns (monitor_x, monitor_y, monitor_width, monitor_height).
+#[cfg(target_os = "linux")]
+fn get_focused_monitor_info() -> Option<(f64, f64, f64, f64)> {
+    // Use mouse position to determine which monitor the user is on
+    let mouse_out = std::process::Command::new("xdotool")
+        .args(["getmouselocation", "--shell"])
+        .output()
+        .ok()?;
+
+    if !mouse_out.status.success() {
+        return None;
+    }
+
+    let mouse_str = String::from_utf8_lossy(&mouse_out.stdout);
+    let mut mouse_x: i32 = 0;
+    let mut mouse_y: i32 = 0;
+
+    for line in mouse_str.lines() {
+        if let Some(val) = line.strip_prefix("X=") {
+            mouse_x = val.parse().ok()?;
+        } else if let Some(val) = line.strip_prefix("Y=") {
+            mouse_y = val.parse().ok()?;
+        }
+    }
+
+    tracing::info!("mouse position: ({}, {})", mouse_x, mouse_y);
+
+    // Parse xrandr --listmonitors for reliable monitor geometry
+    let xrandr = std::process::Command::new("xrandr")
+        .args(["--listmonitors"])
+        .output()
+        .ok()?;
+
+    if !xrandr.status.success() {
+        return None;
+    }
+
+    let xrandr_str = String::from_utf8_lossy(&xrandr.stdout);
+
+    for line in xrandr_str.lines() {
+        if let Some((m_x, m_y, m_w, m_h)) = parse_monitor_geom(line) {
+            tracing::info!(
+                "monitor: x={}, y={}, w={}, h={}",
+                m_x, m_y, m_w, m_h
+            );
+            if mouse_x >= m_x as i32
+                && mouse_x < (m_x + m_w) as i32
+                && mouse_y >= m_y as i32
+                && mouse_y < (m_y + m_h) as i32
+            {
+                tracing::info!("matched monitor at ({}, {})", m_x, m_y);
+                return Some((m_x, m_y, m_w, m_h));
+            }
+        }
+    }
+
+    tracing::warn!("no monitor matched for mouse ({}, {})", mouse_x, mouse_y);
+    None
+}
+
+#[cfg(not(target_os = "linux"))]
+fn get_focused_monitor_info() -> Option<(f64, f64, f64, f64)> {
+    None
+}
+
 fn position_overlay(overlay: &tauri::WebviewWindow, width: f64, height: f64) {
     let _ = overlay.set_size(tauri::LogicalSize::new(width, height));
-    if let Ok(Some(monitor)) = overlay.primary_monitor() {
-        let scale = monitor.scale_factor();
-        let screen_w = monitor.size().width as f64 / scale;
-        let screen_h = monitor.size().height as f64 / scale;
-        let x = (screen_w - width) / 2.0;
-        let y = screen_h - height - OVERLAY_BOTTOM_OFFSET;
+
+    if let Some((screen_x, screen_y, screen_w, screen_h)) = get_focused_monitor_info() {
+        let x = screen_x + (screen_w - width) / 2.0;
+        let y = screen_y + screen_h - height - OVERLAY_BOTTOM_OFFSET;
         let _ = overlay.set_position(tauri::LogicalPosition::new(x, y));
     }
 }
@@ -217,7 +328,7 @@ pub async fn get_status(state: State<'_, AppState>) -> Result<RecordingStatus, S
 
 #[tauri::command]
 pub async fn copy_text(text: String) -> Result<(), String> {
-    altgo::output::write_clipboard(&text)
+    output::write_clipboard(&text)
         .await
         .map_err(|e| e.to_string())
 }
@@ -232,7 +343,7 @@ pub async fn hide_overlay(app: tauri::AppHandle) -> Result<(), String> {
 
 pub async fn run_pipeline(
     app: tauri::AppHandle,
-    cfg: Arc<altgo::config::Config>,
+    cfg: Arc<config::Config>,
     mut stop_rx: tokio::sync::oneshot::Receiver<()>,
     pipeline_status: Arc<std::sync::RwLock<String>>,
 ) {
@@ -263,9 +374,9 @@ pub async fn run_pipeline(
             while poll_running.load(Ordering::SeqCst) {
                 let is_down = is_key_pressed(vk_code);
                 if is_down && !was_down {
-                    let _ = raw_key_tx.send(altgo::key_listener::KeyEvent { pressed: true });
+                    let _ = raw_key_tx.send(key_listener::KeyEvent { pressed: true });
                 } else if !is_down && was_down {
-                    let _ = raw_key_tx.send(altgo::key_listener::KeyEvent { pressed: false });
+                    let _ = raw_key_tx.send(key_listener::KeyEvent { pressed: false });
                 }
                 was_down = is_down;
                 std::thread::sleep(std::time::Duration::from_millis(poll_interval_ms));
@@ -276,7 +387,7 @@ pub async fn run_pipeline(
     #[cfg(not(target_os = "windows"))]
     {
         let mut listener =
-            match altgo::key_listener::PlatformListener::new(&cfg.key_listener.key_name) {
+            match key_listener::PlatformListener::new(&cfg.key_listener.key_name) {
                 Ok(l) => l,
                 Err(e) => {
                     tracing::error!(error = %e, "failed to create key listener");
@@ -284,7 +395,7 @@ pub async fn run_pipeline(
                     return;
                 }
             };
-        let key_events = match listener.start() {
+        let mut key_events = match listener.start() {
             Ok(rx) => rx,
             Err(e) => {
                 tracing::error!(error = %e, "failed to start key listener");
@@ -307,7 +418,7 @@ pub async fn run_pipeline(
     }
 
     let mut recorder =
-        altgo::recorder::PlatformRecorder::new(cfg.recorder.sample_rate, cfg.recorder.channels);
+        recorder::PlatformRecorder::new(cfg.recorder.sample_rate, cfg.recorder.channels);
 
     let model_path = if cfg.transcriber.engine == "local" {
         match altgo::model::resolve_model_path(&cfg.transcriber.model) {
@@ -326,13 +437,13 @@ pub async fn run_pipeline(
         cfg.transcriber.model.clone()
     };
 
-    let transcriber: altgo::transcriber::Transcriber = match cfg.transcriber.engine.as_str() {
-        "local" => altgo::transcriber::Transcriber::Local(altgo::transcriber::LocalWhisper::new(
+    let transcriber: transcriber::Transcriber = match cfg.transcriber.engine.as_str() {
+        "local" => transcriber::Transcriber::Local(transcriber::LocalWhisper::new(
             model_path,
             cfg.transcriber.language.clone(),
             cfg.transcriber.whisper_path.clone(),
         )),
-        _ => match altgo::transcriber::WhisperApi::new(
+        _ => match transcriber::WhisperApi::new(
             cfg.transcriber.api_key.clone(),
             cfg.transcriber.api_base_url.clone(),
             cfg.transcriber.model.clone(),
@@ -341,7 +452,7 @@ pub async fn run_pipeline(
             cfg.transcriber.prompt.clone(),
             cfg.transcriber.timeout(),
         ) {
-            Ok(api) => altgo::transcriber::Transcriber::Api(api),
+            Ok(api) => transcriber::Transcriber::Api(api),
             Err(e) => {
                 tracing::error!(error = %e, "failed to create transcriber");
                 let _ = app.emit("pipeline-error", format!("transcriber: {}", e));
@@ -351,16 +462,16 @@ pub async fn run_pipeline(
     };
 
     let polish_level =
-        altgo::polisher::PolishLevel::from_str(&cfg.polisher.level).unwrap_or_else(|_| {
+        polisher::PolishLevel::from_str(&cfg.polisher.level).unwrap_or_else(|_| {
             tracing::warn!("invalid polish level, using medium");
-            altgo::polisher::PolishLevel::Medium
+            polisher::PolishLevel::Medium
         });
-    let polisher_protocol = altgo::polisher::ApiProtocol::from_str(&cfg.polisher.protocol)
+    let polisher_protocol = polisher::ApiProtocol::from_str(&cfg.polisher.protocol)
         .unwrap_or_else(|e| {
             tracing::warn!(error = %e, "invalid polisher protocol, defaulting to openai");
-            altgo::polisher::ApiProtocol::OpenAi
+            polisher::ApiProtocol::OpenAi
         });
-    let formatter = match altgo::polisher::LLMFormatter::with_config(
+    let formatter = match polisher::LLMFormatter::with_config(
         cfg.polisher.api_key.clone(),
         cfg.polisher.api_base_url.clone(),
         cfg.polisher.model.clone(),
@@ -381,13 +492,13 @@ pub async fn run_pipeline(
 
     let (key_tx, key_rx) = tokio::sync::mpsc::unbounded_channel();
     let debounce_window = cfg.key_listener.debounce_window();
-    tokio::spawn(altgo::key_listener::debounce_task(
+    tokio::spawn(key_listener::debounce_task(
         raw_key_rx,
         key_tx,
         debounce_window,
     ));
 
-    let sm = altgo::state_machine::Machine::new(
+    let sm = state_machine::Machine::new(
         cfg.key_listener.long_press_threshold(),
         cfg.key_listener.double_click_interval(),
         cfg.key_listener.min_press_duration(),
@@ -400,7 +511,7 @@ pub async fn run_pipeline(
         tokio::select! {
             cmd = commands.recv() => {
                 match cmd {
-                    Some(altgo::state_machine::Command::StartRecord) => {
+                    Some(state_machine::Command::StartRecord) => {
                         tracing::info!("recording started");
                         if let Err(e) = recorder.start() {
                             tracing::error!(error = %e, "failed to start recording");
@@ -412,7 +523,7 @@ pub async fn run_pipeline(
                             let _ = overlay.show();
                         }
                     }
-                    Some(altgo::state_machine::Command::StopRecord) => {
+                    Some(state_machine::Command::StopRecord) => {
                         tracing::info!("recording stopped, processing...");
                         if let Some(overlay) = app.get_webview_window("overlay") {
                             let _ = overlay.hide();
@@ -441,7 +552,7 @@ pub async fn run_pipeline(
                         let pipeline_status = pipeline_status.clone();
 
                         tokio::spawn(async move {
-                            match altgo::pipeline::process_audio_core(
+                            match pipeline::process_audio_core(
                                 &transcriber,
                                 &formatter,
                                 &wav_data,
@@ -461,7 +572,7 @@ pub async fn run_pipeline(
                                         let display_text = text_to_use.clone();
 
                                         let _ =
-                                            altgo::output::write_clipboard(text_to_use).await;
+                                            output::write_clipboard(text_to_use).await;
 
                                         emit_pipeline_status(&app, &pipeline_status, "done");
                                         if let Some(overlay) =

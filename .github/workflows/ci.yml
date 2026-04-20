@@ -12,26 +12,45 @@ env:
 jobs:
   check:
     name: Check
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf libasound2-dev
+
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: x86_64-pc-windows-msvc
+          targets: x86_64-unknown-linux-gnu
       - uses: Swatinem/rust-cache@v2
         with:
-          key: x86_64-pc-windows-msvc
+          key: x86_64-unknown-linux-gnu
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install frontend dependencies
+        run: npm ci
+        working-directory: frontend
 
       - name: Check formatting
         run: cargo fmt --all -- --check
 
       - name: Clippy
-        run: cargo clippy --target x86_64-pc-windows-msvc -- -D warnings
+        run: cargo clippy -- -D warnings
 
       - name: Build
-        run: cargo build --target x86_64-pc-windows-msvc --release
+        run: cargo build --release
 
       - name: Run tests
-        run: cargo test --target x86_64-pc-windows-msvc
+        run: cargo test
 
+      - name: Install Tauri CLI
+        run: cargo install tauri-cli --version "^2" --locked
+
+      - name: Build Tauri GUI
+        run: cargo tauri build --bundles deb
