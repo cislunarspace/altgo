@@ -169,7 +169,7 @@ fn get_focused_monitor_info() -> Option<(f64, f64, f64, f64)> {
     None
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(target_os = "windows")]
 fn get_focused_monitor_info() -> Option<(f64, f64, f64, f64)> {
     None
 }
