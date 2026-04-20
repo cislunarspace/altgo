@@ -5,12 +5,11 @@
 ## 开发环境
 
 - Rust 1.75+（推荐最新稳定版）
-- Linux / macOS / Windows
+- Linux / Windows
 
 ### 平台特定依赖
 
 - **Linux**: xinput, xmodmap, parecord, xclip
-- **macOS**: sox（`brew install sox`）
 - **Windows**: sox 或 ffmpeg
 
 ## 开发流程
@@ -55,7 +54,7 @@ type: 简短描述
 ## 跨平台开发
 
 添加平台特定代码时：
-- 使用 `#[cfg(target_os = "linux")]` / `#[cfg(target_os = "macos")]` / `#[cfg(target_os = "windows")]`
+- 使用 `#[cfg(target_os = "linux")]` / `#[cfg(target_os = "windows")]`
 - 在对应平台的模块文件中实现（如 `key_listener/linux.rs`）
 - 确保 `mod.rs` 导出统一的公共接口
 - 尽可能使用子进程调用系统工具，避免 FFI
