@@ -4,21 +4,15 @@
 //! 实现静态分派，无需 trait 对象。
 //!
 //! - Linux：`xinput test-xi2`（XInput2 扩展）
-//! - macOS：通过内联 Swift 脚本使用 CGEvent tap（需要辅助功能权限）
 //! - Windows：PowerShell + `GetAsyncKeyState` 轮询
 
 #[cfg(target_os = "linux")]
 mod linux;
-#[cfg(target_os = "macos")]
-mod macos;
 #[cfg(target_os = "windows")]
 mod windows;
 
 #[cfg(target_os = "linux")]
 pub type PlatformListener = linux::X11Listener;
-
-#[cfg(target_os = "macos")]
-pub type PlatformListener = macos::MacOSListener;
 
 #[cfg(target_os = "windows")]
 pub type PlatformListener = windows::WindowsListener;
