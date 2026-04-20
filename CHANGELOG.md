@@ -15,7 +15,6 @@
 ### Platform Support
 
 - **Linux**: x86_64 and ARM64 builds with DEB packages
-- **macOS**: Apple Silicon and Intel builds
 - **Windows**: x86_64 with MSI installer
 
 ### Bug Fixes

@@ -18,7 +18,6 @@
 | 平台 | 按键监听 | 录音 | 剪贴板 | 通知 |
 |------|---------|------|--------|------|
 | Linux (X11/Wayland) | xinput | parecord | xclip/xsel/wl-copy | notify-send |
-| macOS | CGEvent tap | sox | pbcopy | osascript |
 | Windows | PowerShell hook | ffmpeg | clip.exe | PowerShell toast |
 
 ## 系统托盘
@@ -50,20 +49,11 @@
 3. 直接运行：`./altgo_*.AppImage`
 4. 或使用 [AppImageLauncher](https://github.com/TheAssassin/AppImageLauncher) 集成到桌面菜单
 
-### macOS
-
-1. 前往 [Releases](../../releases) 下载 tar.gz 包（支持 Apple Silicon 和 Intel）
-2. 解压并放入 PATH：`sudo cp altgo /usr/local/bin/`
-3. 安装音频工具：`brew install sox`
-4. 在 **系统设置 → 隐私与安全性 → 辅助功能** 中授权终端或 altgo
-5. [配置语音识别和润色](#配置)
-
 ## 配置
 
 配置文件位置：
 
 - **Linux**：`~/.config/altgo/altgo.toml`
-- **macOS**：`~/.config/altgo/altgo.toml`
 - **Windows**：`%APPDATA%\altgo\altgo.toml`
 
 首次使用需创建配置文件，从[模板](configs/altgo.toml)复制即可。

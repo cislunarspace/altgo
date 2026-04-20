@@ -51,9 +51,9 @@ Key Listener → State Machine → Recorder → Transcriber → Polisher → Out
 - **`model.rs`** — whisper.cpp GGML model management (download, switch, storage in `~/.config/altgo/models/`).
 - **`tray.rs`** — System tray configuration (show window, quit menu).
 - **`resource.rs`** — Resource file management.
-- **`key_listener/`** — Platform-specific key detection. Linux: `xinput test-xi2`. macOS: CGEvent tap via inline Swift. Windows: PowerShell + `GetAsyncKeyState`.
-- **`recorder/`** — Platform-specific audio capture. Linux: `parecord`. macOS: `sox`. Windows: `ffmpeg`.
-- **`output/`** — Platform-specific clipboard + notifications. Linux: `xclip`/`xsel`/`wl-copy` + `notify-send`. macOS: `pbcopy` + `osascript`. Windows: `clip.exe`/PowerShell + BurntToast.
+- **`key_listener/`** — Platform-specific key detection. Linux: `xinput test-xi2`. Windows: PowerShell + `GetAsyncKeyState`.
+- **`recorder/`** — Platform-specific audio capture. Linux: `parecord`. Windows: `ffmpeg`.
+- **`output/`** — Platform-specific clipboard + notifications. Linux: `xclip`/`xsel`/`wl-copy` + `notify-send`. Windows: `clip.exe`/PowerShell + BurntToast.
 
 ### Frontend Structure (`frontend/src/`)
 

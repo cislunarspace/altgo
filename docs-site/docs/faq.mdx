@@ -10,7 +10,7 @@ title: 常见问题
 ### 录音没有声音 / 转写结果为空
 
 1. 检查麦克风是否被系统识别
-2. 确认录音工具已安装（Linux: `parecord`, macOS: `sox`, Windows: `ffmpeg`）
+2. 确认录音工具已安装（Linux: `parecord`, Windows: `ffmpeg`）
 3. 查看日志输出：`RUST_LOG=altgo=debug altgo`
 
 ### ffmpeg 录音启动很慢
@@ -38,11 +38,6 @@ import TabItem from '@theme/TabItem';
 2. 如果使用 IME，可能需要增加 `min_press_duration_ms`
 
 </TabItem>
-<TabItem value="macos" label="macOS">
-
-1. 确认已在 **系统设置 → 隐私与安全性 → 辅助功能** 中授权
-2. 首次运行需要手动添加授权
-
 </TabItem>
 </Tabs>
 
@@ -121,13 +116,6 @@ Start-Process -WindowStyle Hidden .\altgo.exe
 ```
 
 </TabItem>
-<TabItem value="macos" label="macOS">
-
-```bash
-# 使用 launchd 或直接
-nohup altgo &
-```
-
 </TabItem>
 </Tabs>
 

@@ -5,7 +5,7 @@ title: 快速开始
 
 # 快速开始
 
-altgo 支持 Linux、macOS 和 Windows。选择你的平台：
+altgo 支持 Linux 和 Windows。选择你的平台：
 
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
@@ -40,11 +40,6 @@ cd altgo
 脚本会自动：检查 Rust 工具链 → 编译 altgo → 下载 whisper.cpp 预编译二进制 → 下载模型 → 生成配置文件。
 
 </TabItem>
-<TabItem value="macos" label="macOS">
-
-macOS 暂无一键安装脚本，请参考下方手动安装步骤。
-
-</TabItem>
 </Tabs>
 
 ## 手动安装
@@ -74,16 +69,6 @@ winget install ffmpeg
 ```
 
 </TabItem>
-<TabItem value="macos" label="macOS">
-
-```bash
-brew install sox
-```
-
-:::info 辅助功能权限
-altgo 使用 CGEvent tap 监听按键，需要在 **系统设置 → 隐私与安全性 → 辅助功能** 中授权终端或 altgo 应用。
-:::
-
 </TabItem>
 </Tabs>
 
@@ -95,7 +80,7 @@ cd altgo
 cargo build --release
 ```
 
-Linux / macOS 可使用 `sudo make install` 安装到系统路径。
+Linux 可使用 `sudo make install` 安装到系统路径。
 
 ### 3. 安装 whisper.cpp
 
@@ -121,15 +106,6 @@ copy bin\* "C:\Program Files\whisper\"
 ```
 
 </TabItem>
-<TabItem value="macos" label="macOS">
-
-```bash
-git clone https://github.com/ggerganov/whisper.cpp.git
-cd whisper.cpp
-make -j
-sudo cp main /usr/local/bin/whisper-cli
-```
-
 </TabItem>
 </Tabs>
 
@@ -155,14 +131,6 @@ Invoke-WebRequest -Uri `
 ```
 
 </TabItem>
-<TabItem value="macos" label="macOS">
-
-```bash
-mkdir -p ~/models
-curl -L -o ~/models/ggml-base.bin \
-  https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin
-```
-
 </TabItem>
 </Tabs>
 
@@ -185,13 +153,6 @@ copy configs\altgo.toml "$env:APPDATA\altgo\altgo.toml"
 ```
 
 </TabItem>
-<TabItem value="macos" label="macOS">
-
-```bash
-mkdir -p ~/.config/altgo
-cp configs/altgo.toml ~/.config/altgo/altgo.toml
-```
-
 </TabItem>
 </Tabs>
 

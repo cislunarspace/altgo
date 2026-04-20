@@ -29,17 +29,14 @@ src/
 ├── key_listener/      # 跨平台按键监听
 │   ├── mod.rs         # 公共接口 + 去抖逻辑
 │   ├── linux.rs       # xinput test-xi2
-│   ├── macos.rs       # CGEvent tap
 │   └── windows.rs     # PowerShell GetAsyncKeyState
 ├── recorder/          # 跨平台音频录制
 │   ├── mod.rs         # 公共接口
 │   ├── linux.rs       # parecord
-│   ├── macos.rs       # sox / ffmpeg
-│   └── windows.rs     # ffmpeg / sox
+│   └── windows.rs     # ffmpeg
 └── output/            # 跨平台剪贴板 + 通知
     ├── mod.rs         # 公共接口
     ├── linux.rs       # xclip / xsel / wl-copy + notify-send
-    ├── macos.rs       # pbcopy + osascript
     └── windows.rs     # clip.exe + PowerShell toast
 ```
 
@@ -72,8 +69,6 @@ src/
 // recorder/mod.rs
 #[cfg(target_os = "linux")]
 pub type PlatformRecorder = LinuxRecorder;
-#[cfg(target_os = "macos")]
-pub type PlatformRecorder = MacOSRecorder;
 #[cfg(target_os = "windows")]
 pub type PlatformRecorder = WindowsRecorder;
 ```
@@ -100,4 +95,4 @@ pub type PlatformRecorder = WindowsRecorder;
 - `config.rs` / `audio.rs` — 全面的单元测试
 - `transcriber.rs` / `polisher.rs` — 使用 `mockito` 进行 HTTP 级别 mock
 - 平台模块 — 仅构造/冒烟测试
-- CI 在三个平台（Linux / macOS / Windows）上运行：`fmt`、`clippy`、`build --release`、`test`
+- CI 在 Linux 和 Windows 两个平台上运行：`fmt`、`clippy`、`build --release`、`test`

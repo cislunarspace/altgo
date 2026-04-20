@@ -117,4 +117,4 @@ altgo/
 - 现有 `src/gui/` 下的 eframe/egui 代码将被完全替换
 - 核心管道逻辑（key_listener、recorder、transcriber、polisher、state_machine）保持不变
 - 原有 Rust 测试应继续通过
-- 优先实现 Windows 平台，macOS/Linux 后续适配
+- 优先实现 Windows 平台，Linux 后续适配
