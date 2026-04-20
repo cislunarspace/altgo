@@ -3,41 +3,54 @@
    ============================================ */
 
 :root {
-  /* Color Palette */
-  --color-bg: #09090b;
-  --color-bg-card: rgba(255, 255, 255, 0.03);
-  --color-bg-card-hover: rgba(255, 255, 255, 0.06);
-  --color-bg-input: rgba(255, 255, 255, 0.05);
-  --color-bg-input-focus: rgba(255, 255, 255, 0.08);
+  /* ── Surface hierarchy ───────────────────────── */
+  /* bg-base is the deepest layer; surfaces stack upward */
+  --color-bg: #0b0b0d;
+  --color-surface-1: #111114;
+  --color-surface-2: #18181c;
+  --color-surface-3: #222226;
 
-  --color-text: #fafafa;
-  --color-text-secondary: #a1a1aa;
-  --color-text-muted: #52525b;
+  --color-bg-card: var(--color-surface-2);
+  --color-bg-card-hover: var(--color-surface-3);
+  --color-bg-input: var(--color-surface-1);
+  --color-bg-input-focus: var(--color-surface-2);
 
+  /* ── Text ──────────────────────────────────── */
+  --color-text: #ededef;
+  --color-text-secondary: #8e8e96;
+  --color-text-muted: #4a4a52;
+
+  /* ── Accent — indigo-viola ─────────────────── */
   --color-accent: #6366f1;
   --color-accent-hover: #818cf8;
-  --color-accent-glow: rgba(99, 102, 241, 0.25);
+  --color-accent-glow: rgba(99, 102, 241, 0.2);
 
-  --color-accent-green: #22c55e;
-  --color-accent-green-glow: rgba(34, 197, 94, 0.2);
-  --color-accent-red: #ef4444;
-  --color-accent-red-glow: rgba(239, 68, 68, 0.2);
-  --color-accent-amber: #f59e0b;
-  --color-accent-amber-glow: rgba(245, 158, 11, 0.2);
+  /* ── Semantic status colors ─────────────────── */
+  --color-green: #22c55e;
+  --color-green-bg: rgba(34, 197, 94, 0.12);
+  --color-green-glow: rgba(34, 197, 94, 0.25);
+  --color-red: #f43f5e;
+  --color-red-bg: rgba(244, 63, 94, 0.12);
+  --color-red-glow: rgba(244, 63, 94, 0.25);
+  --color-amber: #f59e0b;
+  --color-amber-bg: rgba(245, 158, 11, 0.12);
+  --color-amber-glow: rgba(245, 158, 11, 0.25);
 
-  --color-border: rgba(255, 255, 255, 0.08);
-  --color-border-focus: rgba(99, 102, 241, 0.5);
+  /* ── Borders ───────────────────────────────── */
+  --color-border: rgba(255, 255, 255, 0.07);
+  --color-border-subtle: rgba(255, 255, 255, 0.04);
+  --color-border-focus: var(--color-accent);
 
-  /* Typography */
+  /* ── Typography ─────────────────────────────── */
   --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --font-mono: "JetBrains Mono", "SF Mono", Consolas, monospace;
 
-  --text-xs: 0.75rem;
-  --text-sm: 0.8125rem;
-  --text-base: 0.875rem;
-  --text-lg: 1rem;
-  --text-xl: 1.125rem;
-  --text-2xl: 1.375rem;
+  --text-xs: 0.6875rem;   /* 11px */
+  --text-sm: 0.8125rem;   /* 13px */
+  --text-base: 0.9375rem; /* 15px */
+  --text-lg: 1.0625rem;   /* 17px */
+  --text-xl: 1.25rem;     /* 20px */
+  --text-2xl: 1.5rem;     /* 24px */
 
   --leading-tight: 1.25;
   --leading-normal: 1.5;
@@ -45,9 +58,9 @@
 
   --tracking-tight: -0.025em;
   --tracking-normal: 0;
-  --tracking-wide: 0.025em;
+  --tracking-wide: 0.04em;
 
-  /* Spacing */
+  /* ── Spacing ────────────────────────────────── */
   --space-1: 0.25rem;
   --space-2: 0.5rem;
   --space-3: 0.75rem;
@@ -59,32 +72,33 @@
   --space-12: 3rem;
   --space-16: 4rem;
 
-  /* Border Radius */
-  --radius-sm: 0.375rem;
-  --radius-md: 0.5rem;
-  --radius-lg: 0.75rem;
-  --radius-xl: 1rem;
-  --radius-2xl: 1.5rem;
+  /* ── Border Radius ──────────────────────────── */
+  --radius-xs: 0.25rem;  /* 4px */
+  --radius-sm: 0.375rem; /* 6px */
+  --radius-md: 0.5rem;   /* 8px */
+  --radius-lg: 0.75rem; /* 12px */
+  --radius-xl: 1rem;     /* 16px */
+  --radius-2xl: 1.5rem; /* 24px */
   --radius-full: 9999px;
 
-  /* Shadows */
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
-  --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.4);
-  --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.5);
-  --shadow-glow-accent: 0 0 20px var(--color-accent-glow);
-  --shadow-glow-green: 0 0 20px var(--color-accent-green-glow);
-  --shadow-glow-red: 0 0 20px var(--color-accent-red-glow);
-  --shadow-glow-amber: 0 0 20px var(--color-accent-amber-glow);
+  /* ── Shadows ────────────────────────────────── */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.5);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.6);
+  --shadow-glow-accent: 0 0 0 1px var(--color-accent), 0 0 20px var(--color-accent-glow);
+  --shadow-glow-green: 0 0 20px var(--color-green-glow);
+  --shadow-glow-red: 0 0 20px var(--color-red-glow);
+  --shadow-glow-amber: 0 0 20px var(--color-amber-glow);
 
-  /* Transitions */
+  /* ── Transitions ─────────────────────────────── */
   --duration-fast: 100ms;
-  --duration-normal: 200ms;
-  --duration-slow: 300ms;
+  --duration-normal: 180ms;
+  --duration-slow: 280ms;
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
   --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
 
-  /* Z-index */
+  /* ── Z-index ────────────────────────────────── */
   --z-base: 0;
   --z-dropdown: 100;
   --z-sticky: 200;
@@ -93,7 +107,7 @@
 }
 
 /* ============================================
-   Global Reset & Base
+   Global Base Styles
    ============================================ */
 
 *,

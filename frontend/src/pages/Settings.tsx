@@ -5,7 +5,6 @@ import { useModelDownloadProgress } from "../hooks/useTauri";
 import { Save, Globe, Mic, Sparkles, Check, Download, Trash2 } from "lucide-react";
 import "../styles/components.css";
 
-// Config interface - keep same as before
 interface Config {
   key_name: string;
   language: string;
@@ -16,7 +15,6 @@ interface Config {
   polish_model: string;
   polish_api_base_url: string;
   gui_language: string;
-  // API keys (not in config returned to frontend, use empty string)
   transcriber_api_key: string;
   polisher_api_key: string;
 }
@@ -42,7 +40,7 @@ function ModelSection({ t }: { t: (k: string) => string }) {
   const progress = useModelDownloadProgress();
 
   useEffect(() => {
-    invoke<ModelEntry[]>("list_models").then(setModels).catch(console.error);
+    invoke<ModelEntry[]>("list_models").then(setModels).catch(() => {});
   }, []);
 
   const handleDownload = async (name: string) => {
@@ -75,52 +73,54 @@ function ModelSection({ t }: { t: (k: string) => string }) {
       : 0;
 
   return (
-    <div className="settings-section">
-      <h3 className="section-label">{t("settings.models")}</h3>
-      {error && <p className="settings-error">{error}</p>}
-      <div className="model-list">
-        {models.map((m) => (
-          <div key={m.name} className="model-row">
-            <div className="model-info">
-              <span className="model-name">{m.name}</span>
-              <span className="model-desc">
-                {m.description} · {formatSize(m.sizeBytes)}
-              </span>
-            </div>
-            <div className="model-actions">
-              {m.downloaded ? (
-                <div className="model-downloaded">
-                  <span className="badge badge-ok">✓</span>
-                  <button
-                    className="btn btn-sm btn-danger"
-                    onClick={() => handleDelete(m.name)}
-                  >
-                    {t("settings.model_delete")}
-                  </button>
-                </div>
-              ) : downloading === m.name ? (
-                <div className="model-progress">
-                  <div className="progress-bar">
-                    <div
-                      className="progress-fill"
-                      style={{ width: `${downloadingProgress}%` }}
-                    />
-                  </div>
-                  <span className="progress-text">{downloadingProgress}%</span>
-                </div>
-              ) : (
-                <button
-                  className="btn btn-sm btn-primary"
-                  onClick={() => handleDownload(m.name)}
-                  disabled={downloading !== null}
-                >
-                  {t("settings.model_download")}
-                </button>
-              )}
-            </div>
+    <div className="model-list">
+      {error && <p className="input-error">{error}</p>}
+      {models.map((m) => (
+        <div key={m.name} className="model-row">
+          <div className="model-info">
+            <span className="model-name">{m.name}</span>
+            <span className="model-desc">
+              {m.description} &middot; {formatSize(m.sizeBytes)}
+            </span>
           </div>
-        ))}
-      </div>
+          <div className="model-actions">
+            {m.downloaded ? (
+              <>
+                <span className="model-badge">
+                  <Check size={10} />
+                  {t("settings.model_downloaded")}
+                </span>
+                <button
+                  className="settings-btn settings-btn-sm settings-btn-danger"
+                  onClick={() => handleDelete(m.name)}
+                >
+                  <Trash2 size={11} />
+                  {t("settings.delete_model")}
+                </button>
+              </>
+            ) : downloading === m.name ? (
+              <div className="model-progress">
+                <div className="progress-bar">
+                  <div
+                    className="progress-fill"
+                    style={{ width: `${downloadingProgress}%` }}
+                  />
+                </div>
+                <span className="progress-text">{downloadingProgress}%</span>
+              </div>
+            ) : (
+              <button
+                className="settings-btn settings-btn-sm settings-btn-primary"
+                onClick={() => handleDownload(m.name)}
+                disabled={downloading !== null}
+              >
+                <Download size={11} />
+                {t("settings.download_model")}
+              </button>
+            )}
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
@@ -129,10 +129,10 @@ export default function Settings() {
   const { t, setLang } = useTranslation();
   const [config, setConfig] = useState<Config | null>(null);
   const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState("");
+  const [message, setMessage] = useState<"saved" | string>("");
 
   useEffect(() => {
-    invoke<Config>("get_config").then(setConfig).catch(console.error);
+    invoke<Config>("get_config").then(setConfig).catch(() => {});
   }, []);
 
   if (!config) {
@@ -172,17 +172,18 @@ export default function Settings() {
   return (
     <div className="settings-page">
       <div className="settings-form">
-        {/* Section 1: Basic Settings */}
-        <div className="settings-form-section">
-          <h3 className="settings-form-section-title">
-            <Globe size={14} />
+
+        {/* ── UI Language ── */}
+        <div className="settings-section">
+          <h3 className="settings-section-title">
+            <Globe size={12} />
             {t("settings.gui_language")}
           </h3>
-          <div className="settings-form-row">
-            <span className="settings-form-label">{t("settings.gui_language")}</span>
-            <div className="settings-form-control">
+          <div className="settings-field">
+            <span className="settings-field-label-text">{t("settings.gui_language")}</span>
+            <div className="settings-field-control">
               <select
-                className="settings-form-select"
+                className="settings-select"
                 value={config.gui_language}
                 onChange={(e) => update("gui_language", e.target.value)}
               >
@@ -193,40 +194,18 @@ export default function Settings() {
           </div>
         </div>
 
-        {/* Section 1: GUI Language */}
-        <div className="settings-form-section">
-          <h3 className="settings-form-section-title">
-            <Globe size={14} />
-            {t("settings.gui_language")}
-          </h3>
-          <div className="settings-form-row">
-            <span className="settings-form-label">{t("settings.gui_language")}</span>
-            <div className="settings-form-control">
-              <select
-                className="settings-form-select"
-                value={config.gui_language}
-                onChange={(e) => update("gui_language", e.target.value)}
-              >
-                <option value="zh">中文</option>
-                <option value="en">English</option>
-              </select>
-            </div>
-          </div>
-        </div>
-
-        {/* Section 2: Recording */}
-
-        <div className="settings-form-section">
-          <h3 className="settings-form-section-title">
-            <Mic size={14} />
+        {/* ── Recording ── */}
+        <div className="settings-section">
+          <h3 className="settings-section-title">
+            <Mic size={12} />
             {t("settings.recording")}
           </h3>
-          <div className="settings-form-row">
-            <span className="settings-form-label">{t("settings.key_name")}</span>
-            <div className="settings-form-control">
+          <div className="settings-field">
+            <span className="settings-field-label-text">{t("settings.key_name")}</span>
+            <div className="settings-field-control">
               <input
                 type="text"
-                className="settings-form-input"
+                className="settings-input"
                 value={config.key_name}
                 onChange={(e) => update("key_name", e.target.value)}
                 placeholder="Alt_R"
@@ -235,17 +214,17 @@ export default function Settings() {
           </div>
         </div>
 
-        {/* Section 3: Transcription */}
-        <div className="settings-form-section">
-          <h3 className="settings-form-section-title">
-            <Sparkles size={14} />
+        {/* ── Transcription ── */}
+        <div className="settings-section">
+          <h3 className="settings-section-title">
+            <Sparkles size={12} />
             {t("settings.transcription")}
           </h3>
-          <div className="settings-form-row">
-            <span className="settings-form-label">{t("settings.engine")}</span>
-            <div className="settings-form-control">
+          <div className="settings-field">
+            <span className="settings-field-label-text">{t("settings.engine")}</span>
+            <div className="settings-field-control">
               <select
-                className="settings-form-select"
+                className="settings-select"
                 value={config.engine}
                 onChange={(e) => update("engine", e.target.value)}
               >
@@ -254,12 +233,12 @@ export default function Settings() {
               </select>
             </div>
           </div>
-          <div className="settings-form-row">
-            <span className="settings-form-label">{t("settings.language")}</span>
-            <div className="settings-form-control">
+          <div className="settings-field">
+            <span className="settings-field-label-text">{t("settings.language")}</span>
+            <div className="settings-field-control">
               <input
                 type="text"
-                className="settings-form-input"
+                className="settings-input"
                 value={config.language}
                 onChange={(e) => update("language", e.target.value)}
                 placeholder="zh"
@@ -268,24 +247,24 @@ export default function Settings() {
           </div>
           {config.engine === "api" ? (
             <>
-              <div className="settings-form-row">
-                <span className="settings-form-label">{t("settings.api_url")}</span>
-                <div className="settings-form-control">
+              <div className="settings-field">
+                <span className="settings-field-label-text">{t("settings.api_url")}</span>
+                <div className="settings-field-control">
                   <input
                     type="text"
-                    className="settings-form-input"
+                    className="settings-input"
                     value={config.api_base_url}
                     onChange={(e) => update("api_base_url", e.target.value)}
                     placeholder="https://api.openai.com"
                   />
                 </div>
               </div>
-              <div className="settings-form-row">
-                <span className="settings-form-label">{t("settings.api_key")}</span>
-                <div className="settings-form-control">
+              <div className="settings-field">
+                <span className="settings-field-label-text">{t("settings.api_key")}</span>
+                <div className="settings-field-control">
                   <input
                     type="password"
-                    className="settings-form-input"
+                    className="settings-input"
                     value={config.transcriber_api_key || ""}
                     onChange={(e) => update("transcriber_api_key", e.target.value)}
                     placeholder="sk-..."
@@ -294,12 +273,12 @@ export default function Settings() {
               </div>
             </>
           ) : (
-            <div className="settings-form-row">
-              <span className="settings-form-label">{t("settings.model_path")}</span>
-              <div className="settings-form-control">
+            <div className="settings-field">
+              <span className="settings-field-label-text">{t("settings.model")}</span>
+              <div className="settings-field-control">
                 <input
                   type="text"
-                  className="settings-form-input"
+                  className="settings-input"
                   value={config.model}
                   onChange={(e) => update("model", e.target.value)}
                   placeholder="~/models/whisper.bin"
@@ -309,26 +288,26 @@ export default function Settings() {
           )}
         </div>
 
-        {/* Section 4: Model Management (functional) */}
-        <div className="settings-form-section">
-          <h3 className="settings-form-section-title">
-            <Download size={14} />
+        {/* ── Model Management ── */}
+        <div className="settings-section">
+          <h3 className="settings-section-title">
+            <Download size={12} />
             {t("settings.model_management")}
           </h3>
           <ModelSection t={t} />
         </div>
 
-        {/* Section 5: Polishing */}
-        <div className="settings-form-section">
-          <h3 className="settings-form-section-title">
-            <Sparkles size={14} />
+        {/* ── Polishing ── */}
+        <div className="settings-section">
+          <h3 className="settings-section-title">
+            <Sparkles size={12} />
             {t("settings.polishing")}
           </h3>
-          <div className="settings-form-row">
-            <span className="settings-form-label">{t("settings.polish_level")}</span>
-            <div className="settings-form-control">
+          <div className="settings-field">
+            <span className="settings-field-label-text">{t("settings.polish_level")}</span>
+            <div className="settings-field-control">
               <select
-                className="settings-form-select"
+                className="settings-select"
                 value={config.polish_level}
                 onChange={(e) => update("polish_level", e.target.value)}
               >
@@ -339,36 +318,36 @@ export default function Settings() {
               </select>
             </div>
           </div>
-          <div className="settings-form-row">
-            <span className="settings-form-label">{t("settings.api_url")}</span>
-            <div className="settings-form-control">
+          <div className="settings-field">
+            <span className="settings-field-label-text">{t("settings.api_url")}</span>
+            <div className="settings-field-control">
               <input
                 type="text"
-                className="settings-form-input"
+                className="settings-input"
                 value={config.polish_api_base_url}
                 onChange={(e) => update("polish_api_base_url", e.target.value)}
                 placeholder="https://api.openai.com"
               />
             </div>
           </div>
-          <div className="settings-form-row">
-            <span className="settings-form-label">{t("settings.model")}</span>
-            <div className="settings-form-control">
+          <div className="settings-field">
+            <span className="settings-field-label-text">{t("settings.model")}</span>
+            <div className="settings-field-control">
               <input
                 type="text"
-                className="settings-form-input"
+                className="settings-input"
                 value={config.polish_model}
                 onChange={(e) => update("polish_model", e.target.value)}
                 placeholder="gpt-4o-mini"
               />
             </div>
           </div>
-          <div className="settings-form-row">
-            <span className="settings-form-label">{t("settings.api_key")}</span>
-            <div className="settings-form-control">
+          <div className="settings-field">
+            <span className="settings-field-label-text">{t("settings.api_key")}</span>
+            <div className="settings-field-control">
               <input
                 type="password"
-                className="settings-form-input"
+                className="settings-input"
                 value={config.polisher_api_key || ""}
                 onChange={(e) => update("polisher_api_key", e.target.value)}
                 placeholder="sk-..."
@@ -377,51 +356,40 @@ export default function Settings() {
           </div>
         </div>
 
-        {/* Section 6: About */}
-        <div className="settings-form-section">
-          <h3 className="settings-form-section-title">
-            <Sparkles size={14} />
+        {/* ── About ── */}
+        <div className="settings-section">
+          <h3 className="settings-section-title">
+            <Sparkles size={12} />
             {t("settings.about")}
           </h3>
-          <div className="settings-form-row">
-            <span className="settings-form-label">{t("settings.version")}</span>
-            <div className="settings-form-control">
-              <span style={{ color: '#888', fontSize: '13px' }}>1.4.0</span>
-            </div>
-          </div>
-          <div className="settings-form-row">
-            <span className="settings-form-label"></span>
-            <div className="settings-form-control">
-              <button className="settings-form-btn">
-                {t("settings.check_updates")}
-              </button>
+          <div className="settings-field">
+            <span className="settings-field-label-text">{t("settings.version")}</span>
+            <div className="settings-field-control">
+              <span style={{ color: 'var(--color-text-muted)', fontSize: 'var(--text-sm)' }}>1.4.0</span>
             </div>
           </div>
         </div>
 
-        {/* Save Button */}
-        <div className="settings-form-row" style={{ marginTop: '16px', borderTop: '1px solid #333', paddingTop: '16px' }}>
-          <span className="settings-form-label"></span>
-          <div className="settings-form-control">
-            <button
-              className="settings-form-btn settings-form-btn-primary"
-              onClick={save}
-              disabled={saving}
-            >
-              <Save size={12} />
-              {saving ? t("settings.saving") : t("settings.save")}
-            </button>
-            {message === "saved" && (
-              <span style={{ color: '#22c55e', fontSize: '13px', marginLeft: '12px' }}>
-                <Check size={12} /> {t("settings.saved")}
-              </span>
-            )}
-            {message && message !== "saved" && (
-              <span style={{ color: '#ef4444', fontSize: '13px', marginLeft: '12px' }}>
-                {message}
-              </span>
-            )}
-          </div>
+        {/* ── Save ── */}
+        <div className="settings-save-row">
+          {message === "saved" && (
+            <span className="settings-save-msg settings-save-msg--ok">
+              <Check size={12} /> {t("settings.saved")}
+            </span>
+          )}
+          {message && message !== "saved" && (
+            <span className="settings-save-msg settings-save-msg--err">
+              {message}
+            </span>
+          )}
+          <button
+            className="settings-btn settings-btn-primary"
+            onClick={save}
+            disabled={saving}
+          >
+            <Save size={13} />
+            {saving ? t("settings.saving") : t("settings.save")}
+          </button>
         </div>
       </div>
     </div>

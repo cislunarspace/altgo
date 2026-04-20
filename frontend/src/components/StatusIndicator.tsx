@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useTranslation } from '../i18n';
 import '../styles/components.css';
 
 type Status = 'idle' | 'recording' | 'processing' | 'done';
@@ -14,21 +15,30 @@ const sizeMap = {
   lg: { dim: 96, stroke: 4 },
 };
 
-const statusConfig = {
-  idle: { color: '#52525b', label: '待命' },
-  recording: { color: '#ef4444', label: '录音中' },
-  processing: { color: '#f59e0b', label: '处理中' },
-  done: { color: '#22c55e', label: '已完成' },
+const statusColorMap: Record<Status, string> = {
+  idle: 'var(--color-text-muted)',
+  recording: 'var(--color-red)',
+  processing: 'var(--color-amber)',
+  done: 'var(--color-green)',
+};
+
+const statusI18nMap: Record<Status, string> = {
+  idle: 'status.idle',
+  recording: 'status.recording',
+  processing: 'status.processing',
+  done: 'status.done',
 };
 
 export function StatusIndicator({ status, size = 'md' }: StatusIndicatorProps) {
+  const { t } = useTranslation();
   const [pulseScale, setPulseScale] = useState(1);
   const [glowActive, setGlowActive] = useState(false);
 
   const { dim, stroke } = sizeMap[size];
   const center = dim / 2;
   const radius = (dim - stroke * 2) / 2;
-  const config = statusConfig[status];
+  const color = statusColorMap[status];
+  const label = t(statusI18nMap[status]);
 
   useEffect(() => {
     if (status === 'recording') {
@@ -59,7 +69,7 @@ export function StatusIndicator({ status, size = 'md' }: StatusIndicatorProps) {
           style={{
             width: glowSize,
             height: glowSize,
-            color: config.color,
+            color,
           }}
         />
         <svg
@@ -85,18 +95,15 @@ export function StatusIndicator({ status, size = 'md' }: StatusIndicatorProps) {
             cx={center}
             cy={center}
             r={radius}
-            stroke={config.color}
+            stroke={color}
             strokeWidth={stroke}
             strokeDasharray={status === 'processing' ? `${radius * 1.5} ${radius * 5}` : undefined}
             style={{ transform: 'rotate(-90deg)', transformOrigin: 'center' }}
           />
         </svg>
       </div>
-      <span
-        className="status-label"
-        style={{ color: config.color }}
-      >
-        {config.label}
+      <span className="status-label" style={{ color }}>
+        {label}
       </span>
     </div>
   );
