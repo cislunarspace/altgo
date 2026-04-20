@@ -12,6 +12,9 @@ use reqwest::Client;
 use serde::Deserialize;
 use std::time::Duration;
 
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
+
 /// 语音识别结果。
 #[derive(Debug)]
 #[allow(dead_code)]
@@ -173,6 +176,11 @@ impl LocalWhisper {
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped());
 
+        #[cfg(target_os = "windows")]
+        {
+            cmd.creation_flags(0x08000000);
+        }
+
         let output = cmd.output().await.context("failed to run whisper-cli")?;
 
         if !output.status.success() {
@@ -260,6 +268,7 @@ fn which_binary(name: &str) -> anyhow::Result<std::path::PathBuf> {
 fn which_binary(name: &str) -> anyhow::Result<std::path::PathBuf> {
     let output = std::process::Command::new("cmd")
         .args(["/C", "where", name])
+        .creation_flags(0x08000000)
         .output()?;
     if output.status.success() {
         let path = String::from_utf8_lossy(&output.stdout)

@@ -1,10 +1,11 @@
-import { useStatus, useLatestTranscription } from "../hooks/useTauri";
+import { useStatus, useLatestTranscription, usePipelineError } from "../hooks/useTauri";
 import { useTranslation } from "../i18n";
 
 export default function Home() {
   const { t } = useTranslation();
   const status = useStatus();
   const transcription = useLatestTranscription();
+  const error = usePipelineError();
 
   const statusConfig: Record<string, { emoji: string; color: string; text: string }> = {
     idle: { emoji: "🎤", color: "var(--text-muted)", text: t("status.idle") },
@@ -17,6 +18,12 @@ export default function Home() {
 
   return (
     <div className="home">
+      {error && (
+        <div className="home-error">
+          <span className="error-icon">⚠️</span>
+          <p className="error-text">{error}</p>
+        </div>
+      )}
       {!transcription ? (
         <div className="home-idle">
           <span className="home-emoji" style={{ color: current.color }}>

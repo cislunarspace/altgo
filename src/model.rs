@@ -13,11 +13,11 @@ use std::path::{Path, PathBuf};
 const MODEL_BASE_URL: &str = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main";
 
 /// 已知模型信息。
-struct ModelInfo {
-    name: &'static str,
-    filename: &'static str,
-    size_bytes: u64,
-    description: &'static str,
+pub struct ModelInfo {
+    pub name: &'static str,
+    pub filename: &'static str,
+    pub size_bytes: u64,
+    pub description: &'static str,
 }
 
 const MODELS: &[ModelInfo] = &[
@@ -52,6 +52,10 @@ const MODELS: &[ModelInfo] = &[
         description: "最佳准确率",
     },
 ];
+
+pub fn models_info() -> &'static [ModelInfo] {
+    MODELS
+}
 
 /// 返回模型存储目录（`~/.config/altgo/models/` 或 `%APPDATA%/altgo/models/`）。
 pub fn models_dir() -> PathBuf {
@@ -126,6 +130,65 @@ pub fn resolve_model_path(config_model: &str) -> Option<PathBuf> {
     }
 
     None
+}
+
+/// 下载指定模型，通过回调报告进度。
+///
+/// `on_progress` 参数为 `(downloaded_bytes, total_bytes)` 回调。
+pub async fn download_with_progress<F>(
+    name: &str,
+    mut on_progress: F,
+) -> Result<PathBuf>
+where
+    F: FnMut(u64, u64),
+{
+    let info = MODELS
+        .iter()
+        .find(|m| m.name == name)
+        .ok_or_else(|| anyhow::anyhow!("未知模型: {}", name))?;
+
+    let dir = models_dir();
+    std::fs::create_dir_all(&dir)
+        .with_context(|| format!("创建模型目录失败: {}", dir.display()))?;
+
+    let dest = dir.join(info.filename);
+
+    if dest.exists() {
+        return Ok(dest);
+    }
+
+    let url = format!("{}/{}", MODEL_BASE_URL, info.filename);
+
+    let response = reqwest::get(&url)
+        .await
+        .with_context(|| format!("下载模型失败: {}", url))?;
+
+    if !response.status().is_success() {
+        anyhow::bail!("下载模型失败: HTTP {} for {}", response.status(), url);
+    }
+
+    let total_size = response.content_length().unwrap_or(info.size_bytes);
+    let tmp_path = dest.with_extension("bin.tmp");
+    let mut file = std::fs::File::create(&tmp_path).with_context(|| "创建临时文件失败")?;
+
+    let mut downloaded: u64 = 0;
+    let mut stream = response.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.context("读取下载数据失败")?;
+        std::io::Write::write_all(&mut file, &chunk).context("写入下载数据失败")?;
+        downloaded += chunk.len() as u64;
+        on_progress(downloaded, total_size);
+    }
+
+    let file_size = std::fs::metadata(&tmp_path)?.len();
+    if file_size < 10 * 1024 * 1024 {
+        let _ = std::fs::remove_file(&tmp_path);
+        anyhow::bail!("下载的模型文件过小 ({} bytes)，可能损坏", file_size);
+    }
+
+    std::fs::rename(&tmp_path, &dest).with_context(|| "重命名临时文件失败")?;
+
+    Ok(dest)
 }
 
 /// 下载指定模型，带进度条显示。

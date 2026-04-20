@@ -31,3 +31,45 @@ export function useLatestTranscription(): string | null {
 
   return text;
 }
+
+export function usePipelineError(): string | null {
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const unlisten = listen<string>("pipeline-error", (event) => {
+      setError(event.payload);
+    });
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, []);
+
+  return error;
+}
+
+export function useModelDownloadProgress(): {
+  name: string | null;
+  downloaded: number;
+  total: number;
+} {
+  const [progress, setProgress] = useState<{
+    name: string | null;
+    downloaded: number;
+    total: number;
+  }>({ name: null, downloaded: 0, total: 0 });
+
+  useEffect(() => {
+    const unlisten = listen<{
+      name: string;
+      downloaded: number;
+      total: number;
+    }>("model-download-progress", (event) => {
+      setProgress(event.payload);
+    });
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, []);
+
+  return progress;
+}

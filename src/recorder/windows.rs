@@ -10,9 +10,13 @@
 use crate::audio::{self, Buffer};
 use anyhow::Result;
 use std::io::Read;
+use std::os::windows::process::CommandExt;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::thread::JoinHandle;
+
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 /// 预热音频设备解析缓存（调用 `resolve_audio_device` 填充 `OnceLock`）。
 pub fn warmup_device() {
@@ -33,6 +37,7 @@ fn find_ffmpeg() -> String {
     // Try PATH first via cmd's `where` (more reliable than PowerShell's where).
     if let Ok(output) = std::process::Command::new("cmd")
         .args(["/C", "where", "ffmpeg"])
+        .creation_flags(CREATE_NO_WINDOW)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())
         .output()
@@ -95,6 +100,7 @@ fn resolve_audio_device() -> &'static str {
         // ffmpeg writes device list to stderr.  Capture both stdout and stderr.
         let output = std::process::Command::new(&ffmpeg_path)
             .args(["-list_devices", "true", "-f", "dshow", "-i", "dummy"])
+            .creation_flags(CREATE_NO_WINDOW)
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
             .output();
@@ -202,6 +208,7 @@ impl WindowsRecorder {
                     "pcm_s16le",
                     "pipe:1",
                 ])
+                .creation_flags(CREATE_NO_WINDOW)
                 .stdout(std::process::Stdio::piped())
                 .stderr(std::process::Stdio::null())
                 .spawn();

@@ -309,9 +309,26 @@ pub async fn run_pipeline(
     let mut recorder =
         altgo::recorder::PlatformRecorder::new(cfg.recorder.sample_rate, cfg.recorder.channels);
 
+    let model_path = if cfg.transcriber.engine == "local" {
+        match altgo::model::resolve_model_path(&cfg.transcriber.model) {
+            Some(p) => p.to_string_lossy().to_string(),
+            None => {
+                let msg = format!(
+                    "本地模型未找到（配置值: {:?}）。请在 GUI 设置中下载模型，或将 [transcriber] model 设为已下载模型的名称（如 \"base\"）或完整文件路径。",
+                    cfg.transcriber.model
+                );
+                tracing::error!("{}", msg);
+                let _ = app.emit("pipeline-error", &msg);
+                return;
+            }
+        }
+    } else {
+        cfg.transcriber.model.clone()
+    };
+
     let transcriber: altgo::transcriber::Transcriber = match cfg.transcriber.engine.as_str() {
         "local" => altgo::transcriber::Transcriber::Local(altgo::transcriber::LocalWhisper::new(
-            cfg.transcriber.model.clone(),
+            model_path,
             cfg.transcriber.language.clone(),
             cfg.transcriber.whisper_path.clone(),
         )),
@@ -487,4 +504,70 @@ pub async fn run_pipeline(
 
     emit_pipeline_status(&app, &pipeline_status, "stopped");
     tracing::info!("pipeline stopped");
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelEntry {
+    pub name: String,
+    pub filename: String,
+    pub size_bytes: u64,
+    pub description: String,
+    pub downloaded: bool,
+}
+
+#[tauri::command]
+pub async fn list_models() -> Result<Vec<ModelEntry>, String> {
+    let downloaded = altgo::model::list_downloaded();
+    let entries = altgo::model::models_info()
+        .iter()
+        .map(|m| ModelEntry {
+            name: m.name.to_string(),
+            filename: m.filename.to_string(),
+            size_bytes: m.size_bytes,
+            description: m.description.to_string(),
+            downloaded: downloaded.iter().any(|d| d == m.name),
+        })
+        .collect();
+    Ok(entries)
+}
+
+#[tauri::command]
+pub async fn download_model(
+    app: tauri::AppHandle,
+    name: String,
+) -> Result<String, String> {
+    altgo::model::download_with_progress(&name, {
+        let app = app.clone();
+        let name_clone = name.clone();
+        move |downloaded, total| {
+            let _ = app.emit("model-download-progress", serde_json::json!({
+                "name": name_clone,
+                "downloaded": downloaded,
+                "total": total,
+            }));
+        }
+    })
+    .await
+    .map(|p| p.to_string_lossy().to_string())
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn delete_model(name: String) -> Result<(), String> {
+    let info = altgo::model::models_info()
+        .iter()
+        .find(|m| m.name == name)
+        .ok_or_else(|| format!("unknown model: {}", name))?;
+    let path = altgo::model::models_dir().join(info.filename);
+    if path.exists() {
+        std::fs::remove_file(&path).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn resolve_model(model: String) -> Result<Option<String>, String> {
+    Ok(altgo::model::resolve_model_path(&model)
+        .map(|p| p.to_string_lossy().to_string()))
 }

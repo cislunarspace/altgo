@@ -55,7 +55,7 @@
       "icons/icon.ico"
     ],
     "resources": {
-      "target/deps/bin/*": "./bin/"
+      "../.deps/bin/*": "./bin/"
     }
   }
 }

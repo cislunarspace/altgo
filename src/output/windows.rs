@@ -6,7 +6,10 @@
 //! 如果 WPF 不可用，回退到 MessageBox。
 
 use super::truncate_text;
+use std::os::windows::process::CommandExt;
 use std::process::{Command, Stdio};
+
+const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 /// 通过 PowerShell Set-Clipboard 将文本写入 Windows 剪切板。
 #[allow(dead_code)]
@@ -15,6 +18,7 @@ pub async fn write_clipboard(text: &str) -> anyhow::Result<()> {
     tokio::task::spawn_blocking(move || {
         let output = Command::new("powershell")
             .args(["-NoProfile", "-NonInteractive", "-Command", "Set-Clipboard"])
+            .creation_flags(CREATE_NO_WINDOW)
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
@@ -55,6 +59,7 @@ fn is_text_input_focused() -> bool {
 
     let output = Command::new("powershell")
         .args(["-NoProfile", "-NonInteractive", "-Command", ps_script])
+        .creation_flags(CREATE_NO_WINDOW)
         .stdout(Stdio::piped())
         .output();
 
@@ -135,6 +140,7 @@ fn get_screen_workarea() -> (i32, i32) {
     "#;
     let output = match Command::new("powershell")
         .args(["-NoProfile", "-NonInteractive", "-Command", ps_script])
+        .creation_flags(CREATE_NO_WINDOW)
         .stdout(Stdio::piped())
         .output()
     {
@@ -185,6 +191,7 @@ fn spawn_ps_script(script: &str) {
             "-File",
             &tmp.path().to_string_lossy(),
         ])
+        .creation_flags(CREATE_NO_WINDOW)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())

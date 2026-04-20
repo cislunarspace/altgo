@@ -76,6 +76,10 @@ pub fn run() {
             cmd::get_status,
             cmd::copy_text,
             cmd::hide_overlay,
+            cmd::list_models,
+            cmd::download_model,
+            cmd::delete_model,
+            cmd::resolve_model,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
