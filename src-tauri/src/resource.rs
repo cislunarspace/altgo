@@ -10,7 +10,6 @@ use std::path::PathBuf;
 /// 搜索逻辑：
 /// - Linux: `/usr/lib/altgo/bin/{name}`
 /// - Windows: 可执行文件同级目录下的 `bin/{name}`
-/// - macOS: 可执行文件同级目录下的 `bin/{name}`
 pub fn bundled_bin(name: &str) -> Option<PathBuf> {
     let exe_dir = std::env::current_exe().ok()?.parent()?.to_path_buf();
 
@@ -31,7 +30,7 @@ pub fn bundled_bin(name: &str) -> Option<PathBuf> {
         None
     }
 
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(target_os = "windows")]
     {
         let candidate = exe_dir.join("bin").join(name);
         if candidate.exists() {
