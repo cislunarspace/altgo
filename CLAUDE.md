@@ -88,7 +88,6 @@ Key Listener → State Machine → Recorder → Transcriber → Polisher → Out
 ### Platform System Requirements
 
 - **Linux**: `xinput`, `xmodmap`, `parecord`, `xclip`/`xsel`/`wl-copy`, `notify-send`
-- **macOS**: `sox`, `pbcopy`, `osascript`
 - **Windows**: `ffmpeg`, PowerShell
 
 ### Tauri GUI Development
