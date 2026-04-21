@@ -1,8 +1,15 @@
-.PHONY: build ensure-binary-deps test install clean fmt lint deps-linux deps-windows package-deb
+.PHONY: build ensure-binary-deps ensure-frontend-deps test install clean fmt lint deps-linux deps-windows package-deb run
 
 BINARY=altgo
 RELEASE_BIN_DIR=src-tauri/target/release/bin
 REPO_ROOT := $(abspath .)
+
+# 检查前端依赖是否安装
+ensure-frontend-deps:
+	@if [ ! -d "$(REPO_ROOT)/frontend/node_modules" ]; then \
+		echo "frontend/node_modules not found, running npm install..."; \
+		cd "$(REPO_ROOT)/frontend" && npm install; \
+	fi
 
 # 仅在缺少 ffmpeg / whisper-cli 时跑 download-deps（避免每次 make build 都 git clone）
 ensure-binary-deps:
@@ -12,7 +19,7 @@ ensure-binary-deps:
 
 # Release 可执行文件在 src-tauri/target/release/altgo-tauri；同目录下需有 bin/whisper-cli
 # （resource.rs 会查找）。因此 build 前先拉取依赖，编译后再拷贝到 target/release/bin/。
-build: ensure-binary-deps
+build: ensure-frontend-deps ensure-binary-deps
 	cargo tauri build
 	@install -d $(RELEASE_BIN_DIR)
 	@set -e; \
@@ -52,10 +59,14 @@ clean:
 	rm -f $(BINARY)
 
 deps-linux:
-	bash packaging/scripts/download-deps.sh
+	bash packaging/scripts/download-deps.sh x86_64
 
 deps-windows:
 	pwsh packaging/scripts/download-deps.ps1
+
+# 一键构建并运行
+run: build
+	$(REPO_ROOT)/src-tauri/target/release/altgo-tauri
 
 package-deb: build
 	cargo deb --manifest-path=src-tauri/Cargo.toml --no-build

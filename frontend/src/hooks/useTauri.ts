@@ -20,12 +20,19 @@ export function useLatestTranscription(): string | null {
   const [text, setText] = useState<string | null>(null);
 
   useEffect(() => {
+    let timer: number | null = null;
     const unlisten = listen<string>("transcription-result", (event) => {
       setText(event.payload);
-      setTimeout(() => setText(null), 5000);
+      if (timer !== null) {
+        clearTimeout(timer);
+      }
+      timer = window.setTimeout(() => setText(null), 5000);
     });
     return () => {
       unlisten.then((fn) => fn());
+      if (timer !== null) {
+        clearTimeout(timer);
+      }
     };
   }, []);
 

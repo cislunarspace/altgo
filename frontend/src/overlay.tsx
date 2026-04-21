@@ -18,6 +18,16 @@ function Overlay() {
   const [displayedStatus, setDisplayedStatus] = useState<string | null>(null);
   const prevStatusRef = useRef("idle");
   const exitTimerRef = useRef<number | null>(null);
+  const statusRef = useRef(status);
+  const displayedStatusRef = useRef(displayedStatus);
+
+  useEffect(() => {
+    statusRef.current = status;
+  }, [status]);
+
+  useEffect(() => {
+    displayedStatusRef.current = displayedStatus;
+  }, [displayedStatus]);
 
   useEffect(() => {
     applyThemeToDocument(getThemePref());
@@ -25,18 +35,24 @@ function Overlay() {
   }, []);
 
   useEffect(() => {
+    let active = true;
+
     const unlistenStatus = listen<string>("pipeline-status", (event) => {
+      if (!active) return;
       const newStatus = event.payload;
+      const currentDisplayed = displayedStatusRef.current;
 
       if (newStatus === "idle" || newStatus === "stopped") {
         // Transitioning to hidden state
         if (prevStatusRef.current === "idle" || prevStatusRef.current === "stopped") {
           // Already hidden, just update
           setStatus(newStatus);
+          setDisplayedStatus(null);
         } else {
           // Was showing content, play exit animation
           setIsExiting(true);
-          exitTimerRef.current = setTimeout(() => {
+          exitTimerRef.current = window.setTimeout(() => {
+            if (!active) return;
             setDisplayedStatus(null);
             setStatus(newStatus);
             setIsExiting(false);
@@ -44,14 +60,15 @@ function Overlay() {
         }
       } else {
         // Transitioning to a visible state
-        if (status === "idle" || status === "stopped") {
+        if (currentDisplayed === null || currentDisplayed === "idle" || currentDisplayed === "stopped") {
           // From hidden, just show directly
           setDisplayedStatus(newStatus);
           setStatus(newStatus);
-        } else if (displayedStatus !== newStatus) {
+        } else if (currentDisplayed !== newStatus) {
           // Different visible state, crossfade
           setIsExiting(true);
-          exitTimerRef.current = setTimeout(() => {
+          exitTimerRef.current = window.setTimeout(() => {
+            if (!active) return;
             setDisplayedStatus(newStatus);
             setIsExiting(false);
           }, 150);
@@ -60,17 +77,20 @@ function Overlay() {
       prevStatusRef.current = newStatus;
     });
     const unlistenResult = listen<string>("transcription-result", (event) => {
+      if (!active) return;
       setResult(event.payload);
       setCopied(false);
     });
     return () => {
+      active = false;
       unlistenStatus.then((fn) => fn());
       unlistenResult.then((fn) => fn());
       if (exitTimerRef.current !== null) {
         clearTimeout(exitTimerRef.current);
+        exitTimerRef.current = null;
       }
     };
-  }, [status, displayedStatus]);
+  }, []);
 
   if (displayedStatus === null && !isExiting) return null;
 

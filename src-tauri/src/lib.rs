@@ -83,9 +83,15 @@ pub fn run() {
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
-        .run(|_app_handle, event| {
+        .run(|app_handle, event| {
             if let tauri::RunEvent::ExitRequested { .. } = event {
-                // TODO: stop pipeline on exit
+                let state = app_handle.state::<AppState>();
+                let guard = state.pipeline.try_lock();
+                if let Ok(mut p) = guard {
+                    if let Some(h) = p.take() {
+                        let _ = h.stop_tx.send(());
+                    }
+                }
             }
         });
 }

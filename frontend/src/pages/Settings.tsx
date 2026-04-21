@@ -687,7 +687,7 @@ export default function Settings() {
           <div className="settings-field">
             <span className="settings-field-label-text">{t("settings.version")}</span>
             <div className="settings-field-control">
-              <span className="settings-muted">1.4.0</span>
+              <span className="settings-muted">2.0.1</span>
             </div>
           </div>
         </section>
