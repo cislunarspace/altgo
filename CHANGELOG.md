@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## v2.0.1 (2026-04-21)
+
+### Bug Fixes
+
+- Windows：修复 `key_capture` 中 VK 字母显示名的类型错误（`i32` / `u8` / `char`），恢复 Release 构建
+
 ## v2.0.0 (2026-04-21)
 
 ### Documentation

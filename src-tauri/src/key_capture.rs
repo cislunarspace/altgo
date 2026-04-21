@@ -232,7 +232,8 @@ fn vk_to_display_name(vk: i32) -> String {
         0x28 => "Down".to_string(),
         0x30..=0x39 => format!("{}", vk - 0x30),
         0x41..=0x5A => {
-            let c = (vk - 0x41 + b'a') as char;
+            let off = (vk - 0x41) as u8;
+            let c = (b'a' + off) as char;
             c.to_string()
         }
         0x70..=0x7B => format!("F{}", vk - 0x70 + 1),
