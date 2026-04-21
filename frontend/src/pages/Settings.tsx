@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { message as showMessageDialog } from "@tauri-apps/plugin-dialog";
 import { useTranslation } from "../i18n";
 import { useModelDownloadProgress } from "../hooks/useTauri";
 import {
@@ -48,10 +49,21 @@ interface ModelEntry {
 }
 
 const KEY_PRESETS: { value: string; labelKey: string }[] = [
-  { value: "ISO_Level3_Shift", labelKey: "settings.key_preset_right_alt" },
-  { value: "Alt_L", labelKey: "settings.key_preset_left_alt" },
-  { value: "Alt_R", labelKey: "settings.key_preset_alt_r" },
+  { value: "Alt_R", labelKey: "settings.key_preset_right_alt" },
 ];
+
+/** 与下拉「右Alt」一致的老 keysym 名，仍视为预设而非自定义输入 */
+function isPresetKeyName(keyName: string): boolean {
+  if (KEY_PRESETS.some((p) => p.value === keyName)) return true;
+  return keyName === "ISO_Level3_Shift" || keyName === "AltGr";
+}
+
+/** 下拉框受控 value：老配置里的右 Alt keysym 显示为「右Alt」 */
+function presetSelectValue(keyName: string): string {
+  if (KEY_PRESETS.some((p) => p.value === keyName)) return keyName;
+  if (keyName === "ISO_Level3_Shift" || keyName === "AltGr") return "Alt_R";
+  return "__custom__";
+}
 
 function formatSize(bytes: number): string {
   const mb = bytes / (1024 * 1024);
@@ -92,7 +104,6 @@ export default function Settings() {
   const [models, setModels] = useState<ModelEntry[]>([]);
   const [resolvedPath, setResolvedPath] = useState<string | null | undefined>(undefined);
   const [downloading, setDownloading] = useState<string | null>(null);
-  const [modelError, setModelError] = useState("");
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<"saved" | string>("");
   const [polishOpen, setPolishOpen] = useState(false);
@@ -103,6 +114,16 @@ export default function Settings() {
   const refreshModels = useCallback(() => {
     invoke<ModelEntry[]>("list_models").then(setModels).catch(() => {});
   }, []);
+
+  const reportModelFailure = useCallback(
+    async (err: unknown) => {
+      await showMessageDialog(String(err), {
+        title: t("settings.model_error_title"),
+        kind: "error",
+      });
+    },
+    [t],
+  );
 
   const refreshResolved = useCallback((model: string, engine: string) => {
     if (engine !== "local" || !model.trim()) {
@@ -154,7 +175,6 @@ export default function Settings() {
 
   const downloadAndUse = async (name: string) => {
     setDownloading(name);
-    setModelError("");
     try {
       await invoke("download_model", { name });
       const updated = await invoke<ModelEntry[]>("list_models");
@@ -169,7 +189,7 @@ export default function Settings() {
       setMessage("saved");
       refreshResolved(name, "local");
     } catch (e) {
-      setModelError(String(e));
+      await reportModelFailure(e);
     } finally {
       setDownloading(null);
     }
@@ -183,7 +203,7 @@ export default function Settings() {
         update("model", "");
       }
     } catch (e) {
-      setModelError(String(e));
+      await reportModelFailure(e);
     }
   };
 
@@ -238,10 +258,21 @@ export default function Settings() {
     }
   };
 
-  const downloadingProgress =
-    downloading && progress.name === downloading
-      ? Math.round((progress.downloaded / Math.max(progress.total, 1)) * 100)
-      : 0;
+  const downloadingProgress = (() => {
+    if (!downloading) return 0;
+    const meta = models.find((m) => m.name === downloading);
+    const total =
+      progress.name === downloading && progress.total > 0
+        ? progress.total
+        : meta?.sizeBytes ?? Math.max(progress.total, 1);
+    const downloaded = progress.name === downloading ? progress.downloaded : 0;
+    return Math.round((downloaded / Math.max(total, 1)) * 100);
+  })();
+
+  const showDownloadConnecting =
+    !!downloading &&
+    (progress.name !== downloading ||
+      (progress.name === downloading && progress.downloaded === 0));
 
   if (!config) {
     return <div className="loading-container">{t("settings.loading")}</div>;
@@ -383,7 +414,11 @@ export default function Settings() {
                                 style={{ width: `${downloadingProgress}%` }}
                               />
                             </div>
-                            <span className="progress-text">{downloadingProgress}%</span>
+                            <span className="progress-text">
+                              {showDownloadConnecting
+                                ? t("settings.model_download_connecting")
+                                : `${downloadingProgress}%`}
+                            </span>
                           </div>
                         ) : (
                           <button
@@ -401,8 +436,6 @@ export default function Settings() {
                   );
                 })}
               </div>
-              {modelError && <p className="input-error">{modelError}</p>}
-
               <button
                 type="button"
                 className="settings-advanced-toggle"
@@ -490,14 +523,10 @@ export default function Settings() {
           <p className="settings-section-lead">{t("settings.recording_lead")}</p>
           <div className="settings-field">
             <span className="settings-field-label-text">{t("settings.key_name")}</span>
-            <div className="settings-field-control">
+            <div className="settings-field-control settings-field-control--trigger-key">
               <select
                 className="settings-select"
-                value={
-                  KEY_PRESETS.some((p) => p.value === config.keyName)
-                    ? config.keyName
-                    : "__custom__"
-                }
+                value={presetSelectValue(config.keyName)}
                 onChange={(e) => {
                   if (e.target.value === "__custom__") return;
                   setConfig((prev) =>
@@ -519,9 +548,15 @@ export default function Settings() {
                 ))}
                 <option value="__custom__">{t("settings.key_custom")}</option>
               </select>
+              {!isPresetKeyName(config.keyName) && (
+                <div className="settings-key-binding-readout">
+                  <span className="settings-muted">{t("settings.key_binding_active")}</span>
+                  <code className="settings-key-binding-code">{config.keyName}</code>
+                </div>
+              )}
             </div>
           </div>
-          {!KEY_PRESETS.some((p) => p.value === config.keyName) && (
+          {!isPresetKeyName(config.keyName) && config.linuxEvdevCode == null && config.windowsVk == null && (
             <div className="settings-field">
               <span className="settings-field-label-text">{t("settings.key_custom_value")}</span>
               <div className="settings-field-control">
@@ -687,7 +722,7 @@ export default function Settings() {
           <div className="settings-field">
             <span className="settings-field-label-text">{t("settings.version")}</span>
             <div className="settings-field-control">
-              <span className="settings-muted">2.0.1</span>
+              <span className="settings-muted">2.1.0</span>
             </div>
           </div>
         </section>
