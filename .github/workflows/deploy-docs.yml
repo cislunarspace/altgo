@@ -1,11 +1,9 @@
 name: Deploy Docs to GitHub Pages
 
+# Pages: 仓库 Settings → Pages → Source 选「GitHub Actions」；站点 URL 与 docs-site/docusaurus.config.ts 中 baseUrl 一致。
 on:
   push:
     branches: [master]
-    paths:
-      - 'docs-site/**'
-      - '.github/workflows/deploy-docs.yml'
   workflow_dispatch:
 
 permissions:

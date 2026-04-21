@@ -63,6 +63,13 @@ type: 简短描述
 - 确保 `mod.rs` 导出统一的公共接口
 - 尽可能使用子进程调用系统工具，避免 FFI
 
+## CI、Release 与 GitHub Pages
+
+- **CI**（`.github/workflows/ci.yml`）：向 `master` 推送或开 PR 时运行 `fmt` / `clippy` / `test`，下载 `packaging/scripts/download-deps.sh` 中的捆绑二进制后构建 **deb**，与发布流程一致。
+- **Release**（`.github/workflows/release.yml`）：推送符合 `v*` 的 **tag**（例如 `v1.5.0`）时并行构建 **Linux deb** 与 **Windows MSI**，生成 `checksums.txt` 并创建 GitHub Release。发版前请将 `src-tauri/Cargo.toml` / `tauri.conf.json` 中版本与 tag 对齐。
+- **文档站**（`.github/workflows/deploy-docs.yml`）：向 `master` 推送时构建 Docusaurus 并部署到 **GitHub Pages**。首次需在仓库 **Settings → Pages** 中将 **Build and deployment** 的 Source 设为 **GitHub Actions**（勿选 branch 静态目录）。文档地址见 `docs-site/docusaurus.config.ts` 中的 `url` / `baseUrl`（例如 `https://<org>.github.io/altgo/`）。也可在 Actions 中手动 **Run workflow** 触发部署。
+- **AppImage**（`.github/workflows/appimage.yml`）：仅 **workflow_dispatch**，需传入与 `Cargo.toml` 一致的版本号。
+
 ## 问题反馈
 
 - 使用 GitHub Issues 报告 bug 或提出功能请求

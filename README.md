@@ -158,7 +158,7 @@ cd frontend && npm run build
 
 ## 相关文档
 
-- [CONTRIBUTING.md](CONTRIBUTING.md)
+- [CONTRIBUTING.md](CONTRIBUTING.md)（含 **CI / Release / GitHub Pages** 维护说明）
 - [CLAUDE.md](CLAUDE.md)
 - [docs-site/](docs-site/)
 
