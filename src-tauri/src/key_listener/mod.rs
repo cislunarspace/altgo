@@ -8,6 +8,9 @@
 
 #[cfg(target_os = "linux")]
 mod linux;
+
+#[cfg(target_os = "linux")]
+pub(crate) use linux::list_keyboard_devices;
 #[cfg(target_os = "windows")]
 mod windows;
 

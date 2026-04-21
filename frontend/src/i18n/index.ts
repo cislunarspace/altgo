@@ -1,4 +1,6 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+
+const LANG_KEY = "altgo-lang";
 
 const translations: Record<string, Record<string, string>> = {
   zh: {
@@ -10,6 +12,8 @@ const translations: Record<string, Record<string, string>> = {
     "status.processing": "正在转写...",
     "status.done": "转写完成",
     "main.hint": "按住 右Alt 键说话，松开自动转写",
+    "main.hint_clipboard": "转写完成后文本会写入剪贴板，可直接粘贴使用。",
+    "main.copy": "复制到剪贴板",
     "main.result_label": "转写结果",
     "main.copied": "已复制到剪贴板 ✓",
     "main.error_title": "错误",
@@ -19,6 +23,12 @@ const translations: Record<string, Record<string, string>> = {
     "settings.loading": "加载中...",
     "settings.saved": "设置已保存",
     "settings.saving": "保存中...",
+    "settings.appearance": "外观",
+    "settings.appearance_lead": "选择浅色或深色界面；「跟随系统」会随操作系统明暗模式自动切换。",
+    "settings.theme": "配色",
+    "settings.theme_system": "跟随系统",
+    "settings.theme_light": "浅色",
+    "settings.theme_dark": "深色",
     "settings.gui_language": "界面语言",
     "settings.recording": "录音设置",
     "settings.key_name": "触发键",
@@ -39,6 +49,8 @@ const translations: Record<string, Record<string, string>> = {
     "settings.polish_light": "轻度",
     "settings.polish_medium": "中度",
     "settings.polish_heavy": "重度",
+    "settings.polish_level_hint":
+      "转写完成后用大模型整理标点、口语赘词等；级别越高改写越多，通常更耗时、API 花费更高。关闭则仅保留 Whisper 原文。",
     "settings.model_management": "模型管理",
     "settings.current_model": "当前模型",
     "settings.download_model": "下载模型",
@@ -48,6 +60,7 @@ const translations: Record<string, Record<string, string>> = {
     "settings.confirm_delete": "确认删除？",
     "settings.no_model_configured": "未配置",
     "settings.about": "关于",
+    "settings.about_tagline": "按住快捷键说话，松手转写并润色，把口述变成可直接使用的文字。",
     "settings.version": "版本",
     "settings.check_updates": "检查更新",
     "settings.save": "保存",
@@ -68,6 +81,11 @@ const translations: Record<string, Record<string, string>> = {
     "settings.key_preset_alt_r": "Alt_R",
     "settings.key_custom": "自定义键名…",
     "settings.key_custom_value": "自定义 keysym",
+    "settings.capture_activation": "按下以设置",
+    "settings.capture_activation_short": "按下以设置快捷键",
+    "settings.capture_waiting": "请按键…（约 12 秒内）",
+    "settings.capture_activation_lead":
+      "点击后请按下要作为激活键的按键；成功后会自动保存并重载监听。失败时可再试或手动填写 keysym。",
     "settings.in_use": "当前",
     "settings.use_model": "使用此模型",
     "settings.current": "已选用",
@@ -79,6 +97,7 @@ const translations: Record<string, Record<string, string>> = {
     "overlay.recording": "录音中...",
     "overlay.processing": "处理中...",
     "overlay.copy": "复制",
+    "overlay.copied": "已复制",
   },
   en: {
     "title.subtitle": "Voice to Text",
@@ -89,6 +108,8 @@ const translations: Record<string, Record<string, string>> = {
     "status.processing": "Transcribing...",
     "status.done": "Done",
     "main.hint": "Hold Right Alt to speak, release to transcribe",
+    "main.hint_clipboard": "When transcription finishes, text is placed on the clipboard—paste it anywhere.",
+    "main.copy": "Copy to clipboard",
     "main.result_label": "Transcription",
     "main.copied": "Copied to clipboard ✓",
     "main.error_title": "Error",
@@ -98,6 +119,12 @@ const translations: Record<string, Record<string, string>> = {
     "settings.loading": "Loading...",
     "settings.saved": "Settings saved",
     "settings.saving": "Saving...",
+    "settings.appearance": "Appearance",
+    "settings.appearance_lead": "Choose light or dark UI. \"Match system\" follows your OS light/dark setting.",
+    "settings.theme": "Color theme",
+    "settings.theme_system": "Match system",
+    "settings.theme_light": "Light",
+    "settings.theme_dark": "Dark",
     "settings.gui_language": "UI Language",
     "settings.recording": "Recording",
     "settings.key_name": "Trigger Key",
@@ -118,6 +145,8 @@ const translations: Record<string, Record<string, string>> = {
     "settings.polish_light": "Light",
     "settings.polish_medium": "Medium",
     "settings.polish_heavy": "Heavy",
+    "settings.polish_level_hint":
+      "After transcription, the LLM cleans punctuation and filler; higher levels rewrite more, usually taking longer and costing more. Off keeps the raw Whisper text.",
     "settings.model_management": "Model Management",
     "settings.current_model": "Current Model",
     "settings.download_model": "Download Model",
@@ -127,6 +156,7 @@ const translations: Record<string, Record<string, string>> = {
     "settings.confirm_delete": "Confirm Delete?",
     "settings.no_model_configured": "No Model Configured",
     "settings.about": "About",
+    "settings.about_tagline": "Hold the shortcut to speak, release to transcribe and polish—turn speech into usable text.",
     "settings.version": "Version",
     "settings.check_updates": "Check for Updates",
     "settings.save": "Save",
@@ -147,6 +177,11 @@ const translations: Record<string, Record<string, string>> = {
     "settings.key_preset_alt_r": "Alt_R",
     "settings.key_custom": "Custom keysym…",
     "settings.key_custom_value": "Custom keysym",
+    "settings.capture_activation": "Press to set",
+    "settings.capture_activation_short": "Set key by pressing",
+    "settings.capture_waiting": "Press a key… (within ~12s)",
+    "settings.capture_activation_lead":
+      "Click, then press the key you want to use. Settings save and the listener reloads automatically. On failure, try again or enter a keysym manually.",
     "settings.in_use": "Active",
     "settings.use_model": "Use this model",
     "settings.current": "Selected",
@@ -158,22 +193,47 @@ const translations: Record<string, Record<string, string>> = {
     "overlay.recording": "Recording...",
     "overlay.processing": "Processing...",
     "overlay.copy": "Copy",
+    "overlay.copied": "Copied",
   },
 };
 
+export function translateStatic(lang: string, key: string): string {
+  return translations[lang]?.[key] ?? translations["zh"]?.[key] ?? key;
+}
+
 export function useTranslation() {
   const [lang, setLangState] = useState<string>(
-    () => localStorage.getItem("altgo-lang") || "zh"
+    () => localStorage.getItem(LANG_KEY) || "zh"
   );
 
   const setLang = (code: string) => {
     setLangState(code);
-    localStorage.setItem("altgo-lang", code);
+    localStorage.setItem(LANG_KEY, code);
   };
 
   const t = (key: string): string => {
-    return translations[lang]?.[key] ?? translations["zh"]?.[key] ?? key;
+    return translateStatic(lang, key);
   };
 
   return { t, lang, setLang };
+}
+
+/** For the overlay window: follows `altgo-lang` via storage events from the main window. */
+export function useOverlayTranslation() {
+  const [lang, setLang] = useState<string>(
+    () => localStorage.getItem(LANG_KEY) || "zh"
+  );
+
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === LANG_KEY && e.newValue) {
+        setLang(e.newValue);
+      }
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, []);
+
+  const t = (key: string) => translateStatic(lang, key);
+  return { t, lang };
 }

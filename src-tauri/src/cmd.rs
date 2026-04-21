@@ -45,6 +45,43 @@ fn resolve_vk_code(key_name: &str) -> Result<i32, String> {
     }
 }
 
+fn resolve_vk_for_pipeline(cfg: &config::KeyListenerConfig) -> Result<i32, String> {
+    if let Some(vk) = cfg.windows_vk {
+        return Ok(vk);
+    }
+    resolve_vk_code(&cfg.key_name)
+}
+
+fn apply_json_opt_u16(target: &mut Option<u16>, patch: Option<serde_json::Value>) {
+    match patch {
+        None => {}
+        Some(serde_json::Value::Null) => *target = None,
+        Some(serde_json::Value::Number(n)) => {
+            if let Some(u) = n.as_u64() {
+                if u <= u16::MAX as u64 {
+                    *target = Some(u as u16);
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+fn apply_json_opt_i32(target: &mut Option<i32>, patch: Option<serde_json::Value>) {
+    match patch {
+        None => {}
+        Some(serde_json::Value::Null) => *target = None,
+        Some(serde_json::Value::Number(n)) => {
+            if let Some(v) = n.as_i64() {
+                if v >= i32::MIN as i64 && v <= i32::MAX as i64 {
+                    *target = Some(v as i32);
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RecordingStatus {
@@ -186,6 +223,8 @@ fn position_overlay(overlay: &tauri::WebviewWindow, width: f64, height: f64) {
 #[serde(rename_all = "camelCase")]
 pub struct ConfigResponse {
     pub key_name: String,
+    pub linux_evdev_code: Option<u16>,
+    pub windows_vk: Option<i32>,
     pub language: String,
     pub engine: String,
     pub model: String,
@@ -203,6 +242,8 @@ pub async fn get_config(state: State<'_, AppState>) -> Result<ConfigResponse, St
     let cfg = state.config.lock().await;
     Ok(ConfigResponse {
         key_name: cfg.key_listener.key_name.clone(),
+        linux_evdev_code: cfg.key_listener.linux_evdev_code,
+        windows_vk: cfg.key_listener.windows_vk,
         language: cfg.transcriber.language.clone(),
         engine: cfg.transcriber.engine.clone(),
         model: cfg.transcriber.model.clone(),
@@ -220,6 +261,10 @@ pub async fn get_config(state: State<'_, AppState>) -> Result<ConfigResponse, St
 #[serde(rename_all = "camelCase")]
 pub struct SaveConfigRequest {
     pub key_name: Option<String>,
+    #[serde(default)]
+    pub linux_evdev_code: Option<serde_json::Value>,
+    #[serde(default)]
+    pub windows_vk: Option<serde_json::Value>,
     pub language: Option<String>,
     pub engine: Option<String>,
     pub model: Option<String>,
@@ -288,6 +333,8 @@ pub async fn save_config(
     if let Some(v) = req.key_name {
         cfg.key_listener.key_name = v;
     }
+    apply_json_opt_u16(&mut cfg.key_listener.linux_evdev_code, req.linux_evdev_code);
+    apply_json_opt_i32(&mut cfg.key_listener.windows_vk, req.windows_vk);
     if let Some(v) = req.language {
         cfg.transcriber.language = v;
     }
@@ -325,6 +372,25 @@ pub async fn save_config(
     drop(cfg);
 
     restart_pipeline(app).await
+}
+
+#[tauri::command]
+pub async fn capture_activation_key(
+    state: State<'_, AppState>,
+) -> Result<crate::key_capture::CaptureActivationResponse, String> {
+    {
+        let mut p = state.pipeline.lock().await;
+        if let Some(h) = p.take() {
+            let _ = h.stop_tx.send(());
+        }
+    }
+    tokio::time::sleep(Duration::from_millis(400)).await;
+
+    match tokio::task::spawn_blocking(crate::key_capture::capture_activation_key_blocking).await {
+        Ok(Ok(r)) => Ok(r),
+        Ok(Err(e)) => Err(e),
+        Err(e) => Err(e.to_string()),
+    }
 }
 
 #[tauri::command]
@@ -400,7 +466,7 @@ pub async fn run_pipeline(
     mut stop_rx: tokio::sync::oneshot::Receiver<()>,
     pipeline_status: Arc<std::sync::RwLock<String>>,
 ) {
-    let vk_code = match resolve_vk_code(&cfg.key_listener.key_name) {
+    let vk_code = match resolve_vk_for_pipeline(&cfg.key_listener) {
         Ok(vk) => vk,
         Err(e) => {
             tracing::error!(error = %e, "failed to resolve key code");
@@ -513,7 +579,7 @@ pub async fn run_pipeline(
 
     #[cfg(not(target_os = "windows"))]
     {
-        let mut listener = match key_listener::PlatformListener::new(&cfg.key_listener.key_name) {
+        let mut listener = match key_listener::PlatformListener::new(&cfg.key_listener) {
             Ok(l) => l,
             Err(e) => {
                 tracing::error!(error = %e, "failed to create key listener");

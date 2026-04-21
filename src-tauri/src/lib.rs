@@ -6,6 +6,7 @@
 pub mod audio;
 pub mod cmd;
 pub mod config;
+pub mod key_capture;
 pub mod key_listener;
 pub mod model;
 pub mod output;
@@ -78,6 +79,7 @@ pub fn run() {
             cmd::download_model,
             cmd::delete_model,
             cmd::resolve_model,
+            cmd::capture_activation_key,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

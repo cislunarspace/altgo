@@ -6,6 +6,7 @@
 //! 通过 `xmodmap -pke` 解析按键名称到 keycode 的映射（xinput 路径）。
 
 use super::KeyEvent;
+use crate::config::KeyListenerConfig;
 use anyhow::{Context, Result};
 use std::io::BufRead;
 use std::path::PathBuf;
@@ -31,13 +32,59 @@ const X11_KEYCODE_ALT: u8 = 64;
 /// 无需 root 权限，依赖 XInput2 扩展。
 pub struct X11Listener {
     key_name: String,
+    linux_evdev_code: Option<u16>,
     running: Arc<AtomicBool>,
     child: Option<Child>,
 }
 
+/// 枚举可用于 `evtest` 回退的键盘设备（crate 内共享，供按键捕获使用）。
+pub(crate) fn list_keyboard_devices() -> Result<Vec<PathBuf>> {
+    let by_id_path = PathBuf::from("/dev/input/by-id");
+    let mut devices = Vec::new();
+
+    if by_id_path.exists() {
+        for entry in std::fs::read_dir(&by_id_path)? {
+            let entry = entry?;
+            let name = entry.file_name();
+            let name_str = name.to_string_lossy();
+            if name_str.ends_with("-kbd") {
+                let path = entry.path();
+                if let Ok(real_path) = std::fs::canonicalize(&path) {
+                    devices.push(real_path);
+                }
+            }
+        }
+    }
+
+    if devices.is_empty() {
+        for entry in std::fs::read_dir("/dev/input")? {
+            let entry = entry?;
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name.starts_with("event") {
+                let path = entry.path();
+                let output = Command::new("sh")
+                    .arg("-c")
+                    .arg(format!(
+                        "evtest --info {} 2>&1 | grep -q 'EV_KEY.*KEY' && echo YES || echo NO",
+                        path.display()
+                    ))
+                    .output();
+
+                if let Ok(output) = output {
+                    if String::from_utf8_lossy(&output.stdout).contains("YES") {
+                        devices.push(path);
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(devices)
+}
+
 impl X11Listener {
     /// 创建新的 X11 监听器，验证 `xinput` 是否可用。
-    pub fn new(key_name: &str) -> Result<Self> {
+    pub fn new(cfg: &KeyListenerConfig) -> Result<Self> {
         Command::new("xinput")
             .arg("version")
             .stdout(Stdio::null())
@@ -46,7 +93,8 @@ impl X11Listener {
             .context("xinput not found — install xinput package")?;
 
         Ok(Self {
-            key_name: key_name.to_string(),
+            key_name: cfg.key_name.clone(),
+            linux_evdev_code: cfg.linux_evdev_code,
             running: Arc::new(AtomicBool::new(false)),
             child: None,
         })
@@ -56,17 +104,22 @@ impl X11Listener {
     pub fn start(&mut self) -> Result<(mpsc::UnboundedReceiver<KeyEvent>, &'static str)> {
         // Default config uses ISO_Level3_Shift (typically the right Alt / AltGr key).
         // evdev fallback maps names to KEY_LEFTALT / KEY_RIGHTALT.
-        let evdev_keycode = match self.key_name.as_str() {
-            "Alt_L" => EVDEV_KEY_ALT,
-            "Alt_R" | "ISO_Level3_Shift" | "AltGr" => EVDEV_KEY_ALT_R,
-            _ => {
-                tracing::warn!(
-                    "key_name '{}' not mapped for evtest fallback; defaulting to RightAlt",
-                    self.key_name
-                );
-                EVDEV_KEY_ALT_R
+        let evdev_keycode = if let Some(c) = self.linux_evdev_code {
+            c
+        } else {
+            match self.key_name.as_str() {
+                "Alt_L" => EVDEV_KEY_ALT,
+                "Alt_R" | "ISO_Level3_Shift" | "AltGr" => EVDEV_KEY_ALT_R,
+                _ => {
+                    tracing::warn!(
+                        "key_name '{}' not mapped for evtest fallback; defaulting to RightAlt",
+                        self.key_name
+                    );
+                    EVDEV_KEY_ALT_R
+                }
             }
         };
+        let strict_evtest_match = self.linux_evdev_code.is_some();
 
         let display_set = std::env::var("DISPLAY")
             .map(|s| !s.is_empty())
@@ -82,7 +135,7 @@ impl X11Listener {
             tracing::info!(
                 "Wayland session: trying evtest first (xinput on XWayland typically misses keyboard)"
             );
-            match self.try_start_evtest(evdev_keycode) {
+            match self.try_start_evtest(evdev_keycode, strict_evtest_match) {
                 Ok(rx) => return Ok((rx, "evtest")),
                 Err(e) => {
                     tracing::warn!(
@@ -138,18 +191,19 @@ impl X11Listener {
         }
 
         tracing::info!("starting evtest for key events");
-        let rx = self.try_start_evtest(evdev_keycode)?;
+        let rx = self.try_start_evtest(evdev_keycode, strict_evtest_match)?;
         Ok((rx, "evtest"))
     }
 
     fn try_start_evtest(
         &mut self,
         evdev_keycode: u16,
+        strict_match: bool,
     ) -> Result<mpsc::UnboundedReceiver<KeyEvent>> {
         let (tx, rx) = mpsc::unbounded_channel();
         self.running.store(true, Ordering::SeqCst);
         let running = Arc::clone(&self.running);
-        if let Err(e) = self.start_evtest_fallback(evdev_keycode, tx, running) {
+        if let Err(e) = self.start_evtest_fallback(evdev_keycode, strict_match, tx, running) {
             self.running.store(false, Ordering::SeqCst);
             return Err(e);
         }
@@ -244,11 +298,12 @@ impl X11Listener {
     fn start_evtest_fallback(
         &mut self,
         evdev_keycode: u16,
+        strict_match: bool,
         tx: tokio::sync::mpsc::UnboundedSender<KeyEvent>,
         running: Arc<AtomicBool>,
     ) -> Result<()> {
         // Find keyboard devices
-        let keyboard_devices = self.find_keyboard_devices()?;
+        let keyboard_devices = list_keyboard_devices()?;
         if keyboard_devices.is_empty() {
             return Err(anyhow::anyhow!(
                 "no keyboard devices found for evtest fallback"
@@ -305,8 +360,14 @@ impl X11Listener {
                         let Ok(code) = code_str.parse::<u16>() else {
                             continue;
                         };
-                        if code == evdev_keycode || code == EVDEV_KEY_ALT || code == EVDEV_KEY_ALT_R
-                        {
+                        let key_matches = if strict_match {
+                            code == evdev_keycode
+                        } else {
+                            code == evdev_keycode
+                                || code == EVDEV_KEY_ALT
+                                || code == EVDEV_KEY_ALT_R
+                        };
+                        if key_matches {
                             let Some(value_tail) = line.split("value ").nth(1) else {
                                 continue;
                             };
@@ -337,55 +398,6 @@ impl X11Listener {
         }
 
         Ok(())
-    }
-
-    /// 查找键盘设备。
-    fn find_keyboard_devices(&self) -> Result<Vec<PathBuf>> {
-        let by_id_path = PathBuf::from("/dev/input/by-id");
-        let mut devices = Vec::new();
-
-        if by_id_path.exists() {
-            for entry in std::fs::read_dir(&by_id_path)? {
-                let entry = entry?;
-                let name = entry.file_name();
-                let name_str = name.to_string_lossy();
-                // Keyboard devices have "-kbd" suffix
-                if name_str.ends_with("-kbd") {
-                    let path = entry.path();
-                    // by-id symlinks point to event devices - resolve symlinks
-                    if let Ok(real_path) = std::fs::canonicalize(&path) {
-                        devices.push(real_path);
-                    }
-                }
-            }
-        }
-
-        // Fallback: enumerate all /dev/input/event* devices and check with evtest --info
-        if devices.is_empty() {
-            for entry in std::fs::read_dir("/dev/input")? {
-                let entry = entry?;
-                let name = entry.file_name().to_string_lossy().to_string();
-                if name.starts_with("event") {
-                    let path = entry.path();
-                    // Check if this is a keyboard using evtest --info
-                    let output = Command::new("sh")
-                        .arg("-c")
-                        .arg(format!(
-                            "evtest --info {} 2>&1 | grep -q 'EV_KEY.*KEY' && echo YES || echo NO",
-                            path.display()
-                        ))
-                        .output();
-
-                    if let Ok(output) = output {
-                        if String::from_utf8_lossy(&output.stdout).contains("YES") {
-                            devices.push(path);
-                        }
-                    }
-                }
-            }
-        }
-
-        Ok(devices)
     }
 
     /// 停止监听。

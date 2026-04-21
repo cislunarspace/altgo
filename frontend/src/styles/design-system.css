@@ -1,110 +1,4 @@
-/* ============================================
-   altgo Design System — CSS Custom Properties
-   ============================================ */
-
-:root {
-  /* ── Surface hierarchy ───────────────────────── */
-  /* bg-base is the deepest layer; surfaces stack upward */
-  --color-bg: #0b0b0d;
-  --color-surface-1: #111114;
-  --color-surface-2: #18181c;
-  --color-surface-3: #222226;
-
-  --color-bg-card: var(--color-surface-2);
-  --color-bg-card-hover: var(--color-surface-3);
-  --color-bg-input: var(--color-surface-1);
-  --color-bg-input-focus: var(--color-surface-2);
-
-  /* ── Text ──────────────────────────────────── */
-  --color-text: #ededef;
-  --color-text-secondary: #8e8e96;
-  --color-text-muted: #4a4a52;
-
-  /* ── Accent — indigo-viola ─────────────────── */
-  --color-accent: #6366f1;
-  --color-accent-hover: #818cf8;
-  --color-accent-glow: rgba(99, 102, 241, 0.2);
-
-  /* ── Semantic status colors ─────────────────── */
-  --color-green: #22c55e;
-  --color-green-bg: rgba(34, 197, 94, 0.12);
-  --color-green-glow: rgba(34, 197, 94, 0.25);
-  --color-red: #f43f5e;
-  --color-red-bg: rgba(244, 63, 94, 0.12);
-  --color-red-glow: rgba(244, 63, 94, 0.25);
-  --color-amber: #f59e0b;
-  --color-amber-bg: rgba(245, 158, 11, 0.12);
-  --color-amber-glow: rgba(245, 158, 11, 0.25);
-
-  /* ── Borders ───────────────────────────────── */
-  --color-border: rgba(255, 255, 255, 0.07);
-  --color-border-subtle: rgba(255, 255, 255, 0.04);
-  --color-border-focus: var(--color-accent);
-
-  /* ── Typography ─────────────────────────────── */
-  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  --font-mono: "JetBrains Mono", "SF Mono", Consolas, monospace;
-
-  --text-xs: 0.6875rem;   /* 11px */
-  --text-sm: 0.8125rem;   /* 13px */
-  --text-base: 0.9375rem; /* 15px */
-  --text-lg: 1.0625rem;   /* 17px */
-  --text-xl: 1.25rem;     /* 20px */
-  --text-2xl: 1.5rem;     /* 24px */
-
-  --leading-tight: 1.25;
-  --leading-normal: 1.5;
-  --leading-relaxed: 1.625;
-
-  --tracking-tight: -0.025em;
-  --tracking-normal: 0;
-  --tracking-wide: 0.04em;
-
-  /* ── Spacing ────────────────────────────────── */
-  --space-1: 0.25rem;
-  --space-2: 0.5rem;
-  --space-3: 0.75rem;
-  --space-4: 1rem;
-  --space-5: 1.25rem;
-  --space-6: 1.5rem;
-  --space-8: 2rem;
-  --space-10: 2.5rem;
-  --space-12: 3rem;
-  --space-16: 4rem;
-
-  /* ── Border Radius ──────────────────────────── */
-  --radius-xs: 0.25rem;  /* 4px */
-  --radius-sm: 0.375rem; /* 6px */
-  --radius-md: 0.5rem;   /* 8px */
-  --radius-lg: 0.75rem; /* 12px */
-  --radius-xl: 1rem;     /* 16px */
-  --radius-2xl: 1.5rem; /* 24px */
-  --radius-full: 9999px;
-
-  /* ── Shadows ────────────────────────────────── */
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
-  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.5);
-  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.6);
-  --shadow-glow-accent: 0 0 0 1px var(--color-accent), 0 0 20px var(--color-accent-glow);
-  --shadow-glow-green: 0 0 20px var(--color-green-glow);
-  --shadow-glow-red: 0 0 20px var(--color-red-glow);
-  --shadow-glow-amber: 0 0 20px var(--color-amber-glow);
-
-  /* ── Transitions ─────────────────────────────── */
-  --duration-fast: 100ms;
-  --duration-normal: 180ms;
-  --duration-slow: 280ms;
-  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
-  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
-  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
-
-  /* ── Z-index ────────────────────────────────── */
-  --z-base: 0;
-  --z-dropdown: 100;
-  --z-sticky: 200;
-  --z-overlay: 300;
-  --z-modal: 400;
-}
+@import './design-tokens.css';
 
 /* ============================================
    Global Base Styles
@@ -123,6 +17,14 @@ html {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
+}
+
+[data-theme="light"] {
+  color-scheme: light;
+}
+
+[data-theme="dark"] {
+  color-scheme: dark;
 }
 
 body {

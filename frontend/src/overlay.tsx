@@ -3,9 +3,14 @@ import { useState, useEffect, useRef } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { Copy, X, Check } from "lucide-react";
+import { useOverlayTranslation } from "./i18n";
+import { applyThemeToDocument, getThemePref, installThemeListeners } from "./theme";
+import "./styles/overlay-base.css";
+import "./styles/motion.css";
 import "./overlay.css";
 
 function Overlay() {
+  const { t } = useOverlayTranslation();
   const [status, setStatus] = useState("idle");
   const [result, setResult] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -13,6 +18,11 @@ function Overlay() {
   const [displayedStatus, setDisplayedStatus] = useState<string | null>(null);
   const prevStatusRef = useRef("idle");
   const exitTimerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    applyThemeToDocument(getThemePref());
+    return installThemeListeners(() => applyThemeToDocument(getThemePref()));
+  }, []);
 
   useEffect(() => {
     const unlistenStatus = listen<string>("pipeline-status", (event) => {
@@ -51,7 +61,7 @@ function Overlay() {
     });
     const unlistenResult = listen<string>("transcription-result", (event) => {
       setResult(event.payload);
-      setCopied(true);
+      setCopied(false);
     });
     return () => {
       unlistenStatus.then((fn) => fn());
@@ -102,12 +112,12 @@ function Overlay() {
               {copied ? (
                 <>
                   <Check size={13} />
-                  <span>已复制</span>
+                  <span>{t("overlay.copied")}</span>
                 </>
               ) : (
                 <>
                   <Copy size={13} />
-                  <span>复制</span>
+                  <span>{t("overlay.copy")}</span>
                 </>
               )}
             </button>
@@ -128,7 +138,7 @@ function Overlay() {
             <div className="recording-glow" />
             <div className="recording-core" />
           </div>
-          <span className="label">录音中...</span>
+          <span className="label">{t("overlay.recording")}</span>
         </>
       )}
       {displayedStatus === "processing" && (
@@ -136,7 +146,7 @@ function Overlay() {
           <div className="processing-indicator">
             <div className="processing-ring" />
           </div>
-          <span className="label">处理中...</span>
+          <span className="label">{t("overlay.processing")}</span>
         </>
       )}
     </div>

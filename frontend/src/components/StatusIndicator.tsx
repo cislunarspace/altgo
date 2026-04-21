@@ -87,7 +87,6 @@ export function StatusIndicator({ status, size = 'md' }: StatusIndicatorProps) {
             cx={center}
             cy={center}
             r={radius}
-            stroke="rgba(255,255,255,0.05)"
             strokeWidth={stroke}
           />
           <circle

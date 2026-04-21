@@ -41,6 +41,10 @@ pub struct Config {
 pub struct KeyListenerConfig {
     /// 监听的按键名称（如 `ISO_Level3_Shift`、`Alt_R`）
     pub key_name: String,
+    /// Linux evtest 回退路径使用的 evdev 键码（由「按下以设置」捕获）；`None` 时沿用 Alt 预设的启发式映射
+    pub linux_evdev_code: Option<u16>,
+    /// Windows 虚拟键码；`None` 时由 `key_name` 白名单解析
+    pub windows_vk: Option<i32>,
     /// 长按阈值（毫秒），超过此时间视为长按录音
     pub long_press_threshold_ms: u64,
     /// 双击间隔（毫秒），两次点击在此时间窗口内视为双击
@@ -79,6 +83,8 @@ impl Default for KeyListenerConfig {
     fn default() -> Self {
         Self {
             key_name: "ISO_Level3_Shift".to_string(),
+            linux_evdev_code: None,
+            windows_vk: None,
             long_press_threshold_ms: 200,
             double_click_interval_ms: 300,
             debounce_window_ms: 100,
@@ -361,6 +367,8 @@ mod tests {
     fn test_default_config() {
         let cfg = Config::default();
         assert_eq!(cfg.key_listener.key_name, "ISO_Level3_Shift");
+        assert!(cfg.key_listener.linux_evdev_code.is_none());
+        assert!(cfg.key_listener.windows_vk.is_none());
         assert_eq!(cfg.key_listener.long_press_threshold_ms, 200);
         assert_eq!(cfg.key_listener.debounce_window_ms, 100);
         assert_eq!(cfg.key_listener.poll_interval_ms, 30);

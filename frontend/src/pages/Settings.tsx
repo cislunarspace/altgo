@@ -14,12 +14,19 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronRight,
+  Palette,
+  Keyboard,
 } from "lucide-react";
+import { useTheme, type ThemePref } from "../ThemeContext";
 import "../styles/components.css";
 
 /** Matches backend ConfigResponse (camelCase). */
 interface AppConfig {
   keyName: string;
+  /** Linux evdev 键码；由「按下以设置」写入 */
+  linuxEvdevCode: number | null;
+  /** Windows 虚拟键码 */
+  windowsVk: number | null;
   language: string;
   engine: string;
   model: string;
@@ -52,8 +59,35 @@ function formatSize(bytes: number): string {
   return `${Math.round(mb)} MB`;
 }
 
+function saveRequestBody(c: AppConfig) {
+  return {
+    keyName: c.keyName,
+    linuxEvdevCode: c.linuxEvdevCode,
+    windowsVk: c.windowsVk,
+    language: c.language,
+    engine: c.engine,
+    model: c.model,
+    apiKey: c.transcriberApiKey,
+    apiBaseUrl: c.apiBaseUrl,
+    polishLevel: c.polishLevel,
+    polishModel: c.polishModel,
+    polishApiKey: c.polisherApiKey,
+    polishApiBaseUrl: c.polishApiBaseUrl,
+    guiLanguage: c.guiLanguage,
+  };
+}
+
+function normalizeConfig(c: AppConfig): AppConfig {
+  return {
+    ...c,
+    linuxEvdevCode: c.linuxEvdevCode ?? null,
+    windowsVk: c.windowsVk ?? null,
+  };
+}
+
 export default function Settings() {
   const { t, setLang } = useTranslation();
+  const { themePref, setTheme } = useTheme();
   const [config, setConfig] = useState<AppConfig | null>(null);
   const [models, setModels] = useState<ModelEntry[]>([]);
   const [resolvedPath, setResolvedPath] = useState<string | null | undefined>(undefined);
@@ -63,6 +97,7 @@ export default function Settings() {
   const [message, setMessage] = useState<"saved" | string>("");
   const [polishOpen, setPolishOpen] = useState(false);
   const [advancedPath, setAdvancedPath] = useState(false);
+  const [keyCapturing, setKeyCapturing] = useState(false);
   const progress = useModelDownloadProgress();
 
   const refreshModels = useCallback(() => {
@@ -82,7 +117,7 @@ export default function Settings() {
   useEffect(() => {
     invoke<AppConfig>("get_config")
       .then((c) => {
-        setConfig(c);
+        setConfig(normalizeConfig(c));
         refreshResolved(c.model, c.engine);
       })
       .catch(() => {});
@@ -104,19 +139,7 @@ export default function Settings() {
     setMessage("");
     try {
       await invoke("save_config", {
-        req: {
-          keyName: config.keyName,
-          language: config.language,
-          engine: config.engine,
-          model: config.model,
-          apiKey: config.transcriberApiKey,
-          apiBaseUrl: config.apiBaseUrl,
-          polishLevel: config.polishLevel,
-          polishModel: config.polishModel,
-          polishApiKey: config.polisherApiKey,
-          polishApiBaseUrl: config.polishApiBaseUrl,
-          guiLanguage: config.guiLanguage,
-        },
+        req: saveRequestBody(config),
       });
       setLang(config.guiLanguage);
       setMessage("saved");
@@ -140,19 +163,7 @@ export default function Settings() {
       const next = { ...config, engine: "local", model: name };
       setConfig(next);
       await invoke("save_config", {
-        req: {
-          keyName: next.keyName,
-          language: next.language,
-          engine: "local",
-          model: name,
-          apiKey: next.transcriberApiKey,
-          apiBaseUrl: next.apiBaseUrl,
-          polishLevel: next.polishLevel,
-          polishModel: next.polishModel,
-          polishApiKey: next.polisherApiKey,
-          polishApiBaseUrl: next.polishApiBaseUrl,
-          guiLanguage: next.guiLanguage,
-        },
+        req: saveRequestBody({ ...next, model: name }),
       });
       setLang(next.guiLanguage);
       setMessage("saved");
@@ -184,19 +195,7 @@ export default function Settings() {
     setMessage("");
     try {
       await invoke("save_config", {
-        req: {
-          keyName: next.keyName,
-          language: next.language,
-          engine: "local",
-          model: name,
-          apiKey: next.transcriberApiKey,
-          apiBaseUrl: next.apiBaseUrl,
-          polishLevel: next.polishLevel,
-          polishModel: next.polishModel,
-          polishApiKey: next.polisherApiKey,
-          polishApiBaseUrl: next.polishApiBaseUrl,
-          guiLanguage: next.guiLanguage,
-        },
+        req: saveRequestBody({ ...next, model: name }),
       });
       setLang(next.guiLanguage);
       setMessage("saved");
@@ -206,6 +205,36 @@ export default function Settings() {
       setMessage(String(e));
     } finally {
       setSaving(false);
+    }
+  };
+
+  const captureActivationKey = async () => {
+    if (!config) return;
+    setKeyCapturing(true);
+    setMessage("");
+    try {
+      const r = await invoke<{
+        keyName: string;
+        linuxEvdevCode?: number | null;
+        windowsVk?: number | null;
+      }>("capture_activation_key");
+      const next: AppConfig = {
+        ...config,
+        keyName: r.keyName,
+        linuxEvdevCode: r.linuxEvdevCode ?? null,
+        windowsVk: r.windowsVk ?? null,
+      };
+      setConfig(next);
+      await invoke("save_config", { req: saveRequestBody(next) });
+      setLang(next.guiLanguage);
+      setMessage("saved");
+      refreshResolved(next.model, next.engine);
+      refreshModels();
+    } catch (e) {
+      setMessage(String(e));
+      await invoke("start_pipeline").catch(() => {});
+    } finally {
+      setKeyCapturing(false);
     }
   };
 
@@ -471,7 +500,16 @@ export default function Settings() {
                 }
                 onChange={(e) => {
                   if (e.target.value === "__custom__") return;
-                  update("keyName", e.target.value);
+                  setConfig((prev) =>
+                    prev
+                      ? {
+                          ...prev,
+                          keyName: e.target.value,
+                          linuxEvdevCode: null,
+                          windowsVk: null,
+                        }
+                      : prev,
+                  );
                 }}
               >
                 {KEY_PRESETS.map((p) => (
@@ -491,11 +529,37 @@ export default function Settings() {
                   type="text"
                   className="settings-input"
                   value={config.keyName}
-                  onChange={(e) => update("keyName", e.target.value)}
+                  onChange={(e) =>
+                    setConfig((prev) =>
+                      prev
+                        ? {
+                            ...prev,
+                            keyName: e.target.value,
+                            linuxEvdevCode: null,
+                            windowsVk: null,
+                          }
+                        : prev,
+                    )
+                  }
                 />
               </div>
             </div>
           )}
+          <div className="settings-field">
+            <span className="settings-field-label-text">{t("settings.capture_activation")}</span>
+            <div className="settings-field-control">
+              <button
+                type="button"
+                className="settings-btn settings-btn-secondary"
+                onClick={() => void captureActivationKey()}
+                disabled={saving || keyCapturing}
+              >
+                <Keyboard size={14} />
+                {keyCapturing ? t("settings.capture_waiting") : t("settings.capture_activation_short")}
+              </button>
+            </div>
+          </div>
+          <p className="settings-hint">{t("settings.capture_activation_lead")}</p>
         </section>
 
         {/* Polishing — collapsible */}
@@ -526,6 +590,7 @@ export default function Settings() {
                   </select>
                 </div>
               </div>
+              <p className="settings-hint settings-hint--polish">{t("settings.polish_level_hint")}</p>
               <div className="settings-field">
                 <span className="settings-field-label-text">{t("settings.api_url")}</span>
                 <div className="settings-field-control">
@@ -566,6 +631,29 @@ export default function Settings() {
           )}
         </section>
 
+        {/* Appearance */}
+        <section className="settings-section">
+          <h3 className="settings-section-title">
+            <Palette size={14} />
+            {t("settings.appearance")}
+          </h3>
+          <p className="settings-section-lead">{t("settings.appearance_lead")}</p>
+          <div className="settings-field">
+            <span className="settings-field-label-text">{t("settings.theme")}</span>
+            <div className="settings-field-control">
+              <select
+                className="settings-select"
+                value={themePref}
+                onChange={(e) => setTheme(e.target.value as ThemePref)}
+              >
+                <option value="system">{t("settings.theme_system")}</option>
+                <option value="light">{t("settings.theme_light")}</option>
+                <option value="dark">{t("settings.theme_dark")}</option>
+              </select>
+            </div>
+          </div>
+        </section>
+
         {/* UI language */}
         <section className="settings-section">
           <h3 className="settings-section-title">
@@ -592,6 +680,10 @@ export default function Settings() {
             <Sparkles size={14} />
             {t("settings.about")}
           </h3>
+          <div className="settings-about-brand">
+            <img src="/altgo-logo.svg" alt="" width={40} height={40} className="settings-about-logo" />
+            <p className="settings-about-tagline">{t("settings.about_tagline")}</p>
+          </div>
           <div className="settings-field">
             <span className="settings-field-label-text">{t("settings.version")}</span>
             <div className="settings-field-control">

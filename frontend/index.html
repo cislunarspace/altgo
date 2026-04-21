@@ -1,9 +1,21 @@
 <!doctype html>
 <html lang="zh-CN">
   <head>
+    <script>
+      (function () {
+        try {
+          var k = "altgo-theme-pref";
+          var p = localStorage.getItem(k) || "system";
+          var dark =
+            p === "dark" ? true : p === "light" ? false : window.matchMedia("(prefers-color-scheme: dark)").matches;
+          document.documentElement.dataset.theme = dark ? "dark" : "light";
+        } catch (e) {}
+      })();
+    </script>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>altgo</title>
+    <link rel="icon" href="/altgo-logo.svg" type="image/svg+xml" />
   </head>
   <body>
     <div id="root"></div>

@@ -52,6 +52,7 @@ export default function Home() {
         <div className="home-idle">
           <StatusIndicator status={mappedStatus} size="lg" />
           <p className="home-hint">{t("main.hint")}</p>
+          <p className="home-hint-clipboard">{t("main.hint_clipboard")}</p>
           {keyBackend && (
             <p className="home-key-backend">{t(`main.key_backend_${keyBackend}`)}</p>
           )}
@@ -68,8 +69,8 @@ export default function Home() {
           >
             {copied ? (
               <>
-                <Check size={16} color="var(--color-accent-green)" />
-                <span style={{ color: 'var(--color-accent-green)' }}>已复制</span>
+                <Check size={16} color="var(--color-green)" />
+                <span className="home-copy-done">{t("overlay.copied")}</span>
               </>
             ) : (
               <>

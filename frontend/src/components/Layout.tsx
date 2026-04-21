@@ -15,7 +15,13 @@ export default function Layout({ children }: LayoutProps) {
       <header className="layout-header">
         <div className="layout-header-left">
           <div className="layout-logo-wrapper">
-            <Mic size={20} className="layout-logo-icon" />
+            <img
+              src="/altgo-logo.svg"
+              alt=""
+              width={28}
+              height={28}
+              className="layout-logo-mark"
+            />
             <span className="layout-logo">altgo</span>
           </div>
           <span className="layout-subtitle">{t("title.subtitle")}</span>

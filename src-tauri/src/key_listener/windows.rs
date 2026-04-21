@@ -6,6 +6,7 @@
 //! 将常见的按键名称（如 `ISO_Level3_Shift`、`Alt_R`）映射到 Windows 虚拟键码。
 
 use super::KeyEvent;
+use crate::config::KeyListenerConfig;
 use anyhow::{Context, Result};
 use std::io::BufRead;
 use std::os::windows::process::CommandExt;
@@ -22,6 +23,7 @@ const CREATE_NO_WINDOW: u32 = 0x08000000;
 /// 使用 PowerShell + `GetAsyncKeyState` 进行按键状态轮询。
 pub struct WindowsListener {
     key_name: String,
+    windows_vk: Option<i32>,
     poll_interval_ms: u64,
     running: Arc<AtomicBool>,
     child: Option<Child>,
@@ -29,7 +31,7 @@ pub struct WindowsListener {
 
 impl WindowsListener {
     /// 创建新的 Windows 监听器，验证 PowerShell 是否可用。
-    pub fn new(key_name: &str) -> Result<Self> {
+    pub fn new(cfg: &KeyListenerConfig) -> Result<Self> {
         // Verify PowerShell is available.
         Command::new("powershell")
             .arg("-Command")
@@ -40,8 +42,9 @@ impl WindowsListener {
             .context("PowerShell not found")?;
 
         Ok(Self {
-            key_name: key_name.to_string(),
-            poll_interval_ms: 50, // default, can be set before start()
+            key_name: cfg.key_name.clone(),
+            windows_vk: cfg.windows_vk,
+            poll_interval_ms: cfg.poll_interval_ms.max(1),
             running: Arc::new(AtomicBool::new(false)),
             child: None,
         })
@@ -139,6 +142,9 @@ while ($true) {{
     }
 
     fn resolve_vkcode(&self) -> Result<i32> {
+        if let Some(vk) = self.windows_vk {
+            return Ok(vk);
+        }
         // Map common key names to Windows virtual key codes.
         match self.key_name.as_str() {
             "ISO_Level3_Shift" | "Alt_R" | "RightAlt" => Ok(0xA5), // VK_RMENU
