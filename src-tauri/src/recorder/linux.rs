@@ -88,8 +88,14 @@ impl PulseRecorder {
                 }
             }
 
-            // Kill parecord when recording stops.
+            // Stop parecord and drain remaining audio data from the pipe.
             let _ = child.kill();
+            while let Ok(n) = reader.read(&mut chunk) {
+                if n == 0 {
+                    break;
+                }
+                buffer.write(&chunk[..n]);
+            }
             let _ = child.wait();
         });
 
