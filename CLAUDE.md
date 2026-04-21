@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**altgo** is a cross-platform desktop voice-to-text tool written in Rust (product docs target **Linux** first, Ubuntu 20.04 tested). Hold the right Alt key to record speech, release to transcribe with **local whisper.cpp**, optionally polish via any **OpenAI-compatible LLM** API, and show results in a **floating overlay** for user-initiated copy (not auto-clipboard by default in end-user messaging). Code may still include optional HTTP Whisper API paths for advanced use.
+**altgo** is a cross-platform desktop voice-to-text tool written in Rust (product docs target **Linux** first, Ubuntu 20.04 tested). Hold the right Alt key to record speech, release to transcribe with **local whisper.cpp**, optionally polish via any **OpenAI-compatible LLM** API, and show results in a **floating overlay** for user-initiated copy (not auto-clipboard by default in end-user messaging). Successful transcriptions (raw + displayed text) are **persisted as text-only history** in a local JSON file (`~/.config/altgo/history.json`); audio is never stored. Code may still include optional HTTP Whisper API paths for advanced use.
 
 ## Build & Test Commands
 
@@ -37,13 +37,14 @@ Tauri desktop app with core logic in `src-tauri/src/`:
 Core pipeline driven by keyboard events:
 
 ```
-Key Listener → State Machine → Recorder → Transcriber → Polisher → Output
+Key Listener → State Machine → Recorder → Transcriber → Polisher → Output (+ History JSON)
 ```
 
 ### Modules (in `src-tauri/src/`)
 
-- **`lib.rs`** — Tauri app entry point, `AppState` struct, run loop setup.
-- **`cmd.rs`** — Tauri commands exposed to frontend via IPC (get_config, save_config, capture_activation_key, start_pipeline, stop_pipeline, get_status, copy_text, hide_overlay).
+- **`lib.rs`** — Tauri app entry point, `AppState` struct (`config_path`, **`history_path`**, pipeline handle, pipeline status), run loop setup.
+- **`cmd.rs`** — Tauri commands exposed to frontend via IPC: config (`get_config`, `save_config`, `capture_activation_key`), pipeline (`start_pipeline`, `stop_pipeline`, `get_status`), overlay (`copy_text`, `hide_overlay`), models (`list_models`, `download_model`, `delete_model`, `resolve_model`), **history** (`list_history`, `delete_history_entries`, `clear_history`, `polish_history_entry`). The voice pipeline (`run_pipeline`) appends a row when `raw_text` is non-empty, emits `history-updated` after a successful write, and prefers showing polished text only when it is non-empty after trim.
+- **`history.rs`** — Append/list/delete/clear/update for `history.json` (camelCase JSON, `Mutex` for file I/O). Does not store audio.
 - **`config.rs`** — TOML config loading with `serde(default)` for every field. API keys overridable via env vars (e.g. `ALTGO_POLISHER_API_KEY`; transcriber key if API engine used).
 - **`state_machine.rs`** — 5-state enum (`Idle`, `PotentialPress`, `Recording`, `WaitSecondClick`, `ContinuousRecording`). Long-press records, double-click enters continuous mode. Uses `tokio::select!` to race key events vs timeouts.
 - **`audio.rs`** — Thread-safe PCM buffer (`Mutex<Vec<u8>>`), WAV encode/decode (44-byte header + PCM).
@@ -73,7 +74,8 @@ Key Listener → State Machine → Recorder → Transcriber → Polisher → Out
 │   └── StatusIndicator.tsx # Status indicator
 ├── pages/
 │   ├── Home.tsx            # Home page
-│   └── Settings.tsx      # Settings page
+│   ├── History.tsx         # Transcription history (select / delete / clear / copy / polish one row)
+│   └── Settings.tsx        # Settings page
 ├── hooks/
 │   └── useTauri.ts         # Tauri integration hook
 ├── i18n/                   # Internationalization
@@ -96,6 +98,8 @@ Key Listener → State Machine → Recorder → Transcriber → Polisher → Out
 
 **Config** — Lives at `~/.config/altgo/altgo.toml`. Template at `configs/altgo.toml`. All fields have serde defaults so a partial config works.
 
+**Transcription history** — `~/.config/altgo/history.json` (same directory as config). Entries: `id`, `createdAtMs`, `rawText`, `text`. The floating window and frontend listen for the **`history-updated`** event to refresh lists.
+
 ### Platform System Requirements
 
 - **Linux**: `xinput`, `xmodmap`, `parecord`, `xclip`/`xsel`/`wl-copy`, `notify-send`
@@ -111,6 +115,6 @@ cd frontend && npm install
 ## Testing Notes
 
 - Unit tests live in `#[cfg(test)]` modules within each source file.
-- `config.rs`, `audio.rs`, and `model.rs` have comprehensive tests.
+- `config.rs`, `audio.rs`, `model.rs`, and `history.rs` have comprehensive tests.
 - `transcriber.rs` and `polisher.rs` use `mockito` for HTTP-level mocking.
 - Platform-specific modules have minimal tests (construction/smoke tests only).

@@ -10,22 +10,29 @@ title: 架构设计
 altgo 采用线性流水线架构，由键盘事件驱动：
 
 ```
-按键监听 → 状态机 → 录音 → ASR 转写 → LLM 润色 → 剪贴板 + 通知
+按键监听 → 状态机 → 录音 → ASR 转写 → LLM 润色 → 剪贴板 + 通知 + 本地转写历史（纯文本 JSON）
 ```
+
+**转写历史**：仅保存文本（原始转写 `rawText` 与当前展示 `text`），不保存录音；数据文件为 `~/.config/altgo/history.json`。转写成功后（以 `raw_text` 非空为准）写入一条记录并广播 `history-updated` 事件，供主窗口历史页刷新。
 
 各模块之间通过 `tokio::sync::mpsc` 异步通道解耦，每个处理阶段作为独立的 `tokio::spawn` 任务运行。
 
 ## 模块结构
 
+以下为 Tauri 核心目录 `src-tauri/src/`（节选）：
+
 ```
-src/
-├── main.rs            # 入口，CLI 解析，事件循环
+src-tauri/src/
+├── main.rs            # 薄入口，调用 `lib::run()`
+├── lib.rs             # Tauri 构建入口；AppState（含 history_path）
+├── cmd.rs             # IPC：配置、管道、模型、转写历史等
 ├── config.rs          # TOML 配置加载（serde）
+├── history.rs         # 转写历史 persistence（history.json）
 ├── state_machine.rs   # 按键状态机
 ├── audio.rs           # WAV 编解码，线程安全 Buffer
 ├── transcriber.rs     # Whisper API + 本地 whisper.cpp
 ├── polisher.rs        # LLM 文本润色
-├── pipeline.rs        # 音频处理流水线
+├── pipeline.rs        # 音频处理核心（转写 + 润色）
 ├── key_listener/      # 跨平台按键监听
 │   ├── mod.rs         # 公共接口 + 去抖逻辑
 │   ├── linux.rs       # xinput test-xi2
@@ -90,9 +97,15 @@ pub type PlatformRecorder = WindowsRecorder;
 - 使用 OpenAI 兼容 chat API
 - 指数退避重试（最多 3 次）
 
+历史页可对单条记录基于 **`rawText`** 再次调用当前润色配置（`polish_history_entry`）。
+
+## 前端路由（主窗口）
+
+- React Router Hash 模式：`/` 首页、`/history` 历史、`/settings` 设置。
+
 ## 测试策略
 
-- `config.rs` / `audio.rs` — 全面的单元测试
+- `config.rs` / `audio.rs` / `history.rs` — 全面的单元测试
 - `transcriber.rs` / `polisher.rs` — 使用 `mockito` 进行 HTTP 级别 mock
 - 平台模块 — 仅构造/冒烟测试
 - CI 在 Linux 和 Windows 两个平台上运行：`fmt`、`clippy`、`build --release`、`test`
