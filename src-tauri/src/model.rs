@@ -8,9 +8,30 @@ use console::style;
 use dialoguer::{Confirm, Select};
 use futures_util::StreamExt;
 use indicatif::{ProgressBar, ProgressStyle};
+use reqwest::Client;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
+use std::time::Duration;
 
 const MODEL_BASE_URL: &str = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main";
+
+/// Hugging Face 实际对象大小（用于进度条；与 Content-Length 接近即可）。
+const GGML_MEDIUM_BYTES: u64 = 1533763059;
+
+fn model_download_client() -> &'static Client {
+    static CLIENT: OnceLock<Client> = OnceLock::new();
+    CLIENT.get_or_init(|| {
+        Client::builder()
+            .user_agent(concat!(
+                "altgo/",
+                env!("CARGO_PKG_VERSION"),
+                " (whisper.cpp ggml model download)"
+            ))
+            .connect_timeout(Duration::from_secs(120))
+            .build()
+            .expect("reqwest client for model downloads")
+    })
+}
 
 /// 已知模型信息。
 pub struct ModelInfo {
@@ -42,7 +63,7 @@ const MODELS: &[ModelInfo] = &[
     ModelInfo {
         name: "medium",
         filename: "ggml-medium.bin",
-        size_bytes: 1500 * 1024 * 1024,
+        size_bytes: GGML_MEDIUM_BYTES,
         description: "推荐中文使用",
     },
     ModelInfo {
@@ -156,7 +177,9 @@ where
 
     let url = format!("{}/{}", MODEL_BASE_URL, info.filename);
 
-    let response = reqwest::get(&url)
+    let response = model_download_client()
+        .get(&url)
+        .send()
         .await
         .with_context(|| format!("下载模型失败: {}", url))?;
 
@@ -165,6 +188,7 @@ where
     }
 
     let total_size = response.content_length().unwrap_or(info.size_bytes);
+    on_progress(0, total_size);
     let tmp_path = dest.with_extension("bin.tmp");
     let mut file = std::fs::File::create(&tmp_path).with_context(|| "创建临时文件失败")?;
 
@@ -215,7 +239,9 @@ pub async fn download(name: &str) -> Result<PathBuf> {
         format_size(info.size_bytes)
     );
 
-    let response = reqwest::get(&url)
+    let response = model_download_client()
+        .get(&url)
+        .send()
         .await
         .with_context(|| format!("下载模型失败: {}", url))?;
 

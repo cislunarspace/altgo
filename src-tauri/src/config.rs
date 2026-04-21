@@ -39,7 +39,7 @@ pub struct Config {
 #[derive(Debug, Deserialize, Clone, serde::Serialize)]
 #[serde(default)]
 pub struct KeyListenerConfig {
-    /// 监听的按键名称（如 `ISO_Level3_Shift`、`Alt_R`）
+    /// 监听的按键名称（如 `Alt_L`、`Alt_R`），与 xmodmap keysym 一致
     pub key_name: String,
     /// Linux evtest 回退路径使用的 evdev 键码（由「按下以设置」捕获）；`None` 时沿用 Alt 预设的启发式映射
     pub linux_evdev_code: Option<u16>,
@@ -82,7 +82,7 @@ impl KeyListenerConfig {
 impl Default for KeyListenerConfig {
     fn default() -> Self {
         Self {
-            key_name: "ISO_Level3_Shift".to_string(),
+            key_name: "Alt_R".to_string(),
             linux_evdev_code: None,
             windows_vk: None,
             long_press_threshold_ms: 200,
@@ -366,7 +366,7 @@ mod tests {
     #[test]
     fn test_default_config() {
         let cfg = Config::default();
-        assert_eq!(cfg.key_listener.key_name, "ISO_Level3_Shift");
+        assert_eq!(cfg.key_listener.key_name, "Alt_R");
         assert!(cfg.key_listener.linux_evdev_code.is_none());
         assert!(cfg.key_listener.windows_vk.is_none());
         assert_eq!(cfg.key_listener.long_press_threshold_ms, 200);

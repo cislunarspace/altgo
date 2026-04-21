@@ -34,6 +34,13 @@ pub fn detect_clipboard_tool() -> Option<ClipboardTool> {
         if which("wl-copy") {
             return Some(ClipboardTool::WlCopy);
         }
+        // Wayland 下没有 wl-copy 时，回退到 xclip/xsel（可能通过 XWayland 工作）
+        if which("xclip") {
+            return Some(ClipboardTool::XClip);
+        }
+        if which("xsel") {
+            return Some(ClipboardTool::XSel);
+        }
         return None;
     }
 

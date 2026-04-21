@@ -19,7 +19,7 @@ use tokio::sync::mpsc;
 /// so we cache the entire keycode table on first use.
 static XMODMAP_CACHE: OnceLock<std::collections::HashMap<String, u8>> = OnceLock::new();
 
-/// evdev keycode for Alt keys (used by evtest fallback).
+/// evdev keycode for Alt keys（evtest 回退；与 `linux/input-event-codes.h` 一致）
 const EVDEV_KEY_ALT: u16 = 56; // KEY_LEFTALT
 const EVDEV_KEY_ALT_R: u16 = 100; // KEY_RIGHTALT
 
@@ -102,25 +102,23 @@ impl X11Listener {
 
     /// 开始监听按键事件，返回事件通道与后端标识（`"xinput"` / `"evtest"`）。
     pub fn start(&mut self) -> Result<(mpsc::UnboundedReceiver<KeyEvent>, &'static str)> {
-        // Default config uses ISO_Level3_Shift (typically the right Alt / AltGr key).
-        // evdev fallback maps names to KEY_LEFTALT / KEY_RIGHTALT.
-        let evdev_keycode = if let Some(c) = self.linux_evdev_code {
-            c
+        // evtest：有捕获码则只认该码；否则按 keysym 映射到 evdev（左/右 Alt 严格区分）。
+        let allowed_evdev: std::sync::Arc<[u16]> = if let Some(c) = self.linux_evdev_code {
+            std::sync::Arc::from([c])
         } else {
-            match self.key_name.as_str() {
+            let code = match self.key_name.as_str() {
                 "Alt_L" => EVDEV_KEY_ALT,
                 "Alt_R" | "ISO_Level3_Shift" | "AltGr" => EVDEV_KEY_ALT_R,
                 _ => {
                     tracing::warn!(
-                        "key_name '{}' not mapped for evtest fallback; defaulting to RightAlt",
+                        "key_name '{}' not mapped for evtest fallback; defaulting to KEY_RIGHTALT",
                         self.key_name
                     );
                     EVDEV_KEY_ALT_R
                 }
-            }
+            };
+            std::sync::Arc::from([code])
         };
-        let strict_evtest_match = self.linux_evdev_code.is_some();
-
         let display_set = std::env::var("DISPLAY")
             .map(|s| !s.is_empty())
             .unwrap_or(false);
@@ -135,7 +133,7 @@ impl X11Listener {
             tracing::info!(
                 "Wayland session: trying evtest first (xinput on XWayland typically misses keyboard)"
             );
-            match self.try_start_evtest(evdev_keycode, strict_evtest_match) {
+            match self.try_start_evtest(allowed_evdev.clone()) {
                 Ok(rx) => return Ok((rx, "evtest")),
                 Err(e) => {
                     tracing::warn!(
@@ -191,19 +189,18 @@ impl X11Listener {
         }
 
         tracing::info!("starting evtest for key events");
-        let rx = self.try_start_evtest(evdev_keycode, strict_evtest_match)?;
+        let rx = self.try_start_evtest(allowed_evdev)?;
         Ok((rx, "evtest"))
     }
 
     fn try_start_evtest(
         &mut self,
-        evdev_keycode: u16,
-        strict_match: bool,
+        allowed_evdev: std::sync::Arc<[u16]>,
     ) -> Result<mpsc::UnboundedReceiver<KeyEvent>> {
         let (tx, rx) = mpsc::unbounded_channel();
         self.running.store(true, Ordering::SeqCst);
         let running = Arc::clone(&self.running);
-        if let Err(e) = self.start_evtest_fallback(evdev_keycode, strict_match, tx, running) {
+        if let Err(e) = self.start_evtest_fallback(allowed_evdev, tx, running) {
             self.running.store(false, Ordering::SeqCst);
             return Err(e);
         }
@@ -297,8 +294,7 @@ impl X11Listener {
     /// evtest 需要读取 /dev/input/event* 设备，需要用户属于 input 组。
     fn start_evtest_fallback(
         &mut self,
-        evdev_keycode: u16,
-        strict_match: bool,
+        allowed_evdev: std::sync::Arc<[u16]>,
         tx: tokio::sync::mpsc::UnboundedSender<KeyEvent>,
         running: Arc<AtomicBool>,
     ) -> Result<()> {
@@ -319,6 +315,7 @@ impl X11Listener {
             let running = Arc::clone(&running);
             let tx = tx.clone();
             let device_path = device.clone();
+            let allowed = std::sync::Arc::clone(&allowed_evdev);
 
             std::thread::spawn(move || {
                 // evtest prints device info and all EV_* lines to stdout (not stderr).
@@ -360,13 +357,8 @@ impl X11Listener {
                         let Ok(code) = code_str.parse::<u16>() else {
                             continue;
                         };
-                        let key_matches = if strict_match {
-                            code == evdev_keycode
-                        } else {
-                            code == evdev_keycode
-                                || code == EVDEV_KEY_ALT
-                                || code == EVDEV_KEY_ALT_R
-                        };
+                        // 仅匹配允许的 evdev 码（通常为单个；捕获模式为按下的物理码）。
+                        let key_matches = allowed.contains(&code);
                         if key_matches {
                             let Some(value_tail) = line.split("value ").nth(1) else {
                                 continue;
@@ -455,13 +447,38 @@ impl X11Listener {
             ));
         }
 
-        keycode_map.get(&self.key_name).copied().ok_or_else(|| {
-            anyhow::anyhow!(
-                "keycode for '{}' not found in xmodmap output (key '{}' may not exist on this keyboard layout)",
-                self.key_name,
-                self.key_name
-            )
-        })
+        let candidates: &[&str] = match self.key_name.as_str() {
+            "Alt_L" => &["Alt_L"],
+            // 布局上可能只出现 Alt_R、ISO_Level3_Shift 或 AltGr 之一，任一对上即可。
+            "Alt_R" | "ISO_Level3_Shift" | "AltGr" => &["Alt_R", "ISO_Level3_Shift", "AltGr"],
+            _ => {
+                let name = self.key_name.as_str();
+                // 单元素切片：自定义 keysym 名
+                return keycode_map.get(name).copied().ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "keycode for '{}' not found in xmodmap output",
+                        self.key_name
+                    )
+                });
+            }
+        };
+
+        for name in candidates {
+            if let Some(&k) = keycode_map.get(*name) {
+                tracing::info!(
+                    keysym = %name,
+                    keycode = k,
+                    "resolved xmodmap keycode for trigger key"
+                );
+                return Ok(k);
+            }
+        }
+
+        Err(anyhow::anyhow!(
+            "keycode for trigger '{}' not found in xmodmap (tried: {:?})",
+            self.key_name,
+            candidates
+        ))
     }
 }
 

@@ -23,7 +23,10 @@ pub fn create_tray(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
         .on_menu_event(|app, event| match event.id().as_ref() {
             "show" => {
                 if let Some(window) = app.get_webview_window("main") {
+                    // `show` then `unminimize` works more reliably than the reverse on some Linux WMs
+                    // when the window was minimized to the taskbar / dock.
                     let _ = window.show();
+                    let _ = window.unminimize();
                     let _ = window.set_focus();
                 }
             }

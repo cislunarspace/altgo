@@ -5,12 +5,14 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-use serde::Serialize;
-use tauri::{AppHandle, Emitter, Manager, State};
+use serde::{Deserialize, Deserializer, Serialize};
+use tauri::{
+    AppHandle, Emitter, LogicalSize, Manager, Monitor, PhysicalPosition, PhysicalSize, State,
+};
 
 use crate::{
-    config, key_listener, output, pipeline, polisher, recorder, state_machine, transcriber,
-    AppState,
+    config, history, key_listener, output, pipeline, polisher, recorder, state_machine,
+    transcriber, AppState,
 };
 
 const OVERLAY_RECORDING_W: f64 = 200.0;
@@ -20,9 +22,17 @@ const OVERLAY_RESULT_H: f64 = 100.0;
 const OVERLAY_BOTTOM_OFFSET: f64 = 80.0;
 
 #[cfg(target_os = "windows")]
+#[repr(C)]
+struct WinPoint {
+    x: i32,
+    y: i32,
+}
+
+#[cfg(target_os = "windows")]
 #[link(name = "user32")]
 extern "system" {
     fn GetAsyncKeyState(vKey: i32) -> i16;
+    fn GetCursorPos(lpPoint: *mut WinPoint) -> i32;
 }
 
 #[cfg(target_os = "windows")]
@@ -52,33 +62,65 @@ fn resolve_vk_for_pipeline(cfg: &config::KeyListenerConfig) -> Result<i32, Strin
     resolve_vk_code(&cfg.key_name)
 }
 
-fn apply_json_opt_u16(target: &mut Option<u16>, patch: Option<serde_json::Value>) {
+fn apply_nested_opt_u16(target: &mut Option<u16>, patch: Option<Option<u16>>) {
     match patch {
         None => {}
-        Some(serde_json::Value::Null) => *target = None,
-        Some(serde_json::Value::Number(n)) => {
-            if let Some(u) = n.as_u64() {
-                if u <= u16::MAX as u64 {
-                    *target = Some(u as u16);
-                }
-            }
-        }
-        _ => {}
+        Some(None) => *target = None,
+        Some(Some(v)) => *target = Some(v),
     }
 }
 
-fn apply_json_opt_i32(target: &mut Option<i32>, patch: Option<serde_json::Value>) {
+fn apply_nested_opt_i32(target: &mut Option<i32>, patch: Option<Option<i32>>) {
     match patch {
         None => {}
-        Some(serde_json::Value::Null) => *target = None,
-        Some(serde_json::Value::Number(n)) => {
-            if let Some(v) = n.as_i64() {
-                if v >= i32::MIN as i64 && v <= i32::MAX as i64 {
-                    *target = Some(v as i32);
-                }
+        Some(None) => *target = None,
+        Some(Some(v)) => *target = Some(v),
+    }
+}
+
+/// 区分 JSON 中「字段缺失」与「`null`」：前者不修改配置，后者清除已保存的 evdev 键码。
+fn deserialize_opt_patch_u16<'de, D>(deserializer: D) -> Result<Option<Option<u16>>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let v = serde_json::Value::deserialize(deserializer)?;
+    match v {
+        serde_json::Value::Null => Ok(Some(None)),
+        serde_json::Value::Number(n) => {
+            let u = n
+                .as_u64()
+                .ok_or_else(|| serde::de::Error::custom("linux_evdev_code: expected number"))?;
+            if u > u16::MAX as u64 {
+                return Err(serde::de::Error::custom("linux_evdev_code out of range"));
             }
+            Ok(Some(Some(u as u16)))
         }
-        _ => {}
+        _ => Err(serde::de::Error::custom(
+            "linux_evdev_code: expected null or number",
+        )),
+    }
+}
+
+/// 同上，用于 Windows 虚拟键码。
+fn deserialize_opt_patch_i32<'de, D>(deserializer: D) -> Result<Option<Option<i32>>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let v = serde_json::Value::deserialize(deserializer)?;
+    match v {
+        serde_json::Value::Null => Ok(Some(None)),
+        serde_json::Value::Number(n) => {
+            let i = n
+                .as_i64()
+                .ok_or_else(|| serde::de::Error::custom("windows_vk: expected integer"))?;
+            if i < i32::MIN as i64 || i > i32::MAX as i64 {
+                return Err(serde::de::Error::custom("windows_vk out of range"));
+            }
+            Ok(Some(Some(i as i32)))
+        }
+        _ => Err(serde::de::Error::custom(
+            "windows_vk: expected null or number",
+        )),
     }
 }
 
@@ -102,55 +144,9 @@ fn emit_pipeline_status(
     }
 }
 
-/// Parse monitor geometry from xrandr --listmonitors output.
-/// Format: " <idx>: +[*]<name> <W>/<pw>x<H>/<ph>+<X>+<Y>  <output>"
-fn parse_monitor_geom(line: &str) -> Option<(f64, f64, f64, f64)> {
-    // Find the geometry part: look for pattern like "6144/697x3456/392+3840+0"
-    let line = line.trim_start();
-    // Skip "N: +*name " prefix — find the geometry after the second space
-    let mut spaces = 0;
-    let mut geom_start = 0;
-    for (i, c) in line.char_indices() {
-        if c == ' ' {
-            spaces += 1;
-            if spaces == 2 {
-                geom_start = i + 1;
-                break;
-            }
-        }
-    }
-    if geom_start == 0 {
-        return None;
-    }
-
-    // Find end of geometry (next space or end of line)
-    let geom_end = line[geom_start..]
-        .find(' ')
-        .map(|p| geom_start + p)
-        .unwrap_or(line.len());
-    let geom = &line[geom_start..geom_end];
-
-    // Parse "6144/697x3456/392+3840+0"
-    let (w_part, rest) = geom.split_once('x')?;
-    let w: f64 = w_part.split('/').next()?.parse().ok()?;
-
-    // rest = "3456/392+3840+0"
-    let parts: Vec<&str> = rest.split('+').collect();
-    if parts.len() < 3 {
-        return None;
-    }
-    let h: f64 = parts[0].split('/').next()?.parse().ok()?;
-    let x: f64 = parts[1].parse().ok()?;
-    let y: f64 = parts[2].parse().ok()?;
-
-    Some((x, y, w, h))
-}
-
-/// Get monitor info for the screen where the mouse cursor is.
-/// Returns (monitor_x, monitor_y, monitor_width, monitor_height).
+/// Linux: root-window mouse coordinates from `xdotool` (physical pixels).
 #[cfg(target_os = "linux")]
-fn get_focused_monitor_info() -> Option<(f64, f64, f64, f64)> {
-    // Use mouse position to determine which monitor the user is on
+fn mouse_position_physical() -> Option<(i32, i32)> {
     let mouse_out = std::process::Command::new("xdotool")
         .args(["getmouselocation", "--shell"])
         .output()
@@ -172,51 +168,65 @@ fn get_focused_monitor_info() -> Option<(f64, f64, f64, f64)> {
         }
     }
 
-    tracing::info!("mouse position: ({}, {})", mouse_x, mouse_y);
-
-    // Parse xrandr --listmonitors for reliable monitor geometry
-    let xrandr = std::process::Command::new("xrandr")
-        .args(["--listmonitors"])
-        .output()
-        .ok()?;
-
-    if !xrandr.status.success() {
-        return None;
-    }
-
-    let xrandr_str = String::from_utf8_lossy(&xrandr.stdout);
-
-    for line in xrandr_str.lines() {
-        if let Some((m_x, m_y, m_w, m_h)) = parse_monitor_geom(line) {
-            tracing::info!("monitor: x={}, y={}, w={}, h={}", m_x, m_y, m_w, m_h);
-            if mouse_x >= m_x as i32
-                && mouse_x < (m_x + m_w) as i32
-                && mouse_y >= m_y as i32
-                && mouse_y < (m_y + m_h) as i32
-            {
-                tracing::info!("matched monitor at ({}, {})", m_x, m_y);
-                return Some((m_x, m_y, m_w, m_h));
-            }
-        }
-    }
-
-    tracing::warn!("no monitor matched for mouse ({}, {})", mouse_x, mouse_y);
-    None
+    tracing::debug!("mouse position (physical): ({}, {})", mouse_x, mouse_y);
+    Some((mouse_x, mouse_y))
 }
 
 #[cfg(target_os = "windows")]
-fn get_focused_monitor_info() -> Option<(f64, f64, f64, f64)> {
+fn mouse_position_physical() -> Option<(i32, i32)> {
+    let mut pt = WinPoint { x: 0, y: 0 };
+    // SAFETY: GetCursorPos writes to a valid stack POINT; standard Win32 API.
+    let ok = unsafe { GetCursorPos(&mut pt) };
+    if ok == 0 {
+        return None;
+    }
+    Some((pt.x, pt.y))
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "windows")))]
+fn mouse_position_physical() -> Option<(i32, i32)> {
     None
 }
 
-fn position_overlay(overlay: &tauri::WebviewWindow, width: f64, height: f64) {
-    let _ = overlay.set_size(tauri::LogicalSize::new(width, height));
-
-    if let Some((screen_x, screen_y, screen_w, screen_h)) = get_focused_monitor_info() {
-        let x = screen_x + (screen_w - width) / 2.0;
-        let y = screen_y + screen_h - height - OVERLAY_BOTTOM_OFFSET;
-        let _ = overlay.set_position(tauri::LogicalPosition::new(x, y));
+/// Pick the monitor under the cursor using the same coordinate space as Tauri/GTK (`monitor_from_point`).
+/// Falls back to the primary monitor if the cursor cannot be read or no monitor contains the point.
+fn resolve_monitor_at_cursor(overlay: &tauri::WebviewWindow) -> Option<Monitor> {
+    if let Some((x, y)) = mouse_position_physical() {
+        match overlay.monitor_from_point(x as f64, y as f64) {
+            Ok(Some(m)) => return Some(m),
+            Ok(None) => tracing::debug!("monitor_from_point: no monitor for cursor ({}, {})", x, y),
+            Err(e) => tracing::warn!(error = %e, "monitor_from_point failed"),
+        }
+    } else {
+        tracing::debug!("mouse position unavailable; using primary monitor for overlay");
     }
+
+    overlay.primary_monitor().ok().flatten()
+}
+
+fn position_overlay(overlay: &tauri::WebviewWindow, width: f64, height: f64) {
+    let _ = overlay.set_size(LogicalSize::new(width, height));
+
+    let Some(monitor) = resolve_monitor_at_cursor(overlay) else {
+        tracing::warn!("no monitor available for overlay positioning");
+        return;
+    };
+
+    let scale = monitor.scale_factor();
+    let phys: PhysicalSize<u32> = LogicalSize::new(width, height).to_physical(scale);
+    let phys_w = phys.width as i32;
+    let phys_h = phys.height as i32;
+    let offset_phys = (OVERLAY_BOTTOM_OFFSET * scale).round() as i32;
+
+    let pos = monitor.position();
+    let size = monitor.size();
+    let mw = size.width as i32;
+    let mh = size.height as i32;
+
+    let x = pos.x + (mw - phys_w) / 2;
+    let y = pos.y + mh - phys_h - offset_phys;
+
+    let _ = overlay.set_position(PhysicalPosition::new(x, y));
 }
 
 #[derive(Serialize)]
@@ -257,14 +267,15 @@ pub async fn get_config(state: State<'_, AppState>) -> Result<ConfigResponse, St
     })
 }
 
-#[derive(serde::Deserialize)]
+#[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SaveConfigRequest {
     pub key_name: Option<String>,
-    #[serde(default)]
-    pub linux_evdev_code: Option<serde_json::Value>,
-    #[serde(default)]
-    pub windows_vk: Option<serde_json::Value>,
+    /// `None` = 请求中未带此字段（不修改）；`Some(None)` = JSON `null`（清除）；`Some(Some)` = 设置键码。
+    #[serde(default, deserialize_with = "deserialize_opt_patch_u16")]
+    pub linux_evdev_code: Option<Option<u16>>,
+    #[serde(default, deserialize_with = "deserialize_opt_patch_i32")]
+    pub windows_vk: Option<Option<i32>>,
     pub language: Option<String>,
     pub engine: Option<String>,
     pub model: Option<String>,
@@ -333,8 +344,8 @@ pub async fn save_config(
     if let Some(v) = req.key_name {
         cfg.key_listener.key_name = v;
     }
-    apply_json_opt_u16(&mut cfg.key_listener.linux_evdev_code, req.linux_evdev_code);
-    apply_json_opt_i32(&mut cfg.key_listener.windows_vk, req.windows_vk);
+    apply_nested_opt_u16(&mut cfg.key_listener.linux_evdev_code, req.linux_evdev_code);
+    apply_nested_opt_i32(&mut cfg.key_listener.windows_vk, req.windows_vk);
     if let Some(v) = req.language {
         cfg.transcriber.language = v;
     }
@@ -577,8 +588,11 @@ pub async fn run_pipeline(
         });
     }
 
+    // Must keep `PlatformListener` alive for the whole pipeline: its `Drop` stops xinput/evtest.
+    // Previously the listener lived only inside the block below and was dropped before the main
+    // loop — global keys were never delivered.
     #[cfg(not(target_os = "windows"))]
-    {
+    let _linux_key_listener = {
         let mut listener = match key_listener::PlatformListener::new(&cfg.key_listener) {
             Ok(l) => l,
             Err(e) => {
@@ -615,9 +629,9 @@ pub async fn run_pipeline(
                     }
                 }
             }
-            drop(listener);
         });
-    }
+        listener
+    };
 
     let (key_tx, key_rx) = tokio::sync::mpsc::unbounded_channel();
     let debounce_window = cfg.key_listener.debounce_window();
@@ -690,9 +704,11 @@ pub async fn run_pipeline(
                             .await
                             {
                                 Ok(output) => {
-                                    if !output.text.is_empty() {
+                                    // 以原始转写为准：润色侧可能返回空字符串，此时仍应展示/剪贴/入库。
+                                    if !output.raw_text.is_empty() {
                                         let text_to_use = if cfg.output.prefer_polished
                                             && !output.polish_failed
+                                            && !output.text.trim().is_empty()
                                         {
                                             &output.text
                                         } else {
@@ -700,8 +716,34 @@ pub async fn run_pipeline(
                                         };
                                         let display_text = text_to_use.clone();
 
+                                        let hist_path =
+                                            app.state::<AppState>().history_path.clone();
+                                        let raw_hist = output.raw_text.clone();
+                                        let text_hist = display_text.clone();
+                                        match tokio::task::spawn_blocking(move || {
+                                            history::append_entry(&hist_path, raw_hist, text_hist)
+                                        })
+                                        .await
+                                        {
+                                            Ok(Ok(_)) => {
+                                                let _ = app.emit("history-updated", ());
+                                            }
+                                            Ok(Err(e)) => {
+                                                tracing::warn!(
+                                                    error = %e,
+                                                    "failed to append transcription history"
+                                                );
+                                            }
+                                            Err(e) => {
+                                                tracing::warn!(
+                                                    error = %e,
+                                                    "history append task failed"
+                                                );
+                                            }
+                                        }
+
                                         let _ =
-                                            output::write_clipboard(text_to_use).await;
+                                            output::write_clipboard(&display_text).await;
 
                                         emit_pipeline_status(&app, &pipeline_status, "done");
                                         if let Some(overlay) =
@@ -774,6 +816,19 @@ pub async fn list_models() -> Result<Vec<ModelEntry>, String> {
 
 #[tauri::command]
 pub async fn download_model(app: tauri::AppHandle, name: String) -> Result<String, String> {
+    if let Some(info) = crate::model::models_info()
+        .iter()
+        .find(|m| m.name == name.as_str())
+    {
+        let _ = app.emit(
+            "model-download-progress",
+            serde_json::json!({
+                "name": name,
+                "downloaded": 0_u64,
+                "total": info.size_bytes,
+            }),
+        );
+    }
     crate::model::download_with_progress(&name, {
         let app = app.clone();
         let name_clone = name.clone();
@@ -809,4 +864,109 @@ pub async fn delete_model(name: String) -> Result<(), String> {
 #[tauri::command]
 pub async fn resolve_model(model: String) -> Result<Option<String>, String> {
     Ok(crate::model::resolve_model_path(&model).map(|p| p.to_string_lossy().to_string()))
+}
+
+#[tauri::command]
+pub async fn list_history(
+    state: State<'_, AppState>,
+) -> Result<Vec<history::HistoryEntry>, String> {
+    history::list_entries(&state.history_path).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn delete_history_entries(
+    state: State<'_, AppState>,
+    ids: Vec<String>,
+) -> Result<usize, String> {
+    history::delete_entries(&state.history_path, &ids).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn clear_history(state: State<'_, AppState>) -> Result<(), String> {
+    history::clear_all(&state.history_path).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn polish_history_entry(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<history::HistoryEntry, String> {
+    let history_path = state.history_path.clone();
+    let cfg = state.config.lock().await.clone();
+
+    let entry = tokio::task::spawn_blocking({
+        let p = history_path.clone();
+        let id = id.clone();
+        move || history::get_entry(&p, &id).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+
+    let entry = entry.ok_or_else(|| "history entry not found".to_string())?;
+
+    let polish_level = polisher::PolishLevel::from_str(&cfg.polisher.level).unwrap_or_else(|_| {
+        tracing::warn!("invalid polish level, using medium");
+        polisher::PolishLevel::Medium
+    });
+    let polisher_protocol =
+        polisher::ApiProtocol::from_str(&cfg.polisher.protocol).unwrap_or_else(|e| {
+            tracing::warn!(error = %e, "invalid polisher protocol, defaulting to openai");
+            polisher::ApiProtocol::OpenAi
+        });
+    let formatter = polisher::LLMFormatter::with_config(
+        cfg.polisher.api_key.clone(),
+        cfg.polisher.api_base_url.clone(),
+        cfg.polisher.model.clone(),
+        cfg.polisher.timeout(),
+        cfg.polisher.max_tokens,
+        polisher_protocol,
+        cfg.polisher.temperature,
+        cfg.transcriber.language.clone(),
+        cfg.polisher.system_prompt.clone(),
+    )
+    .map_err(|e| e.to_string())?;
+
+    let source = entry.raw_text.clone();
+    let polished = formatter
+        .polish(&source, polish_level)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let history_path_write = history_path;
+    let out = tokio::task::spawn_blocking(move || {
+        history::update_entry_text(&history_path_write, &id, polished)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string())?;
+
+    let _ = app.emit("history-updated", ());
+    Ok(out)
+}
+
+#[cfg(test)]
+mod save_config_request_tests {
+    use super::SaveConfigRequest;
+
+    #[test]
+    fn linux_evdev_json_null_clears_stored_code() {
+        let j = r#"{"linuxEvdevCode":null}"#;
+        let req: SaveConfigRequest = serde_json::from_str(j).unwrap();
+        assert_eq!(req.linux_evdev_code, Some(None));
+    }
+
+    #[test]
+    fn linux_evdev_missing_field_means_no_patch() {
+        let j = r#"{}"#;
+        let req: SaveConfigRequest = serde_json::from_str(j).unwrap();
+        assert!(req.linux_evdev_code.is_none());
+    }
+
+    #[test]
+    fn linux_evdev_number_sets() {
+        let j = r#"{"linuxEvdevCode":100}"#;
+        let req: SaveConfigRequest = serde_json::from_str(j).unwrap();
+        assert_eq!(req.linux_evdev_code, Some(Some(100)));
+    }
 }

@@ -17,7 +17,12 @@ pub async fn write_clipboard(text: &str) -> anyhow::Result<()> {
     let text = text.to_string();
     tokio::task::spawn_blocking(move || {
         let output = Command::new("powershell")
-            .args(["-NoProfile", "-NonInteractive", "-Command", "Set-Clipboard"])
+            .args([
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                "$input | Set-Clipboard",
+            ])
             .creation_flags(CREATE_NO_WINDOW)
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::null())
