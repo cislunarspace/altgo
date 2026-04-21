@@ -4,8 +4,8 @@
   "version": "1.4.0",
   "identifier": "com.altgo.app",
   "build": {
-    "beforeDevCommand": null,
-    "devUrl": "http://localhost:1420",
+    "beforeDevCommand": "npm --prefix ../frontend run dev",
+    "devUrl": "http://127.0.0.1:1420",
     "beforeBuildCommand": "npm --prefix ../frontend run build",
     "frontendDist": "../frontend/dist"
   },
@@ -56,7 +56,7 @@
       "icons/icon.ico"
     ],
     "resources": {
-      "../.deps/bin/*": "./bin/"
+      "../target/deps/bin/*": "./bin/"
     },
     "linux": {
       "deb": {

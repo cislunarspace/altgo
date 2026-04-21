@@ -3,9 +3,10 @@
 use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 
 use serde::Serialize;
-use tauri::{Emitter, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::{
     config, key_listener, output, pipeline, polisher, recorder, state_machine, transcriber,
@@ -150,10 +151,7 @@ fn get_focused_monitor_info() -> Option<(f64, f64, f64, f64)> {
 
     for line in xrandr_str.lines() {
         if let Some((m_x, m_y, m_w, m_h)) = parse_monitor_geom(line) {
-            tracing::info!(
-                "monitor: x={}, y={}, w={}, h={}",
-                m_x, m_y, m_w, m_h
-            );
+            tracing::info!("monitor: x={}, y={}, w={}, h={}", m_x, m_y, m_w, m_h);
             if mouse_x >= m_x as i32
                 && mouse_x < (m_x + m_w) as i32
                 && mouse_y >= m_y as i32
@@ -196,6 +194,8 @@ pub struct ConfigResponse {
     pub polish_model: String,
     pub polish_api_base_url: String,
     pub gui_language: String,
+    pub transcriber_api_key: String,
+    pub polisher_api_key: String,
 }
 
 #[tauri::command]
@@ -211,6 +211,8 @@ pub async fn get_config(state: State<'_, AppState>) -> Result<ConfigResponse, St
         polish_model: cfg.polisher.model.clone(),
         polish_api_base_url: cfg.polisher.api_base_url.clone(),
         gui_language: cfg.gui.language.clone(),
+        transcriber_api_key: cfg.transcriber.api_key.clone(),
+        polisher_api_key: cfg.polisher.api_key.clone(),
     })
 }
 
@@ -230,8 +232,57 @@ pub struct SaveConfigRequest {
     pub gui_language: Option<String>,
 }
 
+/// Start the main voice pipeline thread (used at app startup).
+pub fn spawn_pipeline_at_startup(app: AppHandle) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    let cfg_arc = Arc::new(state.config.blocking_lock().clone());
+    cfg_arc.validate().map_err(|e| e.to_string())?;
+    let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
+    let app_handle = app.clone();
+    let pipeline_status = state.pipeline_status.clone();
+    std::thread::spawn(move || {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("failed to build tokio runtime");
+        rt.block_on(run_pipeline(app_handle, cfg_arc, stop_rx, pipeline_status));
+    });
+    *state.pipeline.blocking_lock() = Some(crate::PipelineHandle { stop_tx });
+    Ok(())
+}
+
+/// Stop the current pipeline and start a new one using the latest in-memory config (after save).
+async fn restart_pipeline(app: AppHandle) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    {
+        let mut p = state.pipeline.lock().await;
+        if let Some(h) = p.take() {
+            let _ = h.stop_tx.send(());
+        }
+    }
+    tokio::time::sleep(Duration::from_millis(320)).await;
+    let cfg_arc = Arc::new(state.config.lock().await.clone());
+    cfg_arc.validate().map_err(|e| e.to_string())?;
+    let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
+    let app_handle = app.clone();
+    let pipeline_status = state.pipeline_status.clone();
+    std::thread::spawn(move || {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("failed to build tokio runtime");
+        rt.block_on(run_pipeline(app_handle, cfg_arc, stop_rx, pipeline_status));
+    });
+    *state.pipeline.lock().await = Some(crate::PipelineHandle { stop_tx });
+    Ok(())
+}
+
 #[tauri::command]
-pub async fn save_config(state: State<'_, AppState>, req: SaveConfigRequest) -> Result<(), String> {
+pub async fn save_config(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    req: SaveConfigRequest,
+) -> Result<(), String> {
     let mut cfg = state.config.lock().await;
 
     if let Some(v) = req.key_name {
@@ -268,10 +319,12 @@ pub async fn save_config(state: State<'_, AppState>, req: SaveConfigRequest) -> 
         cfg.gui.language = v;
     }
 
+    cfg.validate().map_err(|e| e.to_string())?;
     cfg.save(&state.config_path)
         .map_err(|e| format!("save failed: {}", e))?;
+    drop(cfg);
 
-    Ok(())
+    restart_pipeline(app).await
 }
 
 #[tauri::command]
@@ -363,60 +416,8 @@ pub async fn run_pipeline(
 
     let poll_interval_ms = cfg.key_listener.poll_interval_ms;
 
-    let (raw_key_tx, raw_key_rx) = tokio::sync::mpsc::unbounded_channel();
-    let poll_running = Arc::new(AtomicBool::new(true));
-
-    #[cfg(target_os = "windows")]
-    {
-        let poll_running = poll_running.clone();
-        std::thread::spawn(move || {
-            let mut was_down = false;
-            while poll_running.load(Ordering::SeqCst) {
-                let is_down = is_key_pressed(vk_code);
-                if is_down && !was_down {
-                    let _ = raw_key_tx.send(key_listener::KeyEvent { pressed: true });
-                } else if !is_down && was_down {
-                    let _ = raw_key_tx.send(key_listener::KeyEvent { pressed: false });
-                }
-                was_down = is_down;
-                std::thread::sleep(std::time::Duration::from_millis(poll_interval_ms));
-            }
-        });
-    }
-
-    #[cfg(not(target_os = "windows"))]
-    {
-        let mut listener =
-            match key_listener::PlatformListener::new(&cfg.key_listener.key_name) {
-                Ok(l) => l,
-                Err(e) => {
-                    tracing::error!(error = %e, "failed to create key listener");
-                    let _ = app.emit("pipeline-error", format!("key listener: {}", e));
-                    return;
-                }
-            };
-        let mut key_events = match listener.start() {
-            Ok(rx) => rx,
-            Err(e) => {
-                tracing::error!(error = %e, "failed to start key listener");
-                let _ = app.emit("pipeline-error", format!("key listener start: {}", e));
-                return;
-            }
-        };
-        // Forward PlatformListener events into the shared raw_key channel.
-        let poll_running = poll_running.clone();
-        std::thread::spawn(move || {
-            while poll_running.load(Ordering::SeqCst) {
-                match key_events.try_recv() {
-                    Ok(ev) => { let _ = raw_key_tx.send(ev); }
-                    Err(_) => std::thread::sleep(std::time::Duration::from_millis(poll_interval_ms)),
-                }
-            }
-            // Keep listener alive until the poll loop ends.
-            drop(listener);
-        });
-    }
-
+    // Validate recorder / transcriber / polisher before starting global key capture so errors
+    // are visible immediately and we do not leave a key listener running without a main loop.
     let mut recorder =
         recorder::PlatformRecorder::new(cfg.recorder.sample_rate, cfg.recorder.channels);
 
@@ -461,13 +462,12 @@ pub async fn run_pipeline(
         },
     };
 
-    let polish_level =
-        polisher::PolishLevel::from_str(&cfg.polisher.level).unwrap_or_else(|_| {
-            tracing::warn!("invalid polish level, using medium");
-            polisher::PolishLevel::Medium
-        });
-    let polisher_protocol = polisher::ApiProtocol::from_str(&cfg.polisher.protocol)
-        .unwrap_or_else(|e| {
+    let polish_level = polisher::PolishLevel::from_str(&cfg.polisher.level).unwrap_or_else(|_| {
+        tracing::warn!("invalid polish level, using medium");
+        polisher::PolishLevel::Medium
+    });
+    let polisher_protocol =
+        polisher::ApiProtocol::from_str(&cfg.polisher.protocol).unwrap_or_else(|e| {
             tracing::warn!(error = %e, "invalid polisher protocol, defaulting to openai");
             polisher::ApiProtocol::OpenAi
         });
@@ -489,6 +489,69 @@ pub async fn run_pipeline(
             return;
         }
     };
+
+    let (raw_key_tx, raw_key_rx) = tokio::sync::mpsc::unbounded_channel();
+    let poll_running = Arc::new(AtomicBool::new(true));
+
+    #[cfg(target_os = "windows")]
+    {
+        let poll_running = poll_running.clone();
+        std::thread::spawn(move || {
+            let mut was_down = false;
+            while poll_running.load(Ordering::SeqCst) {
+                let is_down = is_key_pressed(vk_code);
+                if is_down && !was_down {
+                    let _ = raw_key_tx.send(key_listener::KeyEvent { pressed: true });
+                } else if !is_down && was_down {
+                    let _ = raw_key_tx.send(key_listener::KeyEvent { pressed: false });
+                }
+                was_down = is_down;
+                std::thread::sleep(std::time::Duration::from_millis(poll_interval_ms));
+            }
+        });
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let mut listener = match key_listener::PlatformListener::new(&cfg.key_listener.key_name) {
+            Ok(l) => l,
+            Err(e) => {
+                tracing::error!(error = %e, "failed to create key listener");
+                let _ = app.emit("pipeline-error", format!("key listener: {}", e));
+                return;
+            }
+        };
+        let (mut key_events, key_backend) = match listener.start() {
+            Ok(pair) => pair,
+            Err(e) => {
+                tracing::error!(error = %e, "failed to start key listener");
+                let _ = app.emit("pipeline-error", format!("key listener start: {}", e));
+                return;
+            }
+        };
+        tracing::info!(backend = key_backend, "Linux key listener active");
+        let _ = app.emit("key-listener-backend", key_backend);
+        // Forward PlatformListener events into the shared raw_key channel.
+        let poll_running = poll_running.clone();
+        std::thread::spawn(move || {
+            use tokio::sync::mpsc::error::TryRecvError;
+            while poll_running.load(Ordering::SeqCst) {
+                match key_events.try_recv() {
+                    Ok(ev) => {
+                        let _ = raw_key_tx.send(ev);
+                    }
+                    Err(TryRecvError::Empty) => {
+                        std::thread::sleep(std::time::Duration::from_millis(poll_interval_ms));
+                    }
+                    Err(TryRecvError::Disconnected) => {
+                        tracing::error!("key listener channel closed unexpectedly");
+                        break;
+                    }
+                }
+            }
+            drop(listener);
+        });
+    }
 
     let (key_tx, key_rx) = tokio::sync::mpsc::unbounded_channel();
     let debounce_window = cfg.key_listener.debounce_window();
@@ -644,19 +707,19 @@ pub async fn list_models() -> Result<Vec<ModelEntry>, String> {
 }
 
 #[tauri::command]
-pub async fn download_model(
-    app: tauri::AppHandle,
-    name: String,
-) -> Result<String, String> {
+pub async fn download_model(app: tauri::AppHandle, name: String) -> Result<String, String> {
     crate::model::download_with_progress(&name, {
         let app = app.clone();
         let name_clone = name.clone();
         move |downloaded, total| {
-            let _ = app.emit("model-download-progress", serde_json::json!({
-                "name": name_clone,
-                "downloaded": downloaded,
-                "total": total,
-            }));
+            let _ = app.emit(
+                "model-download-progress",
+                serde_json::json!({
+                    "name": name_clone,
+                    "downloaded": downloaded,
+                    "total": total,
+                }),
+            );
         }
     })
     .await
@@ -679,6 +742,5 @@ pub async fn delete_model(name: String) -> Result<(), String> {
 
 #[tauri::command]
 pub async fn resolve_model(model: String) -> Result<Option<String>, String> {
-    Ok(crate::model::resolve_model_path(&model)
-        .map(|p| p.to_string_lossy().to_string()))
+    Ok(crate::model::resolve_model_path(&model).map(|p| p.to_string_lossy().to_string()))
 }

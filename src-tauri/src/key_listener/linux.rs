@@ -1,9 +1,9 @@
 //! Linux 按键监听器。
 //!
-//! 优先使用 `xinput test-xi2` 命令捕获全局键盘事件，依赖 XInput2 扩展。
-//! 在 XWayland 上失败时，回退到使用 `evtest` 读取 `/dev/input/event*` 设备。
+//! - **Wayland 会话**：优先 `evtest` 读 `/dev/input/event*`（XWayland 上 `xinput test-xi2` 常能启动但收不到全局键盘）。
+//! - **传统 X11**：优先 `xinput test-xi2`（XInput2），失败再 `evtest`。
 //!
-//! 通过 `xmodmap -pke` 解析按键名称到 keycode 的映射。
+//! 通过 `xmodmap -pke` 解析按键名称到 keycode 的映射（xinput 路径）。
 
 use super::KeyEvent;
 use anyhow::{Context, Result};
@@ -52,36 +52,107 @@ impl X11Listener {
         })
     }
 
-    /// 开始监听按键事件，返回事件通道。
-    pub fn start(&mut self) -> Result<mpsc::UnboundedReceiver<KeyEvent>> {
-        // Check if we're on Wayland/XWayland - xinput test-xi2 doesn't work there
-        let is_wayland = std::env::var("WAYLAND_DISPLAY").is_ok()
-            || std::env::var("XDG_SESSION_TYPE").map(|v| v == "wayland").unwrap_or(false);
-
+    /// 开始监听按键事件，返回事件通道与后端标识（`"xinput"` / `"evtest"`）。
+    pub fn start(&mut self) -> Result<(mpsc::UnboundedReceiver<KeyEvent>, &'static str)> {
+        // Default config uses ISO_Level3_Shift (typically the right Alt / AltGr key).
+        // evdev fallback maps names to KEY_LEFTALT / KEY_RIGHTALT.
         let evdev_keycode = match self.key_name.as_str() {
             "Alt_L" => EVDEV_KEY_ALT,
-            "Alt_R" => EVDEV_KEY_ALT_R,
-            _ => EVDEV_KEY_ALT, // Default to LeftAlt
+            "Alt_R" | "ISO_Level3_Shift" | "AltGr" => EVDEV_KEY_ALT_R,
+            _ => {
+                tracing::warn!(
+                    "key_name '{}' not mapped for evtest fallback; defaulting to RightAlt",
+                    self.key_name
+                );
+                EVDEV_KEY_ALT_R
+            }
         };
 
-        if is_wayland {
-            tracing::info!("detected Wayland/XWayland session, using evtest for key detection");
-            let (tx, rx) = mpsc::unbounded_channel();
-            let running = Arc::new(AtomicBool::new(true));
-            self.start_evtest_fallback(evdev_keycode, tx, running)?;
-            return Ok(rx);
+        let display_set = std::env::var("DISPLAY")
+            .map(|s| !s.is_empty())
+            .unwrap_or(false);
+        let wayland_hint = std::env::var("WAYLAND_DISPLAY").is_ok()
+            || std::env::var("XDG_SESSION_TYPE")
+                .map(|v| v == "wayland")
+                .unwrap_or(false);
+
+        // On Wayland, DISPLAY still points at XWayland; `xinput test-xi2 --root` usually starts
+        // but does not receive global keyboard events — looks like "no errors, no keys". Prefer evdev.
+        if wayland_hint {
+            tracing::info!(
+                "Wayland session: trying evtest first (xinput on XWayland typically misses keyboard)"
+            );
+            match self.try_start_evtest(evdev_keycode) {
+                Ok(rx) => return Ok((rx, "evtest")),
+                Err(e) => {
+                    tracing::warn!(
+                        error = %e,
+                        "evtest failed on Wayland, will try xinput (may still not receive keys)"
+                    );
+                }
+            }
         }
 
-        // On native X11, use xinput test-xi2
-        let keycode = self.resolve_keycode()?;
-        tracing::info!("resolved key '{}' to keycode {}", self.key_name, keycode);
+        // Classic X11 or Wayland evtest fallback: xinput when we have a real X11 keymap.
+        if display_set {
+            tracing::info!(
+                session = wayland_hint,
+                "DISPLAY is set; trying xinput test-xi2"
+            );
+            match self.resolve_keycode() {
+                Ok(keycode) => {
+                    tracing::info!(
+                        "resolved key '{}' to X11 keycode {}",
+                        self.key_name,
+                        keycode
+                    );
+                    let (tx, rx) = mpsc::unbounded_channel();
+                    let running = Arc::clone(&self.running);
+                    running.store(true, Ordering::SeqCst);
+                    match self.try_start_xinput(keycode, tx, running) {
+                        Ok(child) => {
+                            self.child = Some(child);
+                            return Ok((rx, "xinput"));
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                error = %e,
+                                "xinput failed to start, falling back to evtest"
+                            );
+                        }
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        error = %e,
+                        "xmodmap/keycode resolution failed (no working X?), falling back to evtest"
+                    );
+                }
+            }
+        } else if !wayland_hint {
+            tracing::info!("DISPLAY is unset; using evtest on /dev/input");
+        }
 
+        if wayland_hint {
+            tracing::info!("Wayland: evtest requires read access to /dev/input/event* (e.g. user in group input)");
+        }
+
+        tracing::info!("starting evtest for key events");
+        let rx = self.try_start_evtest(evdev_keycode)?;
+        Ok((rx, "evtest"))
+    }
+
+    fn try_start_evtest(
+        &mut self,
+        evdev_keycode: u16,
+    ) -> Result<mpsc::UnboundedReceiver<KeyEvent>> {
         let (tx, rx) = mpsc::unbounded_channel();
+        self.running.store(true, Ordering::SeqCst);
         let running = Arc::clone(&self.running);
-        running.store(true, Ordering::SeqCst);
-
-        let child = self.try_start_xinput(keycode, tx, running)?;
-        self.child = Some(child);
+        if let Err(e) = self.start_evtest_fallback(evdev_keycode, tx, running) {
+            self.running.store(false, Ordering::SeqCst);
+            return Err(e);
+        }
         Ok(rx)
     }
 
@@ -105,11 +176,9 @@ impl X11Listener {
         if let Some(stderr) = stderr {
             std::thread::spawn(move || {
                 let reader = std::io::BufReader::new(stderr);
-                for line in reader.lines().take(10) {
-                    if let Ok(line) = line {
-                        if line.contains("Xwayland") || line.contains("BadAccess") {
-                            tracing::warn!("detected XWayland, xinput test-xi2 will not work");
-                        }
+                for line in reader.lines().take(10).flatten() {
+                    if line.contains("Xwayland") || line.contains("BadAccess") {
+                        tracing::warn!("detected XWayland, xinput test-xi2 will not work");
                     }
                 }
             });
@@ -181,10 +250,15 @@ impl X11Listener {
         // Find keyboard devices
         let keyboard_devices = self.find_keyboard_devices()?;
         if keyboard_devices.is_empty() {
-            return Err(anyhow::anyhow!("no keyboard devices found for evtest fallback"));
+            return Err(anyhow::anyhow!(
+                "no keyboard devices found for evtest fallback"
+            ));
         }
 
-        tracing::info!("using evtest fallback with {} keyboard devices", keyboard_devices.len());
+        tracing::info!(
+            "using evtest fallback with {} keyboard devices",
+            keyboard_devices.len()
+        );
 
         for device in keyboard_devices {
             let running = Arc::clone(&running);
@@ -192,12 +266,12 @@ impl X11Listener {
             let device_path = device.clone();
 
             std::thread::spawn(move || {
-                // evtest outputs: Event: time..., type 1 (EV_KEY), code 56 (KEY_LEFTALT), value 1
-                // evtest writes events to stderr by default
+                // evtest prints device info and all EV_* lines to stdout (not stderr).
+                // Reading stderr caused Wayland fallback to never see key events.
                 let mut child = match Command::new("evtest")
                     .arg(&device_path)
-                    .stdout(Stdio::null())
-                    .stderr(Stdio::piped())
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::null())
                     .spawn()
                 {
                     Ok(c) => c,
@@ -207,8 +281,8 @@ impl X11Listener {
                     }
                 };
 
-                let stderr = child.stderr.take().expect("evtest stderr captured");
-                let reader = std::io::BufReader::new(stderr);
+                let stdout = child.stdout.take().expect("evtest stdout captured");
+                let reader = std::io::BufReader::new(stdout);
 
                 for line in reader.lines() {
                     if !running.load(Ordering::SeqCst) {
@@ -220,24 +294,41 @@ impl X11Listener {
                         Err(_) => continue,
                     };
 
-                    // Parse evtest output: "Event: time 1234567890.123456, type 1 (EV_KEY), code 56 (KEY_LEFTALT), value 1"
+                    // Parse evtest output: "Event: time ..., type 1 (EV_KEY), code 100 (KEY_RIGHTALT), value 1"
                     if line.contains("EV_KEY") {
-                        // Extract code and value
-                        if let Some(code_start) = line.find("code ") {
-                            if let Some(code_end) = line[code_start..].find(' ') {
-                                let code_str = &line[code_start + 5..code_start + code_end];
-                                if let Ok(code) = code_str.parse::<u16>() {
-                                    if code == evdev_keycode || code == EVDEV_KEY_ALT || code == EVDEV_KEY_ALT_R {
-                                        if let Some(value_start) = line.find("value ") {
-                                            let value_str = line[value_start + 6..].trim();
-                                            let pressed = value_str == "1";
-                                            if tx.send(KeyEvent { pressed }).is_err() {
-                                                tracing::warn!("evtest: receiver dropped, exiting");
-                                                break;
-                                            }
-                                        }
-                                    }
-                                }
+                        let Some(code_tail) = line.split("code ").nth(1) else {
+                            continue;
+                        };
+                        let Some(code_str) = code_tail.split_whitespace().next() else {
+                            continue;
+                        };
+                        let Ok(code) = code_str.parse::<u16>() else {
+                            continue;
+                        };
+                        if code == evdev_keycode || code == EVDEV_KEY_ALT || code == EVDEV_KEY_ALT_R
+                        {
+                            let Some(value_tail) = line.split("value ").nth(1) else {
+                                continue;
+                            };
+                            let value_raw = value_tail
+                                .trim()
+                                .split(|c: char| c.is_whitespace() || c == ',')
+                                .next()
+                                .unwrap_or("");
+                            let Ok(value) = value_raw.parse::<i32>() else {
+                                continue;
+                            };
+                            // evdev: 0 = release, 1 = press, 2 = autorepeat (key still held).
+                            // Treating repeat as release breaks hold-to-record.
+                            let pressed = match value {
+                                0 => false,
+                                1 => true,
+                                2 => continue,
+                                _ => continue,
+                            };
+                            if tx.send(KeyEvent { pressed }).is_err() {
+                                tracing::warn!("evtest: receiver dropped, exiting");
+                                break;
                             }
                         }
                     }
@@ -279,7 +370,10 @@ impl X11Listener {
                     // Check if this is a keyboard using evtest --info
                     let output = Command::new("sh")
                         .arg("-c")
-                        .arg(format!("evtest --info {} 2>&1 | grep -q 'EV_KEY.*KEY' && echo YES || echo NO", path.display()))
+                        .arg(format!(
+                            "evtest --info {} 2>&1 | grep -q 'EV_KEY.*KEY' && echo YES || echo NO",
+                            path.display()
+                        ))
                         .output();
 
                     if let Ok(output) = output {

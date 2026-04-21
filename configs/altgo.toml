@@ -2,7 +2,9 @@
 # 复制到 ~/.config/altgo/altgo.toml 后修改
 
 [key_listener]
-key_name = "ISO_Level3_Shift"       # 触发键的 X11 keysym 名，默认右 Alt
+# 触发键的 X11 keysym：默认 ISO_Level3_Shift = 键盘右侧 Alt（AltGr），不是左侧 Alt
+# 若要用左侧 Alt，改为：key_name = "Alt_L"
+key_name = "ISO_Level3_Shift"
 long_press_threshold_ms = 200       # 长按/短按区分阈值（毫秒）
 double_click_interval_ms = 300      # 双击判定间隔（毫秒）
 min_press_duration_ms = 100         # 最短按下时长（毫秒），过滤 IME 抖动

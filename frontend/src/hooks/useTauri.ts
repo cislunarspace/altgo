@@ -47,6 +47,22 @@ export function usePipelineError(): string | null {
   return error;
 }
 
+/** Linux: `evtest` or `xinput` — set when the voice pipeline starts. */
+export function useKeyListenerBackend(): string | null {
+  const [backend, setBackend] = useState<string | null>(null);
+
+  useEffect(() => {
+    const unlisten = listen<string>("key-listener-backend", (event) => {
+      setBackend(event.payload);
+    });
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, []);
+
+  return backend;
+}
+
 export function useModelDownloadProgress(): {
   name: string | null;
   downloaded: number;

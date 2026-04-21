@@ -24,65 +24,23 @@ pub struct KeyEvent {
     pub pressed: bool,
 }
 
-/// 防抖任务：过滤 IME 引起的按键抖动，将稳定的按键事件转发给状态机。
+/// 将原始按键事件转发给状态机。
+///
+/// 此前实现曾错误地在松开时延迟发送 release（防抖），导致短按松开后 `release`
+/// 晚于长按定时器，状态机误触发录音。现改为即时转发；若需抑制 IME 抖动，可在上层调参。
 pub async fn debounce_task(
     mut key_events: tokio::sync::mpsc::UnboundedReceiver<KeyEvent>,
     key_tx: tokio::sync::mpsc::UnboundedSender<crate::state_machine::KeyEvent>,
-    debounce_window: std::time::Duration,
+    _debounce_window: std::time::Duration,
 ) {
-    use std::sync::atomic::{AtomicBool, Ordering};
-
-    let is_pressed = AtomicBool::new(false);
-    let mut pending_release: Option<std::pin::Pin<Box<tokio::time::Sleep>>> = None;
-
-    loop {
-        tokio::select! {
-            evt = key_events.recv() => {
-                match evt {
-                    Some(evt) if evt.pressed => {
-                        // Press cancels any pending release.
-                        pending_release = None;
-                        is_pressed.store(true, Ordering::SeqCst);
-                        if key_tx
-                            .send(crate::state_machine::KeyEvent { pressed: true })
-                            .is_err()
-                        {
-                            break;
-                        }
-                    }
-                    Some(_) => {
-                        // Release — if no debounce is running, send immediately.
-                        // If debounce is running, it will fire and send the release.
-                        if is_pressed.load(Ordering::SeqCst) && pending_release.is_none() {
-                            pending_release =
-                                Some(Box::pin(tokio::time::sleep(debounce_window)));
-                        }
-                        // Always update is_pressed on release, even without debounce timer.
-                        is_pressed.store(false, Ordering::SeqCst);
-                    }
-                    None => break,
-                }
-            }
-            // Debounce timer fired — forward the release to the state machine.
-            _ = async {
-                if let Some(timer) = &mut pending_release {
-                    timer.as_mut().await;
-                } else {
-                    std::future::pending::<()>().await;
-                }
-            }, if pending_release.is_some() => {
-                pending_release = None;
-                // Only send RELEASE if the key is not currently pressed.
-                // If a new press arrived before the timer fired, the press
-                // will handle sending the correct state.
-                if !is_pressed.load(Ordering::SeqCst)
-                    && key_tx
-                        .send(crate::state_machine::KeyEvent { pressed: false })
-                        .is_err()
-                {
-                    break;
-                }
-            }
+    while let Some(evt) = key_events.recv().await {
+        if key_tx
+            .send(crate::state_machine::KeyEvent {
+                pressed: evt.pressed,
+            })
+            .is_err()
+        {
+            break;
         }
     }
 }

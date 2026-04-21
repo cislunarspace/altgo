@@ -135,10 +135,7 @@ pub fn resolve_model_path(config_model: &str) -> Option<PathBuf> {
 /// 下载指定模型，通过回调报告进度。
 ///
 /// `on_progress` 参数为 `(downloaded_bytes, total_bytes)` 回调。
-pub async fn download_with_progress<F>(
-    name: &str,
-    mut on_progress: F,
-) -> Result<PathBuf>
+pub async fn download_with_progress<F>(name: &str, mut on_progress: F) -> Result<PathBuf>
 where
     F: FnMut(u64, u64),
 {

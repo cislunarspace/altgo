@@ -1,4 +1,9 @@
-import { useStatus, useLatestTranscription, usePipelineError } from "../hooks/useTauri";
+import {
+  useStatus,
+  useLatestTranscription,
+  usePipelineError,
+  useKeyListenerBackend,
+} from "../hooks/useTauri";
 import { useTranslation } from "../i18n";
 import { StatusIndicator } from "../components/StatusIndicator";
 import { Copy, Check } from "lucide-react";
@@ -11,6 +16,7 @@ export default function Home() {
   const status = useStatus();
   const transcription = useLatestTranscription();
   const error = usePipelineError();
+  const keyBackend = useKeyListenerBackend();
   const [copied, setCopied] = useState(false);
 
   const handleCopy = async () => {
@@ -46,6 +52,9 @@ export default function Home() {
         <div className="home-idle">
           <StatusIndicator status={mappedStatus} size="lg" />
           <p className="home-hint">{t("main.hint")}</p>
+          {keyBackend && (
+            <p className="home-key-backend">{t(`main.key_backend_${keyBackend}`)}</p>
+          )}
         </div>
       ) : (
         <div className="home-result">

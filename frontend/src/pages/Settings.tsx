@@ -1,22 +1,35 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useTranslation } from "../i18n";
 import { useModelDownloadProgress } from "../hooks/useTauri";
-import { Save, Globe, Mic, Sparkles, Check, Download, Trash2 } from "lucide-react";
+import {
+  Save,
+  Globe,
+  Mic,
+  Sparkles,
+  Check,
+  Download,
+  Trash2,
+  AlertCircle,
+  CheckCircle2,
+  ChevronDown,
+  ChevronRight,
+} from "lucide-react";
 import "../styles/components.css";
 
-interface Config {
-  key_name: string;
+/** Matches backend ConfigResponse (camelCase). */
+interface AppConfig {
+  keyName: string;
   language: string;
   engine: string;
   model: string;
-  api_base_url: string;
-  polish_level: string;
-  polish_model: string;
-  polish_api_base_url: string;
-  gui_language: string;
-  transcriber_api_key: string;
-  polisher_api_key: string;
+  apiBaseUrl: string;
+  polishLevel: string;
+  polishModel: string;
+  polishApiBaseUrl: string;
+  guiLanguage: string;
+  transcriberApiKey: string;
+  polisherApiKey: string;
 }
 
 interface ModelEntry {
@@ -27,31 +40,125 @@ interface ModelEntry {
   downloaded: boolean;
 }
 
+const KEY_PRESETS: { value: string; labelKey: string }[] = [
+  { value: "ISO_Level3_Shift", labelKey: "settings.key_preset_right_alt" },
+  { value: "Alt_L", labelKey: "settings.key_preset_left_alt" },
+  { value: "Alt_R", labelKey: "settings.key_preset_alt_r" },
+];
+
 function formatSize(bytes: number): string {
   const mb = bytes / (1024 * 1024);
   if (mb >= 1024) return `${(mb / 1024).toFixed(1)} GB`;
   return `${Math.round(mb)} MB`;
 }
 
-function ModelSection({ t }: { t: (k: string) => string }) {
+export default function Settings() {
+  const { t, setLang } = useTranslation();
+  const [config, setConfig] = useState<AppConfig | null>(null);
   const [models, setModels] = useState<ModelEntry[]>([]);
+  const [resolvedPath, setResolvedPath] = useState<string | null | undefined>(undefined);
   const [downloading, setDownloading] = useState<string | null>(null);
-  const [error, setError] = useState("");
+  const [modelError, setModelError] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState<"saved" | string>("");
+  const [polishOpen, setPolishOpen] = useState(false);
+  const [advancedPath, setAdvancedPath] = useState(false);
   const progress = useModelDownloadProgress();
 
-  useEffect(() => {
+  const refreshModels = useCallback(() => {
     invoke<ModelEntry[]>("list_models").then(setModels).catch(() => {});
   }, []);
 
-  const handleDownload = async (name: string) => {
+  const refreshResolved = useCallback((model: string, engine: string) => {
+    if (engine !== "local" || !model.trim()) {
+      setResolvedPath(null);
+      return;
+    }
+    invoke<string | null>("resolve_model", { model })
+      .then(setResolvedPath)
+      .catch(() => setResolvedPath(null));
+  }, []);
+
+  useEffect(() => {
+    invoke<AppConfig>("get_config")
+      .then((c) => {
+        setConfig(c);
+        refreshResolved(c.model, c.engine);
+      })
+      .catch(() => {});
+    refreshModels();
+  }, [refreshModels, refreshResolved]);
+
+  useEffect(() => {
+    if (!config) return;
+    refreshResolved(config.model, config.engine);
+  }, [config?.model, config?.engine, refreshResolved]);
+
+  const update = <K extends keyof AppConfig>(key: K, value: AppConfig[K]) => {
+    setConfig((prev) => (prev ? { ...prev, [key]: value } : prev));
+  };
+
+  const save = async () => {
+    if (!config) return;
+    setSaving(true);
+    setMessage("");
+    try {
+      await invoke("save_config", {
+        req: {
+          keyName: config.keyName,
+          language: config.language,
+          engine: config.engine,
+          model: config.model,
+          apiKey: config.transcriberApiKey,
+          apiBaseUrl: config.apiBaseUrl,
+          polishLevel: config.polishLevel,
+          polishModel: config.polishModel,
+          polishApiKey: config.polisherApiKey,
+          polishApiBaseUrl: config.polishApiBaseUrl,
+          guiLanguage: config.guiLanguage,
+        },
+      });
+      setLang(config.guiLanguage);
+      setMessage("saved");
+      refreshResolved(config.model, config.engine);
+      refreshModels();
+    } catch (e) {
+      setMessage(String(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const downloadAndUse = async (name: string) => {
     setDownloading(name);
-    setError("");
+    setModelError("");
     try {
       await invoke("download_model", { name });
       const updated = await invoke<ModelEntry[]>("list_models");
       setModels(updated);
+      if (!config) return;
+      const next = { ...config, engine: "local", model: name };
+      setConfig(next);
+      await invoke("save_config", {
+        req: {
+          keyName: next.keyName,
+          language: next.language,
+          engine: "local",
+          model: name,
+          apiKey: next.transcriberApiKey,
+          apiBaseUrl: next.apiBaseUrl,
+          polishLevel: next.polishLevel,
+          polishModel: next.polishModel,
+          polishApiKey: next.polisherApiKey,
+          polishApiBaseUrl: next.polishApiBaseUrl,
+          guiLanguage: next.guiLanguage,
+        },
+      });
+      setLang(next.guiLanguage);
+      setMessage("saved");
+      refreshResolved(name, "local");
     } catch (e) {
-      setError(String(e));
+      setModelError(String(e));
     } finally {
       setDownloading(null);
     }
@@ -60,108 +167,41 @@ function ModelSection({ t }: { t: (k: string) => string }) {
   const handleDelete = async (name: string) => {
     try {
       await invoke("delete_model", { name });
-      const updated = await invoke<ModelEntry[]>("list_models");
-      setModels(updated);
+      refreshModels();
+      if (config?.model === name) {
+        update("model", "");
+      }
     } catch (e) {
-      setError(String(e));
+      setModelError(String(e));
     }
   };
 
-  const downloadingProgress =
-    downloading && progress.name === downloading
-      ? Math.round((progress.downloaded / progress.total) * 100)
-      : 0;
-
-  return (
-    <div className="model-list">
-      {error && <p className="input-error">{error}</p>}
-      {models.map((m) => (
-        <div key={m.name} className="model-row">
-          <div className="model-info">
-            <span className="model-name">{m.name}</span>
-            <span className="model-desc">
-              {m.description} &middot; {formatSize(m.sizeBytes)}
-            </span>
-          </div>
-          <div className="model-actions">
-            {m.downloaded ? (
-              <>
-                <span className="model-badge">
-                  <Check size={10} />
-                  {t("settings.model_downloaded")}
-                </span>
-                <button
-                  className="settings-btn settings-btn-sm settings-btn-danger"
-                  onClick={() => handleDelete(m.name)}
-                >
-                  <Trash2 size={11} />
-                  {t("settings.delete_model")}
-                </button>
-              </>
-            ) : downloading === m.name ? (
-              <div className="model-progress">
-                <div className="progress-bar">
-                  <div
-                    className="progress-fill"
-                    style={{ width: `${downloadingProgress}%` }}
-                  />
-                </div>
-                <span className="progress-text">{downloadingProgress}%</span>
-              </div>
-            ) : (
-              <button
-                className="settings-btn settings-btn-sm settings-btn-primary"
-                onClick={() => handleDownload(m.name)}
-                disabled={downloading !== null}
-              >
-                <Download size={11} />
-                {t("settings.download_model")}
-              </button>
-            )}
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-export default function Settings() {
-  const { t, setLang } = useTranslation();
-  const [config, setConfig] = useState<Config | null>(null);
-  const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState<"saved" | string>("");
-
-  useEffect(() => {
-    invoke<Config>("get_config").then(setConfig).catch(() => {});
-  }, []);
-
-  if (!config) {
-    return <div className="loading-container">{t("settings.loading")}</div>;
-  }
-
-  const update = (key: keyof Config, value: string) => {
-    setConfig((prev) => (prev ? { ...prev, [key]: value } : prev));
-  };
-
-  const save = async () => {
+  const applyLocalModel = async (name: string) => {
+    if (!config) return;
+    const next = { ...config, engine: "local", model: name };
+    setConfig(next);
     setSaving(true);
     setMessage("");
     try {
       await invoke("save_config", {
         req: {
-          keyName: config.key_name,
-          language: config.language,
-          engine: config.engine,
-          model: config.model,
-          apiBaseUrl: config.api_base_url,
-          polishLevel: config.polish_level,
-          polishModel: config.polish_model,
-          polishApiBaseUrl: config.polish_api_base_url,
-          guiLanguage: config.gui_language,
+          keyName: next.keyName,
+          language: next.language,
+          engine: "local",
+          model: name,
+          apiKey: next.transcriberApiKey,
+          apiBaseUrl: next.apiBaseUrl,
+          polishLevel: next.polishLevel,
+          polishModel: next.polishModel,
+          polishApiKey: next.polisherApiKey,
+          polishApiBaseUrl: next.polishApiBaseUrl,
+          guiLanguage: next.guiLanguage,
         },
       });
-      setLang(config.gui_language);
+      setLang(next.guiLanguage);
       setMessage("saved");
+      refreshResolved(name, "local");
+      refreshModels();
     } catch (e) {
       setMessage(String(e));
     } finally {
@@ -169,83 +209,196 @@ export default function Settings() {
     }
   };
 
+  const downloadingProgress =
+    downloading && progress.name === downloading
+      ? Math.round((progress.downloaded / Math.max(progress.total, 1)) * 100)
+      : 0;
+
+  if (!config) {
+    return <div className="loading-container">{t("settings.loading")}</div>;
+  }
+
+  const localReady =
+    config.engine === "local" && resolvedPath != null && resolvedPath !== "";
+  const localBlocked =
+    config.engine === "local" &&
+    config.model.trim() !== "" &&
+    resolvedPath === null;
+
   return (
-    <div className="settings-page">
+    <div className="settings-page settings-page--v2">
+      {/* Readiness — implicit state made explicit */}
+      <div
+        className={`settings-readiness ${
+          config.engine === "api"
+            ? "settings-readiness--neutral"
+            : localReady
+              ? "settings-readiness--ok"
+              : "settings-readiness--warn"
+        }`}
+      >
+        <div className="settings-readiness-icon">
+          {config.engine === "api" ? (
+            <Sparkles size={18} />
+          ) : localReady ? (
+            <CheckCircle2 size={18} />
+          ) : (
+            <AlertCircle size={18} />
+          )}
+        </div>
+        <div className="settings-readiness-text">
+          <strong className="settings-readiness-title">
+            {config.engine === "api"
+              ? t("settings.readiness_api")
+              : localReady
+                ? t("settings.readiness_local_ok")
+                : t("settings.readiness_local_need")}
+          </strong>
+          <p className="settings-readiness-desc">
+            {config.engine === "api"
+              ? t("settings.readiness_api_desc")
+              : localBlocked
+                ? t("settings.readiness_path_missing")
+                : t("settings.readiness_local_desc")}
+          </p>
+          {config.engine === "local" && resolvedPath && (
+            <code className="settings-readiness-path">{resolvedPath}</code>
+          )}
+        </div>
+      </div>
+
       <div className="settings-form">
-
-        {/* ── UI Language ── */}
-        <div className="settings-section">
+        {/* Transcription — primary */}
+        <section className="settings-section settings-section--primary">
           <h3 className="settings-section-title">
-            <Globe size={12} />
-            {t("settings.gui_language")}
-          </h3>
-          <div className="settings-field">
-            <span className="settings-field-label-text">{t("settings.gui_language")}</span>
-            <div className="settings-field-control">
-              <select
-                className="settings-select"
-                value={config.gui_language}
-                onChange={(e) => update("gui_language", e.target.value)}
-              >
-                <option value="zh">中文</option>
-                <option value="en">English</option>
-              </select>
-            </div>
-          </div>
-        </div>
-
-        {/* ── Recording ── */}
-        <div className="settings-section">
-          <h3 className="settings-section-title">
-            <Mic size={12} />
-            {t("settings.recording")}
-          </h3>
-          <div className="settings-field">
-            <span className="settings-field-label-text">{t("settings.key_name")}</span>
-            <div className="settings-field-control">
-              <input
-                type="text"
-                className="settings-input"
-                value={config.key_name}
-                onChange={(e) => update("key_name", e.target.value)}
-                placeholder="Alt_R"
-              />
-            </div>
-          </div>
-        </div>
-
-        {/* ── Transcription ── */}
-        <div className="settings-section">
-          <h3 className="settings-section-title">
-            <Sparkles size={12} />
+            <Sparkles size={14} />
             {t("settings.transcription")}
           </h3>
-          <div className="settings-field">
-            <span className="settings-field-label-text">{t("settings.engine")}</span>
-            <div className="settings-field-control">
-              <select
-                className="settings-select"
-                value={config.engine}
-                onChange={(e) => update("engine", e.target.value)}
+          <p className="settings-section-lead">{t("settings.transcription_lead")}</p>
+
+          <div className="settings-engine-switch">
+            <button
+              type="button"
+              className={`settings-engine-btn ${config.engine === "local" ? "is-active" : ""}`}
+              onClick={() => update("engine", "local")}
+            >
+              {t("settings.engine_local")}
+            </button>
+            <button
+              type="button"
+              className={`settings-engine-btn ${config.engine === "api" ? "is-active" : ""}`}
+              onClick={() => update("engine", "api")}
+            >
+              {t("settings.engine_api")}
+            </button>
+          </div>
+
+          {config.engine === "local" ? (
+            <>
+              <div className="settings-field">
+                <span className="settings-field-label-text">{t("settings.language")}</span>
+                <div className="settings-field-control">
+                  <input
+                    type="text"
+                    className="settings-input"
+                    value={config.language}
+                    onChange={(e) => update("language", e.target.value)}
+                    placeholder="zh"
+                  />
+                </div>
+              </div>
+
+              <div className="settings-model-grid">
+                {models.map((m) => {
+                  const isActive = config.model === m.name;
+                  return (
+                    <div
+                      key={m.name}
+                      className={`settings-model-card ${isActive ? "is-active" : ""}`}
+                    >
+                      <div className="settings-model-card-head">
+                        <span className="settings-model-card-name">{m.name}</span>
+                        {isActive && (
+                          <span className="settings-model-card-badge">{t("settings.in_use")}</span>
+                        )}
+                      </div>
+                      <p className="settings-model-card-desc">{m.description}</p>
+                      <p className="settings-model-card-meta">
+                        {formatSize(m.sizeBytes)} · {m.filename}
+                      </p>
+                      <div className="settings-model-card-actions">
+                        {m.downloaded ? (
+                          <>
+                            <button
+                              type="button"
+                              className="settings-btn settings-btn-sm settings-btn-secondary"
+                              onClick={() => applyLocalModel(m.name)}
+                              disabled={isActive || saving}
+                            >
+                              {isActive ? t("settings.current") : t("settings.use_model")}
+                            </button>
+                            <button
+                              type="button"
+                              className="settings-btn settings-btn-sm settings-btn-danger"
+                              onClick={() => handleDelete(m.name)}
+                            >
+                              <Trash2 size={11} />
+                              {t("settings.delete_model")}
+                            </button>
+                          </>
+                        ) : downloading === m.name ? (
+                          <div className="model-progress" style={{ width: "100%" }}>
+                            <div className="progress-bar">
+                              <div
+                                className="progress-fill"
+                                style={{ width: `${downloadingProgress}%` }}
+                              />
+                            </div>
+                            <span className="progress-text">{downloadingProgress}%</span>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            className="settings-btn settings-btn-sm settings-btn-primary"
+                            onClick={() => downloadAndUse(m.name)}
+                            disabled={downloading !== null}
+                          >
+                            <Download size={11} />
+                            {t("settings.download_and_use")}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              {modelError && <p className="input-error">{modelError}</p>}
+
+              <button
+                type="button"
+                className="settings-advanced-toggle"
+                onClick={() => setAdvancedPath(!advancedPath)}
               >
-                <option value="api">{t("settings.engine_api")}</option>
-                <option value="local">{t("settings.engine_local")}</option>
-              </select>
-            </div>
-          </div>
-          <div className="settings-field">
-            <span className="settings-field-label-text">{t("settings.language")}</span>
-            <div className="settings-field-control">
-              <input
-                type="text"
-                className="settings-input"
-                value={config.language}
-                onChange={(e) => update("language", e.target.value)}
-                placeholder="zh"
-              />
-            </div>
-          </div>
-          {config.engine === "api" ? (
+                {advancedPath ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                {t("settings.advanced_model_path")}
+              </button>
+              {advancedPath && (
+                <div className="settings-field settings-field--nested">
+                  <span className="settings-field-label-text">{t("settings.custom_path")}</span>
+                  <div className="settings-field-control">
+                    <input
+                      type="text"
+                      className="settings-input"
+                      value={config.model}
+                      onChange={(e) => update("model", e.target.value)}
+                      placeholder={t("settings.custom_path_placeholder")}
+                    />
+                  </div>
+                  <p className="settings-hint">{t("settings.custom_path_hint")}</p>
+                </div>
+              )}
+            </>
+          ) : (
             <>
               <div className="settings-field">
                 <span className="settings-field-label-text">{t("settings.api_url")}</span>
@@ -253,8 +406,8 @@ export default function Settings() {
                   <input
                     type="text"
                     className="settings-input"
-                    value={config.api_base_url}
-                    onChange={(e) => update("api_base_url", e.target.value)}
+                    value={config.apiBaseUrl}
+                    onChange={(e) => update("apiBaseUrl", e.target.value)}
                     placeholder="https://api.openai.com"
                   />
                 </div>
@@ -265,124 +418,200 @@ export default function Settings() {
                   <input
                     type="password"
                     className="settings-input"
-                    value={config.transcriber_api_key || ""}
-                    onChange={(e) => update("transcriber_api_key", e.target.value)}
+                    value={config.transcriberApiKey}
+                    onChange={(e) => update("transcriberApiKey", e.target.value)}
                     placeholder="sk-..."
                   />
                 </div>
               </div>
+              <div className="settings-field">
+                <span className="settings-field-label-text">{t("settings.model")}</span>
+                <div className="settings-field-control">
+                  <input
+                    type="text"
+                    className="settings-input"
+                    value={config.model}
+                    onChange={(e) => update("model", e.target.value)}
+                    placeholder="whisper-1"
+                  />
+                </div>
+              </div>
+              <div className="settings-field">
+                <span className="settings-field-label-text">{t("settings.language")}</span>
+                <div className="settings-field-control">
+                  <input
+                    type="text"
+                    className="settings-input"
+                    value={config.language}
+                    onChange={(e) => update("language", e.target.value)}
+                    placeholder="zh"
+                  />
+                </div>
+              </div>
             </>
-          ) : (
+          )}
+        </section>
+
+        {/* Recording */}
+        <section className="settings-section">
+          <h3 className="settings-section-title">
+            <Mic size={14} />
+            {t("settings.recording")}
+          </h3>
+          <p className="settings-section-lead">{t("settings.recording_lead")}</p>
+          <div className="settings-field">
+            <span className="settings-field-label-text">{t("settings.key_name")}</span>
+            <div className="settings-field-control">
+              <select
+                className="settings-select"
+                value={
+                  KEY_PRESETS.some((p) => p.value === config.keyName)
+                    ? config.keyName
+                    : "__custom__"
+                }
+                onChange={(e) => {
+                  if (e.target.value === "__custom__") return;
+                  update("keyName", e.target.value);
+                }}
+              >
+                {KEY_PRESETS.map((p) => (
+                  <option key={p.value} value={p.value}>
+                    {t(p.labelKey)}
+                  </option>
+                ))}
+                <option value="__custom__">{t("settings.key_custom")}</option>
+              </select>
+            </div>
+          </div>
+          {!KEY_PRESETS.some((p) => p.value === config.keyName) && (
             <div className="settings-field">
-              <span className="settings-field-label-text">{t("settings.model")}</span>
+              <span className="settings-field-label-text">{t("settings.key_custom_value")}</span>
               <div className="settings-field-control">
                 <input
                   type="text"
                   className="settings-input"
-                  value={config.model}
-                  onChange={(e) => update("model", e.target.value)}
-                  placeholder="~/models/whisper.bin"
+                  value={config.keyName}
+                  onChange={(e) => update("keyName", e.target.value)}
                 />
               </div>
             </div>
           )}
-        </div>
+        </section>
 
-        {/* ── Model Management ── */}
-        <div className="settings-section">
-          <h3 className="settings-section-title">
-            <Download size={12} />
-            {t("settings.model_management")}
-          </h3>
-          <ModelSection t={t} />
-        </div>
-
-        {/* ── Polishing ── */}
-        <div className="settings-section">
-          <h3 className="settings-section-title">
-            <Sparkles size={12} />
+        {/* Polishing — collapsible */}
+        <section className="settings-section">
+          <button
+            type="button"
+            className="settings-section-toggle"
+            onClick={() => setPolishOpen(!polishOpen)}
+          >
+            <Sparkles size={14} />
             {t("settings.polishing")}
+            {polishOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+          </button>
+          {polishOpen && (
+            <div className="settings-section-body">
+              <div className="settings-field">
+                <span className="settings-field-label-text">{t("settings.polish_level")}</span>
+                <div className="settings-field-control">
+                  <select
+                    className="settings-select"
+                    value={config.polishLevel}
+                    onChange={(e) => update("polishLevel", e.target.value)}
+                  >
+                    <option value="none">{t("settings.polish_none")}</option>
+                    <option value="light">{t("settings.polish_light")}</option>
+                    <option value="medium">{t("settings.polish_medium")}</option>
+                    <option value="heavy">{t("settings.polish_heavy")}</option>
+                  </select>
+                </div>
+              </div>
+              <div className="settings-field">
+                <span className="settings-field-label-text">{t("settings.api_url")}</span>
+                <div className="settings-field-control">
+                  <input
+                    type="text"
+                    className="settings-input"
+                    value={config.polishApiBaseUrl}
+                    onChange={(e) => update("polishApiBaseUrl", e.target.value)}
+                    placeholder="https://api.openai.com"
+                  />
+                </div>
+              </div>
+              <div className="settings-field">
+                <span className="settings-field-label-text">{t("settings.model")}</span>
+                <div className="settings-field-control">
+                  <input
+                    type="text"
+                    className="settings-input"
+                    value={config.polishModel}
+                    onChange={(e) => update("polishModel", e.target.value)}
+                    placeholder="gpt-4o-mini"
+                  />
+                </div>
+              </div>
+              <div className="settings-field">
+                <span className="settings-field-label-text">{t("settings.api_key")}</span>
+                <div className="settings-field-control">
+                  <input
+                    type="password"
+                    className="settings-input"
+                    value={config.polisherApiKey}
+                    onChange={(e) => update("polisherApiKey", e.target.value)}
+                    placeholder="sk-..."
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+        </section>
+
+        {/* UI language */}
+        <section className="settings-section">
+          <h3 className="settings-section-title">
+            <Globe size={14} />
+            {t("settings.gui_language")}
           </h3>
           <div className="settings-field">
-            <span className="settings-field-label-text">{t("settings.polish_level")}</span>
+            <span className="settings-field-label-text">{t("settings.gui_language")}</span>
             <div className="settings-field-control">
               <select
                 className="settings-select"
-                value={config.polish_level}
-                onChange={(e) => update("polish_level", e.target.value)}
+                value={config.guiLanguage}
+                onChange={(e) => update("guiLanguage", e.target.value)}
               >
-                <option value="none">{t("settings.polish_none")}</option>
-                <option value="light">{t("settings.polish_light")}</option>
-                <option value="medium">{t("settings.polish_medium")}</option>
-                <option value="heavy">{t("settings.polish_heavy")}</option>
+                <option value="zh">中文</option>
+                <option value="en">English</option>
               </select>
             </div>
           </div>
-          <div className="settings-field">
-            <span className="settings-field-label-text">{t("settings.api_url")}</span>
-            <div className="settings-field-control">
-              <input
-                type="text"
-                className="settings-input"
-                value={config.polish_api_base_url}
-                onChange={(e) => update("polish_api_base_url", e.target.value)}
-                placeholder="https://api.openai.com"
-              />
-            </div>
-          </div>
-          <div className="settings-field">
-            <span className="settings-field-label-text">{t("settings.model")}</span>
-            <div className="settings-field-control">
-              <input
-                type="text"
-                className="settings-input"
-                value={config.polish_model}
-                onChange={(e) => update("polish_model", e.target.value)}
-                placeholder="gpt-4o-mini"
-              />
-            </div>
-          </div>
-          <div className="settings-field">
-            <span className="settings-field-label-text">{t("settings.api_key")}</span>
-            <div className="settings-field-control">
-              <input
-                type="password"
-                className="settings-input"
-                value={config.polisher_api_key || ""}
-                onChange={(e) => update("polisher_api_key", e.target.value)}
-                placeholder="sk-..."
-              />
-            </div>
-          </div>
-        </div>
+        </section>
 
-        {/* ── About ── */}
-        <div className="settings-section">
+        <section className="settings-section">
           <h3 className="settings-section-title">
-            <Sparkles size={12} />
+            <Sparkles size={14} />
             {t("settings.about")}
           </h3>
           <div className="settings-field">
             <span className="settings-field-label-text">{t("settings.version")}</span>
             <div className="settings-field-control">
-              <span style={{ color: 'var(--color-text-muted)', fontSize: 'var(--text-sm)' }}>1.4.0</span>
+              <span className="settings-muted">1.4.0</span>
             </div>
           </div>
-        </div>
+        </section>
 
-        {/* ── Save ── */}
         <div className="settings-save-row">
+          <p className="settings-save-hint">{t("settings.restart_hint")}</p>
           {message === "saved" && (
             <span className="settings-save-msg settings-save-msg--ok">
               <Check size={12} /> {t("settings.saved")}
             </span>
           )}
           {message && message !== "saved" && (
-            <span className="settings-save-msg settings-save-msg--err">
-              {message}
-            </span>
+            <span className="settings-save-msg settings-save-msg--err">{message}</span>
           )}
           <button
+            type="button"
             className="settings-btn settings-btn-primary"
             onClick={save}
             disabled={saving}

@@ -19,7 +19,7 @@ cargo clippy --manifest-path=src-tauri/Cargo.toml -- -D warnings
 cargo tauri dev               # Dev mode (frontend dev server + desktop window)
 cargo tauri build            # Production GUI build
 
-make build                    # Build + copy binary to ./
+make build                    # Same as `cargo tauri build` (release + bundle)
 make install                  # Install to /usr/local/bin + /etc/altgo/
 ```
 

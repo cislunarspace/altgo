@@ -10,7 +10,9 @@ export default defineConfig({
   server: {
     port: 1420,
     strictPort: true,
-    host: host || false,
+    // Bind IPv4 explicitly: on Linux, `localhost` in the WebView often resolves to ::1 while
+    // Vite's default can be IPv4-only, causing "connection refused" for http://localhost:1420.
+    host: host || "127.0.0.1",
     hmr: host
       ? {
           protocol: "ws",

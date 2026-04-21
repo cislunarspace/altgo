@@ -43,8 +43,6 @@ pub fn run() {
             let cfg = config::Config::load(&config_path).expect("failed to load config");
             cfg.validate().expect("invalid config");
 
-            let cfg_arc = Arc::new(cfg.clone());
-
             let pipeline_status = Arc::new(std::sync::RwLock::new(String::from("idle")));
             let state = AppState {
                 config: Mutex::new(cfg),
@@ -64,26 +62,7 @@ pub fn run() {
                 });
             }
 
-            let app_handle = app.handle().clone();
-            let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
-
-            std::thread::spawn(move || {
-                let rt = tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()
-                    .expect("failed to build tokio runtime");
-                rt.block_on(cmd::run_pipeline(
-                    app_handle,
-                    cfg_arc,
-                    stop_rx,
-                    pipeline_status,
-                ));
-            });
-
-            {
-                let state = app.state::<AppState>();
-                *state.pipeline.blocking_lock() = Some(PipelineHandle { stop_tx });
-            }
+            cmd::spawn_pipeline_at_startup(app.handle().clone())?;
 
             Ok(())
         })
