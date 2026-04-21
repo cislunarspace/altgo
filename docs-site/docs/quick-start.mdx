@@ -5,175 +5,74 @@ title: 快速开始
 
 # 快速开始
 
-altgo 支持 Linux 和 Windows。选择你的平台：
+文档以 **Linux** 为主：本软件目前仅在 **Ubuntu 20.04** 上做过测试与部署验证；其他系统未保证。Windows 用户请优先使用 [Releases](https://github.com/cislunarspace/altgo/releases) 中的 **MSI** 或 zip。
+
+**官方预编译包**（deb / AppImage / MSI 等）会尽量把 **ffmpeg**、**whisper-cli** 等与程序一并打包，安装或解压后**开箱即用**，无需再为录音、转写单独安装这些二进制。
 
 import Tabs from '@theme/Tabs';
 import TabItem from '@theme/TabItem';
 
-## 一键安装
+## Linux：安装前必做（input 组）
 
-<Tabs groupId="os">
-<TabItem value="linux" label="Linux">
+**必须**将当前用户加入 `input` 组，否则无法读取 `/dev/input/event*`，按键监听会失败。执行后**须重新登录**：
 
 ```bash
-git clone https://github.com/cislunarspace/altgo.git
-cd altgo
-chmod +x install.sh
-./install.sh            # 默认下载 base 模型
-# ./install.sh --model small   # 或指定模型大小
+sudo usermod -aG input "$USER"
 ```
 
-脚本会自动：检查 Rust 工具链 → 编译 altgo → 编译 whisper.cpp → 下载模型 → 生成配置文件。
+其余与桌面、音频、通知相关的系统库，**`.deb` 会通过依赖声明自动拉取**；若安装器提示缺包，按提示补装即可，不必自行对照长清单。
 
-如缺少系统依赖（xinput、parecord 等），脚本会提示安装命令，不会自动执行 `sudo`。
+## 最终用户：装好后在「设置」里完成一切
+
+1. 从 [Releases](https://github.com/cislunarspace/altgo/releases) 安装 **`.deb`** 或使用 **AppImage**（`chmod +x` 后运行）。
+2. 完成上文 **input 组**。
+3. 启动应用，打开 **设置**：
+   - 在 **转写** 中选用 **本地** 或 **API**（若需要），下载并启用模型，或填写高级路径；
+   - 按需配置 **润色**、**外观**、**触发键**（可用「按下以设置」）；
+   - 点击 **保存**。
+4. 识别结果在**悬浮窗**中展示，由你自行选择复制。
+
+**不要**把「先复制 `configs/altgo.toml` 再手改」当作默认路径——那是高级用法。日常用户只使用界面即可。
+
+## Windows（附带支持）
+
+<Tabs groupId="win">
+<TabItem value="user" label="用户">
+
+安装 **MSI** 或解压 zip 后直接运行；**ffmpeg 等已随包提供**。在 **设置** 中完成转写与润色即可。
 
 </TabItem>
-<TabItem value="windows" label="Windows">
+<TabItem value="dev" label="开发者">
 
 ```powershell
 git clone https://github.com/cislunarspace/altgo.git
 cd altgo
-.\install.ps1               # 默认下载 base 模型
-# .\install.ps1 -Model small  # 或指定模型大小
+cd frontend; npm install; cd ..
+make deps-windows   # 或: pwsh packaging/scripts/download-deps.ps1
+make build
 ```
-
-脚本会自动：检查 Rust 工具链 → 编译 altgo → 下载 whisper.cpp 预编译二进制 → 下载模型 → 生成配置文件。
 
 </TabItem>
 </Tabs>
 
-## 手动安装
+## 开发者：从源码构建
 
-### 1. 安装系统依赖
-
-<Tabs groupId="os">
-<TabItem value="linux" label="Linux">
-
-```bash
-# Debian/Ubuntu
-sudo apt install xinput xdotool pulseaudio-utils xclip libnotify-bin
-
-# Arch
-sudo pacman -S xorg-xinput pulseaudio xclip libnotify
-```
-
-</TabItem>
-<TabItem value="windows" label="Windows">
-
-```powershell
-# 安装 Rust（从源码编译时需要）
-winget install Rustlang.Rustup
-
-# 安装音频录制工具（推荐 ffmpeg）
-winget install ffmpeg
-```
-
-</TabItem>
-</TabItem>
-</Tabs>
-
-### 2. 编译 altgo
+与主仓库一致，使用 **`make deps-linux`** / **`make deps-windows`** 拉取依赖，再用 **`make build`** 打包。**日常验证也建议以 `make build` 为主**。
 
 ```bash
 git clone https://github.com/cislunarspace/altgo.git
 cd altgo
-cargo build --release
+cd frontend && npm install && cd ..
+make deps-linux
+make build
 ```
 
-Linux 可使用 `sudo make install` 安装到系统路径。
+若需快速改前端 UI，可临时使用 `cargo tauri dev`；完整链路仍以 `make build` 为准。
 
-### 3. 安装 whisper.cpp
+## 高级：仅当你要手改配置文件时
 
-<Tabs groupId="os">
-<TabItem value="linux" label="Linux">
-
-```bash
-git clone https://github.com/ggerganov/whisper.cpp.git
-cd whisper.cpp
-make -j
-sudo cp main /usr/local/bin/whisper-cli
-```
-
-</TabItem>
-<TabItem value="windows" label="Windows">
-
-前往 [whisper.cpp Releases](https://github.com/ggerganov/whisper.cpp/releases) 下载最新的 `whisper-bin-x64.zip`。
-
-```powershell
-mkdir "C:\Program Files\whisper"
-# 将解压的 exe 和 dll 全部复制过去
-copy bin\* "C:\Program Files\whisper\"
-```
-
-</TabItem>
-</TabItem>
-</Tabs>
-
-### 4. 下载模型
-
-<Tabs groupId="os">
-<TabItem value="linux" label="Linux">
-
-```bash
-mkdir -p ~/models
-wget https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin \
-  -O ~/models/ggml-base.bin
-```
-
-</TabItem>
-<TabItem value="windows" label="Windows">
-
-```powershell
-mkdir "$env:USERPROFILE\models"
-Invoke-WebRequest -Uri `
-  "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin" `
-  -OutFile "$env:USERPROFILE\models\ggml-base.bin"
-```
-
-</TabItem>
-</TabItem>
-</Tabs>
-
-### 5. 创建配置文件
-
-<Tabs groupId="os">
-<TabItem value="linux" label="Linux">
-
-```bash
-mkdir -p ~/.config/altgo
-cp configs/altgo.toml ~/.config/altgo/altgo.toml
-```
-
-</TabItem>
-<TabItem value="windows" label="Windows">
-
-```powershell
-mkdir "$env:APPDATA\altgo"
-copy configs\altgo.toml "$env:APPDATA\altgo\altgo.toml"
-```
-
-</TabItem>
-</TabItem>
-</Tabs>
-
-编辑配置文件，设置本地模型路径：
-
-```toml
-[transcriber]
-engine = "local"
-model = "~/models/ggml-base.bin"
-language = "zh"
-
-[polisher]
-level = "none"
-```
+配置文件路径：**Linux** `~/.config/altgo/altgo.toml`，**Windows** `%APPDATA%\altgo\altgo.toml`。字段说明见主仓库 [`configs/altgo.toml`](https://github.com/cislunarspace/altgo/blob/master/configs/altgo.toml)。
 
 ## 启动
 
-安装完成后，直接运行：
-
-```bash
-altgo
-```
-
-按住 **右 Alt** 键开始说话，松开后文字自动出现在剪贴板中。
+运行 `altgo` 或安装目录下的可执行文件。按住 **右 Alt** 说话，松开后在**悬浮窗**查看结果；触发键在 **设置** 中修改。

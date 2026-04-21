@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**altgo** is a cross-platform desktop voice-to-text tool written in Rust. Hold the right Alt key to record speech, release to transcribe (via Whisper API or local whisper.cpp), polish with an LLM, and paste from clipboard.
+**altgo** is a cross-platform desktop voice-to-text tool written in Rust (product docs target **Linux** first, Ubuntu 20.04 tested). Hold the right Alt key to record speech, release to transcribe with **local whisper.cpp**, optionally polish via any **OpenAI-compatible LLM** API, and show results in a **floating overlay** for user-initiated copy (not auto-clipboard by default in end-user messaging). Code may still include optional HTTP Whisper API paths for advanced use.
 
 ## Build & Test Commands
 
@@ -19,8 +19,10 @@ cargo clippy --manifest-path=src-tauri/Cargo.toml -- -D warnings
 cargo tauri dev               # Dev mode (frontend dev server + desktop window)
 cargo tauri build            # Production GUI build
 
-make build                    # Same as `cargo tauri build` (release + bundle)
-make install                  # Install to /usr/local/bin + /etc/altgo/
+# make build: runs ensure-binary-deps (may run deps-linux / deps-windows), then
+# cargo tauri build, then copies target/deps/bin/* into src-tauri/target/release/bin/
+make build
+make install                  # After build: altgo -> /usr/local/bin, deps -> /usr/lib/altgo/bin, config -> /etc/altgo/
 ```
 
 ## Architecture
@@ -41,16 +43,17 @@ Key Listener → State Machine → Recorder → Transcriber → Polisher → Out
 ### Modules (in `src-tauri/src/`)
 
 - **`lib.rs`** — Tauri app entry point, `AppState` struct, run loop setup.
-- **`cmd.rs`** — Tauri commands exposed to frontend via IPC (get_config, save_config, start_pipeline, stop_pipeline, get_status, copy_text, hide_overlay).
-- **`config.rs`** — TOML config loading with `serde(default)` for every field. API keys overridable via `ALTGO_TRANSCRIBER_API_KEY` and `ALTGO_POLISHER_API_KEY` env vars.
+- **`cmd.rs`** — Tauri commands exposed to frontend via IPC (get_config, save_config, capture_activation_key, start_pipeline, stop_pipeline, get_status, copy_text, hide_overlay).
+- **`config.rs`** — TOML config loading with `serde(default)` for every field. API keys overridable via env vars (e.g. `ALTGO_POLISHER_API_KEY`; transcriber key if API engine used).
 - **`state_machine.rs`** — 5-state enum (`Idle`, `PotentialPress`, `Recording`, `WaitSecondClick`, `ContinuousRecording`). Long-press records, double-click enters continuous mode. Uses `tokio::select!` to race key events vs timeouts.
 - **`audio.rs`** — Thread-safe PCM buffer (`Mutex<Vec<u8>>`), WAV encode/decode (44-byte header + PCM).
 - **`transcriber.rs`** — `WhisperApi` (HTTP multipart to OpenAI-compatible endpoint) and `LocalWhisper` (subprocess to `whisper-cli` binary).
 - **`polisher.rs`** — LLM text polishing with 4 levels (`none`/`light`/`medium`/`heavy`). Retries with exponential backoff (3 attempts). Uses OpenAI-compatible chat API.
-- **`pipeline.rs`** — Core processing pipeline (transcribe + polish). Caller handles output (clipboard, notifications, GUI updates).
+- **`pipeline.rs`** — Core processing pipeline (transcribe + polish). Caller handles output (overlay UI, optional clipboard inject, notifications).
 - **`model.rs`** — whisper.cpp GGML model management (download, switch, storage in `~/.config/altgo/models/`).
 - **`tray.rs`** — System tray configuration (show window, quit menu).
 - **`resource.rs`** — Resource file management.
+- **`key_capture.rs`** — One-shot activation key capture for Settings (Linux evdev / Windows VK resolution).
 - **`key_listener/`** — Platform-specific key detection. Linux: `xinput test-xi2`. Windows: PowerShell + `GetAsyncKeyState`.
 - **`recorder/`** — Platform-specific audio capture. Linux: `parecord`. Windows: `ffmpeg`.
 - **`output/`** — Platform-specific clipboard + notifications. Linux: `xclip`/`xsel`/`wl-copy` + `notify-send`. Windows: `clip.exe`/PowerShell + BurntToast.
@@ -58,21 +61,29 @@ Key Listener → State Machine → Recorder → Transcriber → Polisher → Out
 ### Frontend Structure (`frontend/src/`)
 
 ```
-├── App.tsx              # App entry
-├── main.tsx             # React render entry
-├── overlay.tsx          # Floating window component
-├── overlay.css          # Overlay styles
+├── App.tsx                 # App entry
+├── main.tsx                # React render entry
+├── ThemeContext.tsx        # Theme provider
+├── theme.ts                # Theme tokens / persistence
+├── overlay.tsx             # Floating window component
+├── overlay.css             # Overlay styles (imports overlay-base, motion)
 ├── components/
-│   ├── ui/              # Base UI components (Input, Button, Card)
-│   ├── Layout.tsx       # Layout component
+│   ├── ui/                 # Base UI components (Input, Button, Card)
+│   ├── Layout.tsx          # Layout component
 │   └── StatusIndicator.tsx # Status indicator
 ├── pages/
-│   ├── Home.tsx         # Home page
-│   └── Settings.tsx     # Settings page
+│   ├── Home.tsx            # Home page
+│   └── Settings.tsx      # Settings page
 ├── hooks/
-│   └── useTauri.ts      # Tauri integration hook
-├── i18n/                # Internationalization
-└── styles/              # CSS styles
+│   └── useTauri.ts         # Tauri integration hook
+├── i18n/                   # Internationalization
+└── styles/
+    ├── global.css
+    ├── components.css
+    ├── design-system.css
+    ├── design-tokens.css   # Design tokens
+    ├── motion.css          # Motion / transitions
+    └── overlay-base.css    # Shared overlay layout
 ```
 
 ### Key Patterns
