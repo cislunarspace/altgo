@@ -31,6 +31,7 @@ dialoguer = "0.11"
 clap = { version = "4", features = ["derive"] }
 toml = "0.8"
 uuid = { version = "1", features = ["v4"] }
+regex = "1"
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.58", features = [

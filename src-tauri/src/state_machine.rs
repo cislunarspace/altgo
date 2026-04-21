@@ -6,7 +6,7 @@
 //! - `PotentialPress`（潜在按下）→ 按下后等待是否达到长按阈值
 //! - `Recording`（录音中）→ 长按触发，松开即停止
 //! - `WaitSecondClick`（等待第二次点击）→ 短按松开后等待双击
-//! - `ContinuousRecording`（连续录音）→ 双击触发，再次点击停止
+//! - `ContinuousRecording`（连续录音）→ 双击触发，再按一次停止；按住第二次时忽略系统按键连发直至松开
 //!
 //! 状态机通过 `tokio::select!` 同时监听按键事件和超时计时器，
 //! 以实现长按阈值和双击间隔的精确控制。
@@ -54,6 +54,10 @@ pub struct Machine {
     double_click_interval: Duration,
     min_press_duration: Duration,
     press_time: Option<Instant>,
+    /// 连续录音开始后直到出现一次松开前，忽略再次「按下」（避免系统按键重复在按住第二次时误触发停止）。
+    continuous_hold: bool,
+    /// 用「再按一次」结束连续录音后，键可能仍被按住；在收到松开前忽略按下，避免误进长按检测。
+    idle_suppress_press_until_release: bool,
 }
 
 impl Machine {
@@ -72,6 +76,8 @@ impl Machine {
             double_click_interval,
             min_press_duration,
             press_time: None,
+            continuous_hold: false,
+            idle_suppress_press_until_release: false,
         }
     }
 
@@ -80,6 +86,13 @@ impl Machine {
         let old_state = self.state;
         let cmd = match self.state {
             State::Idle => {
+                if event.pressed && self.idle_suppress_press_until_release {
+                    return None;
+                }
+                if !event.pressed && self.idle_suppress_press_until_release {
+                    self.idle_suppress_press_until_release = false;
+                    return None;
+                }
                 if event.pressed {
                     self.state = State::PotentialPress;
                     self.press_time = Some(Instant::now());
@@ -118,6 +131,7 @@ impl Machine {
                     // Double click detected → continuous recording.
                     self.state = State::ContinuousRecording;
                     self.press_time = None;
+                    self.continuous_hold = true;
                     Some(Command::StartRecord)
                 } else {
                     None
@@ -125,10 +139,16 @@ impl Machine {
             }
             State::ContinuousRecording => {
                 if event.pressed {
+                    if self.continuous_hold {
+                        return None;
+                    }
                     self.state = State::Idle;
                     self.press_time = None;
+                    self.continuous_hold = false;
+                    self.idle_suppress_press_until_release = true;
                     Some(Command::StopRecord)
                 } else {
+                    self.continuous_hold = false;
                     None
                 }
             }
@@ -296,6 +316,9 @@ mod tests {
 
         assert_eq!(sm.process(press()), Some(Command::StartRecord));
 
+        // Still holding (or OS key-repeat): must not stop until release.
+        assert_eq!(sm.process(press()), None);
+        assert_eq!(sm.process(release()), None);
         assert_eq!(sm.process(press()), Some(Command::StopRecord));
     }
 
@@ -334,6 +357,39 @@ mod tests {
     }
 
     #[test]
+    fn test_continuous_key_repeat_ignored() {
+        let threshold = Duration::from_millis(200);
+        let interval = Duration::from_millis(200);
+        let min_press = Duration::from_millis(1);
+        let mut sm = Machine::new(threshold, interval, min_press);
+
+        sm.process(press());
+        std::thread::sleep(Duration::from_millis(110));
+        sm.process(release());
+        assert_eq!(sm.process(press()), Some(Command::StartRecord));
+        assert_eq!(sm.process(press()), None);
+        assert_eq!(sm.process(release()), None);
+    }
+
+    #[test]
+    fn test_stop_continuous_suppresses_idle_press_until_release() {
+        let threshold = Duration::from_millis(200);
+        let interval = Duration::from_millis(200);
+        let min_press = Duration::from_millis(1);
+        let mut sm = Machine::new(threshold, interval, min_press);
+
+        sm.process(press());
+        std::thread::sleep(Duration::from_millis(110));
+        sm.process(release());
+        assert_eq!(sm.process(press()), Some(Command::StartRecord));
+        assert_eq!(sm.process(release()), None);
+        assert_eq!(sm.process(press()), Some(Command::StopRecord));
+        assert_eq!(sm.process(press()), None);
+        assert_eq!(sm.process(release()), None);
+        assert_eq!(sm.state, State::Idle);
+    }
+
+    #[test]
     fn test_spurious_quick_release_rejected() {
         let threshold = Duration::from_millis(300);
         let interval = Duration::from_millis(300);
@@ -344,6 +400,8 @@ mod tests {
             double_click_interval: interval,
             min_press_duration: Duration::from_millis(1),
             press_time: None,
+            continuous_hold: false,
+            idle_suppress_press_until_release: false,
         };
 
         assert_eq!(sm.process(press()), None);

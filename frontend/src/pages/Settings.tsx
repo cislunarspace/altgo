@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { message as showMessageDialog } from "@tauri-apps/plugin-dialog";
 import { useTranslation } from "../i18n";
 import { useModelDownloadProgress } from "../hooks/useTauri";
@@ -175,8 +176,44 @@ export default function Settings() {
 
   const downloadAndUse = async (name: string) => {
     setDownloading(name);
+    type FinishPayload = {
+      name: string;
+      success: boolean;
+      path?: string;
+      error?: string;
+    };
+    let resolveFinished!: (v: {
+      success: boolean;
+      path?: string;
+      error?: string;
+    }) => void;
+    const finished = new Promise<{
+      success: boolean;
+      path?: string;
+      error?: string;
+    }>((resolve) => {
+      resolveFinished = resolve;
+    });
+
+    const unlisten = await listen<FinishPayload>("model-download-finished", (event) => {
+      const p = event.payload;
+      if (p.name !== name) return;
+      resolveFinished({
+        success: p.success,
+        path: p.path,
+        error: p.error,
+      });
+    });
+
     try {
       await invoke("download_model", { name });
+      const result = await finished;
+
+      if (!result.success) {
+        await reportModelFailure(result.error ?? "download failed");
+        return;
+      }
+
       const updated = await invoke<ModelEntry[]>("list_models");
       setModels(updated);
       if (!config) return;
@@ -191,6 +228,7 @@ export default function Settings() {
     } catch (e) {
       await reportModelFailure(e);
     } finally {
+      unlisten();
       setDownloading(null);
     }
   };

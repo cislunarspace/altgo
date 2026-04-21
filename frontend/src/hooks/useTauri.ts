@@ -70,6 +70,42 @@ export function useKeyListenerBackend(): string | null {
   return backend;
 }
 
+/** 转写/润色阶段进度（`fraction` 为 null 时不确定进度，如云端 API 或未解析到 whisper-cli 输出）。 */
+export function useTranscriptionProgress(): {
+  phase: string;
+  fraction: number | null;
+} | null {
+  const [progress, setProgress] = useState<{
+    phase: string;
+    fraction: number | null;
+  } | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    const unlistenProgress = listen<{
+      phase: string;
+      fraction: number | null;
+    }>("transcription-progress", (event) => {
+      if (active) {
+        setProgress(event.payload);
+      }
+    });
+    const unlistenStatus = listen<string>("pipeline-status", (event) => {
+      if (!active) return;
+      if (event.payload !== "processing") {
+        setProgress(null);
+      }
+    });
+    return () => {
+      active = false;
+      unlistenProgress.then((fn) => fn());
+      unlistenStatus.then((fn) => fn());
+    };
+  }, []);
+
+  return progress;
+}
+
 export function useModelDownloadProgress(): {
   name: string | null;
   downloaded: number;

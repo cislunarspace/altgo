@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use serde::{Deserialize, Deserializer, Serialize};
 use tauri::{
-    AppHandle, Emitter, LogicalSize, Manager, Monitor, PhysicalPosition, PhysicalSize, State,
+    AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, PhysicalSize, State,
 };
 
 use crate::{
@@ -17,6 +17,8 @@ use crate::{
 
 const OVERLAY_RECORDING_W: f64 = 200.0;
 const OVERLAY_RECORDING_H: f64 = 48.0;
+const OVERLAY_PROCESSING_W: f64 = 268.0;
+const OVERLAY_PROCESSING_H: f64 = 56.0;
 const OVERLAY_RESULT_W: f64 = 520.0;
 const OVERLAY_RESULT_H: f64 = 100.0;
 const OVERLAY_BOTTOM_OFFSET: f64 = 80.0;
@@ -144,8 +146,16 @@ fn emit_pipeline_status(
     }
 }
 
+fn emit_transcription_progress(app: &tauri::AppHandle, phase: &str, fraction: Option<f32>) {
+    let _ = app.emit(
+        "transcription-progress",
+        serde_json::json!({ "phase": phase, "fraction": fraction }),
+    );
+}
+
 /// Linux: root-window mouse coordinates from `xdotool` (physical pixels).
 #[cfg(target_os = "linux")]
+#[allow(dead_code)]
 fn mouse_position_physical() -> Option<(i32, i32)> {
     let mouse_out = std::process::Command::new("xdotool")
         .args(["getmouselocation", "--shell"])
@@ -188,27 +198,102 @@ fn mouse_position_physical() -> Option<(i32, i32)> {
     None
 }
 
-/// Pick the monitor under the cursor using the same coordinate space as Tauri/GTK (`monitor_from_point`).
-/// Falls back to the primary monitor if the cursor cannot be read or no monitor contains the point.
-fn resolve_monitor_at_cursor(overlay: &tauri::WebviewWindow) -> Option<Monitor> {
-    if let Some((x, y)) = mouse_position_physical() {
-        match overlay.monitor_from_point(x as f64, y as f64) {
-            Ok(Some(m)) => return Some(m),
-            Ok(None) => tracing::debug!("monitor_from_point: no monitor for cursor ({}, {})", x, y),
-            Err(e) => tracing::warn!(error = %e, "monitor_from_point failed"),
-        }
-    } else {
-        tracing::debug!("mouse position unavailable; using primary monitor for overlay");
+/// Linux: get the primary (or first) monitor geometry from `xrandr` in X11
+/// device coordinates. Returns (x, y, width, height).
+#[cfg(target_os = "linux")]
+fn xrandr_primary_monitor() -> Option<(i32, i32, i32, i32)> {
+    let output = std::process::Command::new("xrandr").output().ok()?;
+    if !output.status.success() {
+        return None;
     }
+    let text = String::from_utf8_lossy(&output.stdout);
+    let monitors = parse_xrandr_geometry(&text);
 
-    overlay.primary_monitor().ok().flatten()
+    // Prefer the explicitly-marked primary monitor.
+    monitors
+        .iter()
+        .find(|m| m.4)
+        .map(|m| (m.0, m.1, m.2, m.3))
+        .or_else(|| monitors.into_iter().next().map(|m| (m.0, m.1, m.2, m.3)))
 }
 
-fn position_overlay(overlay: &tauri::WebviewWindow, width: f64, height: f64) {
+#[cfg(target_os = "linux")]
+fn parse_xrandr_geometry(output: &str) -> Vec<(i32, i32, i32, i32, bool)> {
+    let mut monitors = Vec::new();
+    for line in output.lines() {
+        // Match lines like:
+        //   DP-1 connected primary 1920x1080+0+0 ...
+        //   HDMI-1 connected 1920x1080+1920+0 ...
+        if !line.contains(" connected ") {
+            continue;
+        }
+        let is_primary = line.contains(" connected primary ");
+        let after_conn = if is_primary {
+            line.split(" connected primary ").nth(1)
+        } else {
+            line.split(" connected ").nth(1)
+        };
+        let after_conn = match after_conn {
+            Some(s) => s,
+            None => continue,
+        };
+        // Find the geometry string "WxH+X+Y"
+        let end = after_conn.find(' ').unwrap_or(after_conn.len());
+        let geo = &after_conn[..end];
+
+        // Parse WxH+X+Y
+        let Some(x_idx) = geo.find('x') else { continue };
+        let Some(plus1) = geo.find('+') else { continue };
+        let Some(plus2) = geo.rfind('+') else { continue };
+        if plus1 == plus2 {
+            continue; // only one '+'
+        }
+
+        let w = geo[..x_idx].parse::<i32>().unwrap_or(0);
+        let h = geo[x_idx + 1..plus1].parse::<i32>().unwrap_or(0);
+        let x = geo[plus1 + 1..plus2].parse::<i32>().unwrap_or(0);
+        let y = geo[plus2 + 1..].parse::<i32>().unwrap_or(0);
+
+        if w > 0 && h > 0 {
+            monitors.push((x, y, w, h, is_primary));
+        }
+    }
+    monitors
+}
+
+/// Linux: position overlay on the **primary** monitor only.
+#[cfg(target_os = "linux")]
+fn position_overlay_linux(overlay: &tauri::WebviewWindow, width: f64, height: f64) -> Result<(), String> {
     let _ = overlay.set_size(LogicalSize::new(width, height));
 
-    let Some(monitor) = resolve_monitor_at_cursor(overlay) else {
-        tracing::warn!("no monitor available for overlay positioning");
+    let Some((mx, my, mw, mh)) = xrandr_primary_monitor() else {
+        return Err("xrandr returned no primary monitor".into());
+    };
+
+    let scale = overlay.scale_factor().map_err(|e| e.to_string())?;
+    let phys_w = (width * scale).round() as i32;
+    let phys_h = (height * scale).round() as i32;
+    let offset_phys = (OVERLAY_BOTTOM_OFFSET * scale).round() as i32;
+
+    let x = mx + (mw - phys_w) / 2;
+    let y = my + mh - phys_h - offset_phys;
+
+    tracing::debug!(
+        "linux overlay pos: primary=({},{},{},{}) pos=({},{}) scale={}",
+        mx, my, mw, mh, x, y, scale
+    );
+
+    overlay
+        .set_position(PhysicalPosition::new(x, y))
+        .map_err(|e| e.to_string())
+}
+
+/// Windows / fallback: position overlay on the **primary** monitor only.
+fn position_overlay_tauri(overlay: &tauri::WebviewWindow, width: f64, height: f64) {
+    let _ = overlay.set_size(LogicalSize::new(width, height));
+
+    let Some(monitor) = overlay.primary_monitor().ok().flatten() else {
+        tracing::warn!("no primary monitor available for overlay positioning");
         return;
     };
 
@@ -227,6 +312,27 @@ fn position_overlay(overlay: &tauri::WebviewWindow, width: f64, height: f64) {
     let y = pos.y + mh - phys_h - offset_phys;
 
     let _ = overlay.set_position(PhysicalPosition::new(x, y));
+}
+
+fn position_overlay(overlay: &tauri::WebviewWindow, width: f64, height: f64) {
+    #[cfg(target_os = "linux")]
+    {
+        if let Err(e) = position_overlay_linux(overlay, width, height) {
+            tracing::warn!("linux overlay positioning failed ({}), falling back", e);
+            position_overlay_tauri(overlay, width, height);
+        }
+        return;
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        position_overlay_tauri(overlay, width, height);
+    }
+
+    #[cfg(not(any(target_os = "linux", target_os = "windows")))]
+    {
+        position_overlay_tauri(overlay, width, height);
+    }
 }
 
 #[derive(Serialize)]
@@ -673,7 +779,7 @@ pub async fn run_pipeline(
                         }
                         emit_pipeline_status(&app, &pipeline_status, "processing");
                         if let Some(overlay) = app.get_webview_window("overlay") {
-                            position_overlay(&overlay, OVERLAY_RECORDING_W, OVERLAY_RECORDING_H);
+                            position_overlay(&overlay, OVERLAY_PROCESSING_W, OVERLAY_PROCESSING_H);
                             let _ = overlay.show();
                         }
                         let wav_data = match recorder.stop() {
@@ -695,11 +801,15 @@ pub async fn run_pipeline(
                         let pipeline_status = pipeline_status.clone();
 
                         tokio::spawn(async move {
+                            let app_progress = app.clone();
                             match pipeline::process_audio_core(
                                 &transcriber,
                                 &formatter,
                                 &wav_data,
                                 polish_level,
+                                |phase, fraction| {
+                                    emit_transcription_progress(&app_progress, phase, fraction);
+                                },
                             )
                             .await
                             {
@@ -814,8 +924,17 @@ pub async fn list_models() -> Result<Vec<ModelEntry>, String> {
     Ok(entries)
 }
 
+/// 在后台下载模型并立即返回，避免 GUI 长时间占用 IPC（大模型可达数 GB）。
+/// 进度见 `model-download-progress`，结束见 `model-download-finished`（`success` / `error` / `path`）。
 #[tauri::command]
-pub async fn download_model(app: tauri::AppHandle, name: String) -> Result<String, String> {
+pub async fn download_model(app: tauri::AppHandle, name: String) -> Result<(), String> {
+    if crate::model::models_info()
+        .iter()
+        .all(|m| m.name != name.as_str())
+    {
+        return Err(format!("unknown model: {}", name));
+    }
+
     if let Some(info) = crate::model::models_info()
         .iter()
         .find(|m| m.name == name.as_str())
@@ -829,23 +948,51 @@ pub async fn download_model(app: tauri::AppHandle, name: String) -> Result<Strin
             }),
         );
     }
-    crate::model::download_with_progress(&name, {
-        let app = app.clone();
-        let name_clone = name.clone();
-        move |downloaded, total| {
-            let _ = app.emit(
-                "model-download-progress",
-                serde_json::json!({
-                    "name": name_clone,
-                    "downloaded": downloaded,
-                    "total": total,
-                }),
-            );
+
+    let app_task = app.clone();
+    let name_task = name.clone();
+    tauri::async_runtime::spawn(async move {
+        let result = crate::model::download_with_progress(&name_task, {
+            let app = app_task.clone();
+            let name_clone = name_task.clone();
+            move |downloaded, total| {
+                let _ = app.emit(
+                    "model-download-progress",
+                    serde_json::json!({
+                        "name": name_clone,
+                        "downloaded": downloaded,
+                        "total": total,
+                    }),
+                );
+            }
+        })
+        .await;
+
+        match result {
+            Ok(path) => {
+                let _ = app_task.emit(
+                    "model-download-finished",
+                    serde_json::json!({
+                        "name": name_task,
+                        "success": true,
+                        "path": path.to_string_lossy(),
+                    }),
+                );
+            }
+            Err(e) => {
+                let _ = app_task.emit(
+                    "model-download-finished",
+                    serde_json::json!({
+                        "name": name_task,
+                        "success": false,
+                        "error": e.to_string(),
+                    }),
+                );
+            }
         }
-    })
-    .await
-    .map(|p| p.to_string_lossy().to_string())
-    .map_err(|e| e.to_string())
+    });
+
+    Ok(())
 }
 
 #[tauri::command]

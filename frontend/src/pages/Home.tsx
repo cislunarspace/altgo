@@ -3,6 +3,7 @@ import {
   useLatestTranscription,
   usePipelineError,
   useKeyListenerBackend,
+  useTranscriptionProgress,
 } from "../hooks/useTauri";
 import { useTranslation } from "../i18n";
 import { StatusIndicator } from "../components/StatusIndicator";
@@ -17,6 +18,7 @@ export default function Home() {
   const transcription = useLatestTranscription();
   const error = usePipelineError();
   const keyBackend = useKeyListenerBackend();
+  const txProgress = useTranscriptionProgress();
   const [copied, setCopied] = useState(false);
 
   const handleCopy = async () => {
@@ -51,6 +53,32 @@ export default function Home() {
       {!transcription ? (
         <div className="home-idle">
           <StatusIndicator status={mappedStatus} size="lg" />
+          {mappedStatus === "processing" && (
+            <div className="home-tx-progress-wrap">
+              <span className="home-tx-progress-phase">
+                {txProgress?.phase === "polish"
+                  ? t("overlay.polishing")
+                  : t("overlay.transcribing")}
+              </span>
+              <div className="home-tx-progress-bar">
+                <div
+                  className={`home-tx-progress-fill ${
+                    txProgress?.fraction == null ? "indeterminate" : ""
+                  }`}
+                  style={
+                    txProgress?.fraction != null
+                      ? {
+                          width: `${Math.min(
+                            100,
+                            Math.max(0, txProgress.fraction * 100)
+                          )}%`,
+                        }
+                      : undefined
+                  }
+                />
+              </div>
+            </div>
+          )}
           <p className="home-hint">{t("main.hint")}</p>
           <p className="home-hint-clipboard">{t("main.hint_clipboard")}</p>
           {keyBackend && (

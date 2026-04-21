@@ -16,6 +16,10 @@ function Overlay() {
   const [copied, setCopied] = useState(false);
   const [isExiting, setIsExiting] = useState(false);
   const [displayedStatus, setDisplayedStatus] = useState<string | null>(null);
+  const [txProgress, setTxProgress] = useState<{
+    phase: string;
+    fraction: number | null;
+  } | null>(null);
   const prevStatusRef = useRef("idle");
   const exitTimerRef = useRef<number | null>(null);
   const statusRef = useRef(status);
@@ -43,6 +47,7 @@ function Overlay() {
       const currentDisplayed = displayedStatusRef.current;
 
       if (newStatus === "idle" || newStatus === "stopped") {
+        setTxProgress(null);
         // Transitioning to hidden state
         if (prevStatusRef.current === "idle" || prevStatusRef.current === "stopped") {
           // Already hidden, just update
@@ -59,6 +64,9 @@ function Overlay() {
           }, 150);
         }
       } else {
+        if (newStatus !== "processing") {
+          setTxProgress(null);
+        }
         // Transitioning to a visible state
         if (currentDisplayed === null || currentDisplayed === "idle" || currentDisplayed === "stopped") {
           // From hidden, just show directly
@@ -81,10 +89,18 @@ function Overlay() {
       setResult(event.payload);
       setCopied(false);
     });
+    const unlistenTxProgress = listen<{
+      phase: string;
+      fraction: number | null;
+    }>("transcription-progress", (event) => {
+      if (!active) return;
+      setTxProgress(event.payload);
+    });
     return () => {
       active = false;
       unlistenStatus.then((fn) => fn());
       unlistenResult.then((fn) => fn());
+      unlistenTxProgress.then((fn) => fn());
       if (exitTimerRef.current !== null) {
         clearTimeout(exitTimerRef.current);
         exitTimerRef.current = null;
@@ -162,12 +178,35 @@ function Overlay() {
         </>
       )}
       {displayedStatus === "processing" && (
-        <>
-          <div className="processing-indicator">
-            <div className="processing-ring" />
+        <div className="island-processing-inner">
+          <div className="island-processing-row">
+            <div className="processing-indicator">
+              <div className="processing-ring" />
+            </div>
+            <span className="label">
+              {txProgress?.phase === "polish"
+                ? t("overlay.polishing")
+                : t("overlay.transcribing")}
+            </span>
           </div>
-          <span className="label">{t("overlay.processing")}</span>
-        </>
+          <div className="overlay-tx-progress-track">
+            <div
+              className={`overlay-tx-progress-fill ${
+                txProgress?.fraction == null ? "indeterminate" : ""
+              }`}
+              style={
+                txProgress?.fraction != null
+                  ? {
+                      width: `${Math.min(
+                        100,
+                        Math.max(0, txProgress.fraction * 100)
+                      )}%`,
+                    }
+                  : undefined
+              }
+            />
+          </div>
+        </div>
       )}
     </div>
   );

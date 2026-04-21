@@ -94,6 +94,95 @@
   animation: overlay-spin 0.9s linear infinite;
 }
 
+/* Transcription progress (under processing indicator) */
+.island-processing-inner {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 220px;
+}
+
+.island-processing-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.overlay-tx-progress-track {
+  height: 5px;
+  border-radius: 999px;
+  background: var(--overlay-processing-track);
+  overflow: hidden;
+  position: relative;
+}
+
+.overlay-tx-progress-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(
+    90deg,
+    var(--color-amber) 0%,
+    color-mix(in srgb, var(--color-amber) 72%, #ffffff) 50%,
+    var(--color-amber) 100%
+  );
+  background-size: 200% 100%;
+  box-shadow: 0 0 10px 1px var(--color-amber-glow);
+  transition: width 0.35s var(--ease-out, ease-out);
+  position: relative;
+  overflow: hidden;
+  animation: shimmer 1.8s linear infinite;
+}
+
+.overlay-tx-progress-fill::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.28) 45%,
+    rgba(255, 255, 255, 0.28) 55%,
+    transparent 100%
+  );
+  transform: skewX(-18deg) translateX(-150%);
+  animation: sheen 1.8s ease-in-out infinite;
+}
+
+.overlay-tx-progress-fill.indeterminate {
+  width: 40% !important;
+  animation:
+    overlay-tx-progress-slide 1.4s cubic-bezier(0.4, 0, 0.2, 1) infinite alternate,
+    shimmer 1.8s linear infinite,
+    sheen 1.8s ease-in-out infinite;
+}
+
+@keyframes overlay-tx-progress-slide {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(150%);
+  }
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+@keyframes sheen {
+  0% {
+    transform: skewX(-18deg) translateX(-150%);
+  }
+  100% {
+    transform: skewX(-18deg) translateX(250%);
+  }
+}
+
 /* ============================================
    Done Indicator
    ============================================ */

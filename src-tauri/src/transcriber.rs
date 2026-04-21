@@ -8,12 +8,33 @@
 //! 两种后端均返回 `TranscribeResult`，包含识别文本和语言信息。
 
 use anyhow::{anyhow, Context};
+use regex::Regex;
 use reqwest::Client;
 use serde::Deserialize;
 use std::path::PathBuf;
 use std::time::Duration;
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
+use tokio::sync::mpsc::UnboundedSender;
 
 /// Expand tilde in path to home directory.
+fn stderr_fraction(line: &str, re_percent: &Regex, re_ratio: &Regex) -> Option<f32> {
+    if let Some(c) = re_percent.captures(line) {
+        if let Ok(p) = c[1].parse::<u32>() {
+            if p <= 100 {
+                return Some((p as f32 / 100.0).clamp(0.0, 1.0));
+            }
+        }
+    }
+    if let Some(c) = re_ratio.captures(line) {
+        if let (Ok(a), Ok(b)) = (c[1].parse::<u64>(), c[2].parse::<u64>()) {
+            if b > 0 {
+                return Some(((a as f32) / (b as f32)).clamp(0.0, 1.0));
+            }
+        }
+    }
+    None
+}
+
 fn expand_tilde(path: &str) -> PathBuf {
     if path.starts_with("~/") {
         if let Some(home) = dirs::home_dir() {
@@ -160,7 +181,12 @@ impl LocalWhisper {
     /// 通过本地 `whisper-cli` 子进程识别音频数据。
     ///
     /// 音频数据先写入临时文件，然后调用 whisper-cli 进行识别。
-    pub async fn transcribe(&self, audio_data: &[u8]) -> anyhow::Result<TranscribeResult> {
+    /// `progress` 在解析到 stderr 中的进度片段时发送 0.0–1.0（依赖 whisper-cli 输出格式）。
+    pub async fn transcribe(
+        &self,
+        audio_data: &[u8],
+        progress: Option<UnboundedSender<f32>>,
+    ) -> anyhow::Result<TranscribeResult> {
         if audio_data.is_empty() {
             return Err(anyhow!("empty audio data"));
         }
@@ -187,14 +213,57 @@ impl LocalWhisper {
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped());
 
-        let output = cmd.output().await.context("failed to run whisper-cli")?;
+        let mut child = cmd.spawn().context("failed to spawn whisper-cli")?;
+        let stdout = child.stdout.take().context("whisper-cli stdout")?;
+        let stderr = child.stderr.take().context("whisper-cli stderr")?;
 
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(anyhow!("whisper-cli failed: {}", stderr));
+        let stderr_task = progress.map(|tx| {
+            let re_percent = Regex::new(r"(\d{1,3})\s*%").expect("valid regex");
+            let re_ratio = Regex::new(r"(\d+)\s*/\s*(\d+)").expect("valid regex");
+            tokio::spawn(async move {
+                let mut reader = BufReader::new(stderr);
+                let mut line = String::new();
+                loop {
+                    line.clear();
+                    match reader.read_line(&mut line).await {
+                        Ok(0) => break,
+                        Ok(_) => {
+                            if let Some(fr) = stderr_fraction(&line, &re_percent, &re_ratio) {
+                                let _ = tx.send(fr);
+                            }
+                        }
+                        Err(_) => break,
+                    }
+                }
+            })
+        });
+
+        let stdout_task = tokio::spawn(async move {
+            let mut buf = Vec::new();
+            let mut s = stdout;
+            s.read_to_end(&mut buf).await?;
+            Ok::<_, std::io::Error>(buf)
+        });
+
+        let status = child.wait().await.context("failed to run whisper-cli")?;
+        let stdout_buf = stdout_task
+            .await
+            .context("whisper stdout task")?
+            .context("read whisper stdout")?;
+
+        if let Some(t) = stderr_task {
+            let _ = t.await;
         }
 
-        let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if !status.success() {
+            return Err(anyhow!(
+                "whisper-cli failed (status {:?}); stdout: {}",
+                status,
+                String::from_utf8_lossy(&stdout_buf)
+            ));
+        }
+
+        let text = String::from_utf8_lossy(&stdout_buf).trim().to_string();
 
         Ok(TranscribeResult {
             text,
@@ -299,10 +368,17 @@ pub enum Transcriber {
 
 impl Transcriber {
     /// Transcribe audio data using the selected backend.
-    pub async fn transcribe(&self, wav_data: &[u8]) -> anyhow::Result<TranscribeResult> {
+    pub async fn transcribe(
+        &self,
+        wav_data: &[u8],
+        progress: Option<UnboundedSender<f32>>,
+    ) -> anyhow::Result<TranscribeResult> {
         match self {
-            Transcriber::Api(api) => api.transcribe(wav_data).await,
-            Transcriber::Local(lw) => lw.transcribe(wav_data).await,
+            Transcriber::Api(api) => {
+                let _ = progress;
+                api.transcribe(wav_data).await
+            }
+            Transcriber::Local(lw) => lw.transcribe(wav_data, progress).await,
         }
     }
 }
@@ -310,6 +386,20 @@ impl Transcriber {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_stderr_fraction_parses_percent_and_ratio() {
+        let re_p = Regex::new(r"(\d{1,3})\s*%").unwrap();
+        let re_r = Regex::new(r"(\d+)\s*/\s*(\d+)").unwrap();
+        assert_eq!(
+            stderr_fraction("decode: 45% done", &re_p, &re_r),
+            Some(0.45)
+        );
+        assert_eq!(
+            stderr_fraction(" 12 / 40 ", &re_p, &re_r),
+            Some(0.3)
+        );
+    }
 
     #[tokio::test]
     async fn test_transcribe_empty_audio() {
@@ -409,7 +499,7 @@ mod tests {
             "zh".to_string(),
             String::new(),
         );
-        let result = lw.transcribe(&[]).await;
+        let result = lw.transcribe(&[], None).await;
         assert!(result.is_err());
     }
 }
