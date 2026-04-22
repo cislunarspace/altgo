@@ -7,6 +7,9 @@
 //! - `medium`：修复标点、错别字和语病，使语句更通顺
 //! - `heavy`：重写为结构清晰、表达准确的文字
 //!
+//! 当语言为 `zh` 时，内置系统提示会约束输出为规范简体中文，并合并：材料概括类写作要求，以及本地安装的
+//! **ljg-writes** / **ljg-plain**（lijigang/ljg-skills）中与「口语文本润色」相关的取向（非全文摘抄 skill 文件）。
+//!
 //! 使用兼容 OpenAI 的聊天 API，支持指数退避重试（最多 3 次）。
 
 use anyhow::{anyhow, Context};
@@ -71,9 +74,21 @@ impl std::str::FromStr for PolishLevel {
     }
 }
 
+/// 中文润色时附加的写作与材料概括要求（与简体约束一并传入模型）。
+const ZH_WRITE_GUIDANCE: &str = r#"注意写作的要求：要善于总结材料，这种总结就是将丰富的感性材料科学地加以概括，进行去粗取精、去伪存真、由此及彼、由表及里地加工改造。具体地讲，就是把材料搞全了、弄准了，把问题掰开了、揉碎了，把内在联系理清了、摆正了，这样才可以得到反映事物本质的真知和理论，才可以发现事物运动的规律。“关于写文章，请注意不要用过于夸大的修饰词，反而减损了力量。必须注意各种词语的逻辑界限和整篇文章的条理（也是逻辑问题）。废话应当尽量除去。”“文章写得通俗、亲切，由小讲到大，由近讲到远，引人入胜，这就很好。”“要采取和读者完全平等的态度。我们应该老老实实地办事，对事物有分析，写文章有说服力，不要靠装腔作势来吓人。”“总是先讲死人、外国人，这不好，应当从当前形势讲起。今后写文章要通俗，使工农都能接受。”"#;
+
+/// 与语音转写润色相关的 **ljg-writes** / **ljg-plain** 取向（摘自用户本机 skill 要义，不含 Org/文件输出等仅技能执行用条款）。
+const ZH_LJG_GUIDANCE: &str = r#"
+
+【ljg-writes / ljg-plain（语音后润色适用；内化即可，勿输出本段标题或标签）】
+姿态与诚实：心里是对一个具体的人讲，不是对抽象的「读者们」；不确定就保留不确定感，「大概七成」比空泛的「可能」诚实；忌群体代言、忌编经历、忌元评论（如「接下来我们讨论」）；禁止用「再深入一层」「最深的一层是」等宣告深度——深度靠下一句内容让人感受到，不靠自报。
+语言：简洁、直白、质朴；能短则短；动词用准；砍掉机械连词（此外、另外）、形容词堆叠与软化套话（某种程度上、值得注意的是）；翻译腔句式（像英译中硬套）改成自然汉语；避免同一句式套话重复出现。
+白话（ljg-plain 红线精神，按短文本尽量满足）：口语检验——像跟聪明朋友当面说吗；短词优先；一句一事，长句拆开；名词能具体则具体，动词有力，能删的形容词就删；开头少空泛铺陈与「自古以来」式引子；删开场白、拐杖词、宣传腔与夸大象征（标志着、见证了、充满活力等）；信任读者，不凑字数式手把手；专业词非必要不出现，必须出现时先大白话落地再点术语。
+磨与中文：弱化学术/ AI 腔与「谁写都一样」的模板句；从句拆开、嵌套展平，发挥汉语意合；同一意思选最顺口的地道说法。"#;
+
 fn get_system_prompt(level: PolishLevel, language: &str) -> String {
     let lang_name = match language {
-        "zh" => "中文",
+        "zh" => "Simplified Chinese (简体中文, Mainland standard)",
         "en" => "English",
         "ja" => "日本語",
         "ko" => "한국어",
@@ -83,11 +98,40 @@ fn get_system_prompt(level: PolishLevel, language: &str) -> String {
         _ => language,
     };
 
+    // 明确约束简体，避免模型按「繁体/港台书面」习惯输出。
+    let zh_script_rule = if language == "zh" {
+        " For Chinese: output in Simplified Chinese only (大陆通用规范简体). Never use Traditional Chinese. If the input is Traditional, convert to Simplified. "
+    } else {
+        ""
+    };
+
+    // 写作与表达要求：全文融入用户提供的规范；轻量润色时强调不改结构、仅作最小必要调整。
+    let zh_combined: String = if language == "zh" && !matches!(level, PolishLevel::None) {
+        let intro = match level {
+            PolishLevel::None => "",
+            PolishLevel::Light => {
+                " For light polish: do not restructure; tiny edits only. When text is Chinese, also heed these norms in spirit: "
+            }
+            PolishLevel::Medium | PolishLevel::Heavy => {
+                " When output is Chinese, follow these writing norms: "
+            }
+        };
+        format!("{intro}{ZH_WRITE_GUIDANCE}{ZH_LJG_GUIDANCE}")
+    } else {
+        String::new()
+    };
+
     match level {
         PolishLevel::None => String::new(),
-        PolishLevel::Light => format!("You are a post-processing assistant for speech-to-text in {lang_name}. The user gives you raw speech recognition text in {lang_name}. Fix punctuation and obvious typos without changing the original meaning or word choices. Output only the corrected text with no explanation."),
-        PolishLevel::Medium => format!("You are a post-processing assistant for speech-to-text in {lang_name}. The user gives you raw speech recognition text in {lang_name}. Fix punctuation, typos, and grammar issues to make the text more fluent and natural, without changing the original meaning. Output only the corrected text with no explanation."),
-        PolishLevel::Heavy => format!("You are a post-processing assistant for speech-to-text in {lang_name}. The user gives you raw speech recognition text in {lang_name}. Rewrite it into well-structured, clearly expressed text. You may adjust word order and phrasing, but preserve the core meaning. Output only the rewritten text with no explanation."),
+        PolishLevel::Light => format!(
+            "You are a post-processing assistant for speech-to-text in {lang_name}. The user gives you raw speech recognition text in {lang_name}. Fix punctuation and obvious typos without changing the original meaning or word choices. Output only the corrected text with no explanation.{zh_script_rule}{zh_combined}"
+        ),
+        PolishLevel::Medium => format!(
+            "You are a post-processing assistant for speech-to-text in {lang_name}. The user gives you raw speech recognition text in {lang_name}. Fix punctuation, typos, and grammar issues to make the text more fluent and natural, without changing the original meaning. Output only the corrected text with no explanation.{zh_script_rule}{zh_combined}"
+        ),
+        PolishLevel::Heavy => format!(
+            "You are a post-processing assistant for speech-to-text in {lang_name}. The user gives you raw speech recognition text in {lang_name}. Rewrite it into well-structured, clearly expressed text. You may adjust word order and phrasing, but preserve the core meaning. Output only the rewritten text with no explanation.{zh_script_rule}{zh_combined}"
+        ),
     }
 }
 

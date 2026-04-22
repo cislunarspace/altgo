@@ -132,42 +132,40 @@ function Overlay() {
 
   if ((displayedStatus === "done" || status === "done") && result) {
     return (
-      <div className={`island ${isExiting ? "island-exit" : ""}`}>
-        <div className="island-result">
-          <div className="done-indicator">
-            <Check size={12} className="done-icon" />
-          </div>
-          <div className="result-content">
-            <span className="result-text">{result}</span>
-          </div>
-          <div className="result-actions">
-            <button
-              type="button"
-              className={`btn-copy ${copied ? "copied" : ""}`}
-              onClick={handleCopy}
-              aria-label={copied ? t("overlay.copied") : t("overlay.copy")}
-            >
-              {copied ? (
-                <>
-                  <Check size={13} />
-                  <span>{t("overlay.copied")}</span>
-                </>
-              ) : (
-                <>
-                  <Copy size={13} />
-                  <span>{t("overlay.copy")}</span>
-                </>
-              )}
-            </button>
-            <button
-              type="button"
-              className="btn-close"
-              onClick={handleClose}
-              aria-label={t("overlay.close")}
-            >
-              <X size={14} aria-hidden />
-            </button>
-          </div>
+      <div className={`island-result ${isExiting ? "island-exit" : ""}`}>
+        <div className="done-indicator">
+          <Check size={14} className="done-icon" strokeWidth={2.5} />
+        </div>
+        <div className="result-content">
+          <span className="result-text">{result}</span>
+        </div>
+        <div className="result-actions">
+          <button
+            type="button"
+            className={`btn-copy ${copied ? "copied" : ""}`}
+            onClick={handleCopy}
+            aria-label={copied ? t("overlay.copied") : t("overlay.copy")}
+          >
+            {copied ? (
+              <>
+                <Check size={14} strokeWidth={2.5} />
+                <span>{t("overlay.copied")}</span>
+              </>
+            ) : (
+              <>
+                <Copy size={14} strokeWidth={2} />
+                <span>{t("overlay.copy")}</span>
+              </>
+            )}
+          </button>
+          <button
+            type="button"
+            className="btn-close"
+            onClick={handleClose}
+            aria-label={t("overlay.close")}
+          >
+            <X size={14} strokeWidth={2.5} aria-hidden />
+          </button>
         </div>
       </div>
     );

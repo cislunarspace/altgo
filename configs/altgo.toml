@@ -37,7 +37,7 @@ level = "none"                      # 润色级别："none"（禁用）、"light
 max_tokens = 1024                   # LLM 响应的最大 token 数
 timeout_seconds = 60
 temperature = 0.3                   # LLM temperature（0.0-2.0）
-system_prompt = ""                  # 自定义 system prompt，为空则使用内置多语言 prompt
+system_prompt = ""                  # 自定义则完全替换内置；为空时按 [transcriber] language 生成（中文默认输出简体中文，勿繁体）
 
 [output]
 enable_notify = true
