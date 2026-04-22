@@ -15,9 +15,11 @@ pub(crate) use linux::list_keyboard_devices;
 mod windows;
 
 #[cfg(target_os = "linux")]
+#[allow(dead_code)]
 pub type PlatformListener = linux::X11Listener;
 
 #[cfg(target_os = "windows")]
+#[allow(dead_code)]
 pub type PlatformListener = windows::WindowsListener;
 
 /// 按键事件。

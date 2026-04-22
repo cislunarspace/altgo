@@ -12,7 +12,6 @@ use std::process::{Command, Stdio};
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 /// 通过 PowerShell Set-Clipboard 将文本写入 Windows 剪切板。
-#[allow(dead_code)]
 pub async fn write_clipboard(text: &str) -> anyhow::Result<()> {
     let text = text.to_string();
     tokio::task::spawn_blocking(move || {
@@ -50,6 +49,7 @@ pub async fn write_clipboard(text: &str) -> anyhow::Result<()> {
 }
 
 /// 检查当前焦点元素是否为接受文本输入的控件。
+#[allow(dead_code)]
 fn is_text_input_focused() -> bool {
     let ps_script = r#"
         Add-Type -AssemblyName UIAutomationClient
@@ -75,6 +75,7 @@ fn is_text_input_focused() -> bool {
 }
 
 /// 通过 SendInput 发送 Unicode 文本到当前焦点窗口。
+#[allow(dead_code)]
 fn send_unicode_text(text: &str) -> anyhow::Result<()> {
     use windows::Win32::UI::Input::KeyboardAndMouse::{
         SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP, KEYEVENTF_UNICODE,
@@ -122,6 +123,7 @@ fn send_unicode_text(text: &str) -> anyhow::Result<()> {
 }
 
 /// 尝试将文本注入到当前光标位置。返回原因描述。
+#[allow(dead_code)]
 pub fn try_inject_at_cursor(text: &str) -> &'static str {
     if !is_text_input_focused() {
         return "not_text_field";
@@ -138,6 +140,7 @@ pub fn try_inject_at_cursor(text: &str) -> &'static str {
 // ─── Floating windows ──────────────────────────────────────────────────────────
 
 /// 从系统获取屏幕工作区尺寸，返回 (screen_width, screen_height)。
+#[allow(dead_code)]
 fn get_screen_workarea() -> (i32, i32) {
     let ps_script = r#"
         $s = [System.Windows.SystemParameters]::WorkArea
@@ -163,17 +166,20 @@ fn get_screen_workarea() -> (i32, i32) {
 }
 
 /// 计算居中靠下的窗口 Left 坐标。
+#[allow(dead_code)]
 fn center_left(window_width: i32) -> i32 {
     let (sw, _) = get_screen_workarea();
     (sw - window_width) / 2
 }
 
 /// 计算靠下的 Top 坐标（距任务栏上方 offset 像素）。
+#[allow(dead_code)]
 fn bottom_top(window_height: i32, offset: i32) -> i32 {
     let (_, sh) = get_screen_workarea();
     sh - window_height - offset
 }
 
+#[allow(dead_code)]
 fn spawn_ps_script(script: &str) {
     let tmp = match tempfile::NamedTempFile::with_suffix(".ps1") {
         Ok(t) => t,
@@ -217,6 +223,7 @@ fn spawn_ps_script(script: &str) {
 }
 
 /// 显示录音悬浮窗口（居中靠下）。
+#[allow(dead_code)]
 pub fn show_recording_window() -> anyhow::Result<()> {
     let left = center_left(320);
     let top = bottom_top(120, 80);
@@ -232,11 +239,13 @@ pub fn show_recording_window() -> anyhow::Result<()> {
 }
 
 /// 关闭录音悬浮窗口（静默，窗口由下一次录音/结果覆盖）。
+#[allow(dead_code)]
 pub fn close_recording_window() -> anyhow::Result<()> {
     Ok(())
 }
 
 /// 显示结果悬浮窗口（注入失败时调用）。
+#[allow(dead_code)]
 pub fn show_result_window(
     raw_text: &str,
     polished_text: &str,
@@ -271,6 +280,7 @@ pub fn show_result_window(
 // ─── Unified output API ─────────────────────────────────────────────────────
 
 /// 统一的输出函数：尝试注入光标，失败则显示悬浮窗口。
+#[allow(dead_code)]
 pub async fn output_text(
     raw_text: &str,
     polished_text: &str,
@@ -308,6 +318,7 @@ pub async fn output_text(
 }
 
 /// 通过 PowerShell/WPF 显示浮动通知窗口。
+#[allow(dead_code)]
 pub fn notify(title: &str, body: &str, timeout_ms: u64) -> anyhow::Result<()> {
     let truncated = truncate_text(body, 200);
     let timeout_sec = (timeout_ms as f64) / 1000.0;

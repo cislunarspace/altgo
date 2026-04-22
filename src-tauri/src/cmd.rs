@@ -25,6 +25,7 @@ const OVERLAY_BOTTOM_OFFSET: f64 = 80.0;
 
 #[cfg(target_os = "windows")]
 #[repr(C)]
+#[allow(dead_code)]
 struct WinPoint {
     x: i32,
     y: i32,
@@ -34,6 +35,7 @@ struct WinPoint {
 #[link(name = "user32")]
 extern "system" {
     fn GetAsyncKeyState(vKey: i32) -> i16;
+    #[allow(dead_code)]
     fn GetCursorPos(lpPoint: *mut WinPoint) -> i32;
 }
 
@@ -183,6 +185,7 @@ fn mouse_position_physical() -> Option<(i32, i32)> {
 }
 
 #[cfg(target_os = "windows")]
+#[allow(dead_code)]
 fn mouse_position_physical() -> Option<(i32, i32)> {
     let mut pt = WinPoint { x: 0, y: 0 };
     // SAFETY: GetCursorPos writes to a valid stack POINT; standard Win32 API.

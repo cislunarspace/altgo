@@ -21,6 +21,7 @@ const CREATE_NO_WINDOW: u32 = 0x08000000;
 /// Windows 按键监听器.
 ///
 /// 使用 PowerShell + `GetAsyncKeyState` 进行按键状态轮询。
+#[allow(dead_code)]
 pub struct WindowsListener {
     key_name: String,
     windows_vk: Option<i32>,
@@ -29,6 +30,7 @@ pub struct WindowsListener {
     child: Option<Child>,
 }
 
+#[allow(dead_code)]
 impl WindowsListener {
     /// 创建新的 Windows 监听器，验证 PowerShell 是否可用。
     pub fn new(cfg: &KeyListenerConfig) -> Result<Self> {
@@ -51,11 +53,13 @@ impl WindowsListener {
     }
 
     /// Set the poll interval in milliseconds.
+    #[allow(dead_code)]
     pub fn set_poll_interval_ms(&mut self, ms: u64) {
         self.poll_interval_ms = ms;
     }
 
     /// 开始监听按键事件，通过 PowerShell 轮询实现。
+    #[allow(dead_code)]
     pub fn start(&mut self) -> Result<mpsc::UnboundedReceiver<KeyEvent>> {
         let vk_code = self.resolve_vkcode()?;
 
@@ -133,6 +137,7 @@ while ($true) {{
     }
 
     /// 停止监听。
+    #[allow(dead_code)]
     pub fn stop(&mut self) {
         self.running.store(false, Ordering::SeqCst);
         if let Some(child) = self.child.as_mut() {
@@ -141,6 +146,7 @@ while ($true) {{
         }
     }
 
+    #[allow(dead_code)]
     fn resolve_vkcode(&self) -> Result<i32> {
         if let Some(vk) = self.windows_vk {
             return Ok(vk);

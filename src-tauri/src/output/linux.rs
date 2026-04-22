@@ -136,14 +136,17 @@ pub fn notify_result(text: &str, timeout_ms: u64) -> anyhow::Result<()> {
     notify("altgo", &truncated, timeout_ms)
 }
 
+#[allow(dead_code)]
 pub fn show_recording_window() -> anyhow::Result<()> {
     Ok(())
 }
 
+#[allow(dead_code)]
 pub fn close_recording_window() -> anyhow::Result<()> {
     Ok(())
 }
 
+#[allow(dead_code)]
 pub async fn output_text(
     raw_text: &str,
     polished_text: &str,
