@@ -128,9 +128,11 @@ export ALTGO_POLISHER_API_KEY="sk-your-key"
 
 ## 按键配置
 
+与 [`configs/altgo.toml`](https://github.com/cislunarspace/altgo/blob/master/configs/altgo.toml) 一致；默认触发键为 **右 Alt** 的 keysym 名 `Alt_R`。若在设置页使用「按下以设置」，可能会写入 `linux_evdev_code` / `windows_vk` 等字段。
+
 ```toml
 [key_listener]
-key_name = "ISO_Level3_Shift"      # 触发键，默认右 Alt
+key_name = "Alt_R"                 # 触发键（示例：右 Alt；左 Alt 可用 Alt_L）
 long_press_threshold_ms = 200      # 长按判定阈值 (ms)
 double_click_interval_ms = 300     # 双击判定间隔 (ms)
 min_press_duration_ms = 100        # 最短按下时长，过滤 IME 抖动
@@ -150,9 +152,11 @@ channels = 1                       # 声道数
 [output]
 enable_notify = true               # 桌面通知
 notify_timeout_ms = 5000
-inject_at_cursor = true            # 尝试注入到光标位置（仅 Windows）
-prefer_polished = true             # 优先使用润色后的文本
+inject_at_cursor = true            # 尝试注入到光标位置（仅 Windows；失败时仍会走剪贴板/悬浮窗）
+prefer_polished = true             # 剪贴板/注入优先使用润色成功且非空的文本
 ```
+
+Linux 需要可用的 **`xclip`、`xsel` 或 `wl-copy`** 之一，否则自动写剪贴板会失败（仍可用悬浮窗或历史页复制）。
 
 ## 日志配置
 

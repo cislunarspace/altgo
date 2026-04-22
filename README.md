@@ -2,9 +2,17 @@
 
 **无需打字，言出法随** — 跨平台语音转文字桌面工具
 
-按住右 Alt 键说话，松开后在本地用 **whisper.cpp** 转写，可选通过 **任意兼容 OpenAI Chat API 的 LLM** 润色；结果在**悬浮窗**中展示，由你自行选择是否复制，**不会自动写入系统剪贴板**。
+按住右 Alt 键说话，松开后在本地用 **whisper.cpp** 转写，可选通过 **任意兼容 OpenAI Chat API 的 LLM** 润色；成功后**会尝试将结果写入系统剪贴板**，并在**悬浮窗**中展示，便于核对；也可在悬浮窗内再次点击复制（例如剪贴板工具不可用或需二次确认时）。
 
-本仓库**主要面向 Linux 用户**：在 Windows 上已有大量同类工具，而能在 Linux 上持续开发、维护的同类项目仍然很少。Windows 版仅作附带支持，安装与排障说明相对简略。
+**在线文档**：[https://cislunarspace.github.io/altgo/](https://cislunarspace.github.io/altgo/)（与 [`docs-site/`](docs-site/) 同源，由 GitHub Pages 部署）。
+
+本仓库**主要面向 Linux 用户**：在 Windows 上已有大量同类工具，而能在 Linux 上持续开发、维护的同类项目仍然很少。Windows 版仅作附带支持，安装与排障说明相对简略。**不提供 macOS 构建或发布**（历史设计文档见 [`docs/superpowers/`](docs/superpowers/)）。
+
+![APP首页](figures/app_front_image.png)
+
+![首页转写中](figures/首页_转写中.png)
+
+![悬浮窗转写中](figures/悬浮窗_转写中.png)
 
 ## 功能
 
@@ -12,7 +20,7 @@
 - **双击切换**：双击右 Alt 键进入连续录音模式，再次单击停止
 - **本地 ASR**：以 **whisper.cpp** 为主；`whisper-cli` 与 **ffmpeg** 等随 **官方预编译包** 一并提供，一般无需自行安装；模型可在**设置**里下载并选用
 - **LLM 润色（可选）**：通过 **OpenAI 兼容的 HTTP API** 调用任意厂商或本地部署的 LLM（如云端 API、Ollama、vLLM 等），对转写文本做 light / medium / heavy 等档位润色
-- **悬浮窗结果**：处理完成后弹出悬浮窗展示文本，由用户选择复制；不自动覆盖剪贴板
+- **悬浮窗与剪贴板**：处理完成后写入剪贴板并弹出悬浮窗；可在悬浮窗内再次复制
 - **桌面通知**：处理完成时可伴随通知提示（依配置）
 
 ## 系统要求（Linux）
@@ -35,16 +43,28 @@
 
 ### 给最终用户（推荐）
 
-**Linux（主要平台）**
+#### Linux（主要平台）
 
-1. 前往 [Releases](../../releases) 下载 **`.deb`** 或 **AppImage**。
-2. 安装 **`.deb`**（若提示依赖不足，执行 `sudo apt -f install` 或按提示补装）。**AppImage**：`chmod +x` 后直接运行，也可配合 [AppImageLauncher](https://github.com/TheAssassin/AppImageLauncher)。
+1. 前往 [Releases](../../releases) 下载 **`.deb`**。
+2. 安装 **`.deb`**（Ubuntu / Debian 系）：
+   - **推荐**用 `apt` 从本地文件安装，这样会**自动安装** deb 的 `Depends` 里声明的系统包（如 GTK / WebKit、系统托盘、剪贴板工具、录音与通知相关组件等）：
+
+     ```bash
+     sudo apt install /path/to/altgo_版本_amd64.deb
+     ```
+
+     将路径换成你保存 deb 的**实际位置**（例如 `~/Downloads/altgo_2.1.0_amd64.deb`）；在 deb 所在目录时也可写 `sudo apt install ./altgo_*.deb`。
+   - **不建议只用** `sudo dpkg -i …`：dpkg 不会拉取依赖。若本机缺少任一依赖，常见报错为 *dependency problems – leaving unconfigured*，**软件包会处于未配置（unconfigured）状态**，主程序可能仍不可用或包管理器会提示有未完成配置。
+   - **已经用 dpkg 装到一半失败时**：
+     - 执行 `sudo apt install -f`（或同义的 `sudo apt -f install`），让 apt **补全依赖**并完成 `altgo` 的配置；或
+     - 先按错误信息用 `sudo apt install 缺失包名` 装齐，再执行 `sudo dpkg --configure -a`。
+   - 若需卸掉后重装：`sudo dpkg --remove altgo`（必要时加 `--force-remove-reinstreq`），再按上文的 **`apt install ./…deb`** 重装。
 3. **务必**完成 [系统要求](#系统要求linux) 中的 **`input` 组** 步骤（与按键监听相关，安装包无法代劳）。
 4. 启动应用，在 **[设置](#首次使用应用内设置)** 里完成转写模型与可选润色等；**不要**一上来编辑配置文件。
 
-**预编译包与捆绑内容**：官方构建会把 **ffmpeg**、**whisper-cli** 等与程序一起打进 **deb / AppImage / MSI / zip**，目标是 **安装或解压后开箱即用**，无需再为录音与转写去单独安装这些二进制。
+**预编译包与捆绑内容**：官方构建会把 **ffmpeg**、**whisper-cli** 等与程序一起打进 **deb / MSI / zip**，目标是 **安装或解压后开箱即用**，无需再为录音与转写去单独安装这些二进制。
 
-**Windows（附带支持）**
+#### Windows（附带支持）
 
 1. 从 [Releases](../../releases) 安装 **MSI** 或使用 zip 绿色版。
 2. 同上，**ffmpeg 等已随包提供**；直接打开应用，在 **设置** 中完成首次配置即可。
@@ -80,6 +100,8 @@ make build
 
 跟着界面走即可完成日常使用。
 
+![设置](figures/设置.png)
+
 ## 高级：直接编辑配置文件（可选）
 
 仅在需要 **脚本化、批量部署、或与 GUI 未暴露的字段打交道** 时使用：
@@ -92,7 +114,7 @@ make build
 ### 环境变量（高级 / 部署）
 
 | 变量 | 说明 |
-|------|------|
+| ---- | ---- |
 | `ALTGO_POLISHER_API_KEY` | 覆盖润色 API 密钥 |
 | `ALTGO_TRANSCRIBER_API_KEY` | 若使用云端转写 API，可覆盖其密钥 |
 | `RUST_LOG` | 日志级别，如 `altgo=debug` |
@@ -110,9 +132,13 @@ make build
 3. 查看主窗口是否报错：模型缺失、`xinput`/`evtest` 不可用等会导致管道无法就绪。
 4. 调试：`RUST_LOG=altgo=debug altgo`。
 
+### 历史记录查询
+
+![转录历史](figures/转录历史.png)
+
 ## 架构
 
-```
+```text
 按键事件 → 状态机 → 录音 → whisper.cpp 转写 → 可选 LLM 润色 → 悬浮窗展示 + 通知
 ```
 
@@ -151,16 +177,17 @@ cd frontend && npm run build
 ### Makefile 摘要
 
 | 目标 | 说明 |
-|------|------|
+| ---- | ---- |
 | `make deps-linux` / `make deps-windows` | 下载 whisper-cli、ffmpeg 等至 `target/deps/bin/` |
 | `make build` | 依赖上述二进制后 `cargo tauri build`，并拷贝到 `src-tauri/target/release/bin/` |
 | `make install` | 安装可执行文件与 `/etc/altgo` 配置（通常需 `sudo`） |
 
 ## 相关文档
 
+- **用户向站点**：[https://cislunarspace.github.io/altgo/](https://cislunarspace.github.io/altgo/) · 源码 [`docs-site/`](docs-site/)
 - [CONTRIBUTING.md](CONTRIBUTING.md)（含 **CI / Release / GitHub Pages** 维护说明）
-- [CLAUDE.md](CLAUDE.md)
-- [docs-site/](docs-site/)
+- [CLAUDE.md](CLAUDE.md)（面向 AI/贡献者的架构速览）
+- [docs/](docs/)（维护者用的设计与计划归档，见 [`docs/README.md`](docs/README.md)）
 
 ## 许可证
 

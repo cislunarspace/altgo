@@ -321,7 +321,6 @@ fn position_overlay(overlay: &tauri::WebviewWindow, width: f64, height: f64) {
             tracing::warn!("linux overlay positioning failed ({}), falling back", e);
             position_overlay_tauri(overlay, width, height);
         }
-        return;
     }
 
     #[cfg(target_os = "windows")]

@@ -45,7 +45,7 @@ const features = [
       </svg>
     ),
     title: '跨平台',
-    description: 'Linux (X11/Wayland) · macOS · Windows 原生支持，界面体验一致。',
+    description: 'Linux（X11 / Wayland）与 Windows；以 Linux 为第一目标，Windows 附带支持。',
   },
   {
     icon: (
@@ -54,8 +54,8 @@ const features = [
         <rect width="8" height="4" x="8" y="2" rx="1" ry="1"/>
       </svg>
     ),
-    title: '零侵入输出',
-    description: '自动写入剪贴板，任意应用 Ctrl+V 粘贴。不依赖特定编辑器或窗口。',
+    title: '剪贴板 + 悬浮窗',
+    description: '转写成功后写入剪贴板并弹出悬浮窗；可核对文本或在悬浮窗内再次复制。',
   },
   {
     icon: (

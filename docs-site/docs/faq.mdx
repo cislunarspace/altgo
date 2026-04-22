@@ -27,17 +27,17 @@ import TabItem from '@theme/TabItem';
 <Tabs groupId="os">
 <TabItem value="linux" label="Linux">
 
-1. 确认 `xinput` 已安装：`which xinput`
-2. 检查按键名称：`xmodmap -pke | grep Alt`，确认 `ISO_Level3_Shift` 绑定正确
-3. 如果使用 Wayland，按键监听可能不可用
+1. **用户是否在 `input` 组并已重新登录？** 无法读取 `/dev/input/event*` 时，Linux 按键监听会失败：`sudo usermod -aG input "$USER"` 后注销/重启再试。
+2. 确认 `xinput` 可用：`which xinput`（X11 路径）。
+3. 检查 Alt 绑定：`xmodmap -pke | grep Alt`；配置里默认 `key_name = "Alt_R"`，与设置页「按下以设置」一致即可。
+4. **Wayland**：仍依赖能访问 evdev；若仅用 XWayland 且无权限，现象与未加 `input` 组类似。剪贴板在 Wayland 上建议安装 **`wl-copy`**（或 `xclip`/`xsel` 经 XWayland）。
 
 </TabItem>
 <TabItem value="windows" label="Windows">
 
-1. PowerShell 窗口需要保持前台
-2. 如果使用 IME，可能需要增加 `min_press_duration_ms`
+1. 使用打包版时依赖已随包提供；从源码跑时请确认 `make deps-windows` 等与 README 一致。
+2. 若使用 IME，可适当增大 `min_press_duration_ms` 减轻误触。
 
-</TabItem>
 </TabItem>
 </Tabs>
 
@@ -96,6 +96,14 @@ level = "light"
 system_prompt = "只修正标点和错别字，不要改变原文的意思和语气"
 ```
 
+## 剪贴板与悬浮窗
+
+### 提示成功但粘贴出来是旧内容 / 剪贴板失败
+
+1. **Linux**：安装 `xclip`、`xsel` 或 `wl-copy` 之一，并确保在图形会话内运行 altgo。
+2. 在**悬浮窗**或**历史**页使用复制按钮（WebView 手势复制有时比后端剪贴板更稳）。
+3. 调试：`RUST_LOG=altgo=debug altgo` 查看是否有 clipboard 相关错误。
+
 ## 通用
 
 ### 如何后台运行？
@@ -115,7 +123,6 @@ nohup altgo &
 Start-Process -WindowStyle Hidden .\altgo.exe
 ```
 
-</TabItem>
 </TabItem>
 </Tabs>
 

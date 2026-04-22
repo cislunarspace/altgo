@@ -104,6 +104,7 @@ const translations: Record<string, Record<string, string>> = {
     "overlay.polishing": "润色中...",
     "overlay.copy": "复制",
     "overlay.copied": "已复制",
+    "overlay.close": "关闭",
     "history.title": "转写历史",
     "history.lead": "仅保存转写文本，不保存录音。记录在本地文件中持久保存，可随时删除。",
     "history.loading": "加载中…",
@@ -221,6 +222,7 @@ const translations: Record<string, Record<string, string>> = {
     "overlay.polishing": "Polishing...",
     "overlay.copy": "Copy",
     "overlay.copied": "Copied",
+    "overlay.close": "Close",
     "history.title": "Transcription history",
     "history.lead":
       "Only transcribed text is stored—audio is not saved. Records persist in a local file until you delete them.",

@@ -142,8 +142,10 @@ function Overlay() {
           </div>
           <div className="result-actions">
             <button
+              type="button"
               className={`btn-copy ${copied ? "copied" : ""}`}
               onClick={handleCopy}
+              aria-label={copied ? t("overlay.copied") : t("overlay.copy")}
             >
               {copied ? (
                 <>
@@ -157,8 +159,13 @@ function Overlay() {
                 </>
               )}
             </button>
-            <button className="btn-close" onClick={handleClose}>
-              <X size={14} />
+            <button
+              type="button"
+              className="btn-close"
+              onClick={handleClose}
+              aria-label={t("overlay.close")}
+            >
+              <X size={14} aria-hidden />
             </button>
           </div>
         </div>

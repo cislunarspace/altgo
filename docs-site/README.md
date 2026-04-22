@@ -1,41 +1,32 @@
-# Website
+# altgo 文档站（Docusaurus）
 
-This website is built using [Docusaurus](https://docusaurus.io/), a modern static website generator.
+面向最终用户的说明文档站点，默认语言为**简体中文**（`zh-Hans`）。生产环境部署在 **GitHub Pages**：
 
-## Installation
+**[https://cislunarspace.github.io/altgo/](https://cislunarspace.github.io/altgo/)**
+
+`url` / `baseUrl` 与组织名见 [`docusaurus.config.ts`](docusaurus.config.ts)。推送 `master` 时由 [`.github/workflows/deploy-docs.yml`](../.github/workflows/deploy-docs.yml) 构建并发布（详见 [`CONTRIBUTING.md`](../CONTRIBUTING.md)）。
+
+## 本地开发
 
 ```bash
+cd docs-site
 npm install
-```
-
-## Local Development
-
-```bash
 npm start
 ```
 
-This command starts a local development server and opens up a browser window. Most changes are reflected live without having to restart the server.
+浏览器默认打开开发服务器，文档变更会热更新。
 
-## Build
+## 构建
 
 ```bash
 npm run build
 ```
 
-This command generates static content into the `build` directory and can be served using any static contents hosting service.
+产物在 `build/` 目录，可用任意静态文件服务托管。
 
-## Deployment
+## 内容与侧边栏
 
-Using SSH:
+- 文档页面：`docs/*.mdx`（侧边栏由 [`sidebars.ts`](sidebars.ts) 配置）
+- 营销首页：`src/pages/index.tsx`（与文档首页 `docs/intro.mdx` 不同：前者为站点落地页，后者为文档模块入口）
 
-```bash
-USE_SSH=true npm run deploy
-```
-
-Not using SSH:
-
-```bash
-GIT_USER=<Your GitHub username> npm run deploy
-```
-
-If you are using GitHub pages for hosting, this command is a convenient way to build the website and push to the `gh-pages` branch.
+仓库根目录另有维护者用的 [`docs/`](../docs/)（设计/计划归档），请勿与本文档目录混淆。

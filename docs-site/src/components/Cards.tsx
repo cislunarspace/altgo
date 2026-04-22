@@ -23,12 +23,12 @@ const features = [
   },
   {
     title: '跨平台',
-    description: '原生支持 Linux (X11/Wayland)、macOS、Windows，各平台使用最佳系统集成方案。',
+    description: 'Linux（X11 / Wayland）与 Windows 使用子进程集成系统工具；发布与 CI 以 Linux 为主，Windows 为附带支持。',
     icon: '💻',
   },
   {
-    title: '零侵入输出',
-    description: '自动写入剪贴板，在任意应用中 Ctrl+V 粘贴。Windows 还支持光标注入。',
+    title: '剪贴板与悬浮窗',
+    description: '成功后写入系统剪贴板并弹出悬浮窗核对；可在悬浮窗内再次复制。Windows 可选光标注入（见配置）。',
     icon: '📋',
   },
 ];
