@@ -6,9 +6,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use serde::{Deserialize, Deserializer, Serialize};
-use tauri::{
-    AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, PhysicalSize, State,
-};
+use tauri::{AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, PhysicalSize, State};
 
 use crate::{
     config, history, key_listener, output, pipeline, polisher, recorder, state_machine,
@@ -247,7 +245,9 @@ fn parse_xrandr_geometry(output: &str) -> Vec<(i32, i32, i32, i32, bool)> {
         // Parse WxH+X+Y
         let Some(x_idx) = geo.find('x') else { continue };
         let Some(plus1) = geo.find('+') else { continue };
-        let Some(plus2) = geo.rfind('+') else { continue };
+        let Some(plus2) = geo.rfind('+') else {
+            continue;
+        };
         if plus1 == plus2 {
             continue; // only one '+'
         }
@@ -266,7 +266,11 @@ fn parse_xrandr_geometry(output: &str) -> Vec<(i32, i32, i32, i32, bool)> {
 
 /// Linux: position overlay on the **primary** monitor only.
 #[cfg(target_os = "linux")]
-fn position_overlay_linux(overlay: &tauri::WebviewWindow, width: f64, height: f64) -> Result<(), String> {
+fn position_overlay_linux(
+    overlay: &tauri::WebviewWindow,
+    width: f64,
+    height: f64,
+) -> Result<(), String> {
     let _ = overlay.set_size(LogicalSize::new(width, height));
 
     let Some((mx, my, mw, mh)) = xrandr_primary_monitor() else {
@@ -283,7 +287,13 @@ fn position_overlay_linux(overlay: &tauri::WebviewWindow, width: f64, height: f6
 
     tracing::debug!(
         "linux overlay pos: primary=({},{},{},{}) pos=({},{}) scale={}",
-        mx, my, mw, mh, x, y, scale
+        mx,
+        my,
+        mw,
+        mh,
+        x,
+        y,
+        scale
     );
 
     overlay

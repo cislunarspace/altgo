@@ -395,10 +395,7 @@ mod tests {
             stderr_fraction("decode: 45% done", &re_p, &re_r),
             Some(0.45)
         );
-        assert_eq!(
-            stderr_fraction(" 12 / 40 ", &re_p, &re_r),
-            Some(0.3)
-        );
+        assert_eq!(stderr_fraction(" 12 / 40 ", &re_p, &re_r), Some(0.3));
     }
 
     #[tokio::test]
