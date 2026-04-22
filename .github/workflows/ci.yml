@@ -12,7 +12,8 @@ env:
 jobs:
   check:
     name: Check
-    runs-on: ubuntu-latest
+    # 与 release Linux 构建一致，避免仅在较新 runner 上能通过、deb 在 22.04 上 GLIBC 不兼容
+    runs-on: ubuntu-22.04
 
     steps:
       - uses: actions/checkout@v4

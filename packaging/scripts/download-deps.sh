@@ -114,7 +114,7 @@ build_whisper_from_source() {
         exit 1
     fi
 
-    # 动态库默认 RUNPATH 指向构建目录；复制到 target/deps/bin 并改为 \$ORIGIN，便于随 altgo-tauri 分发。
+    # 动态库默认 RUNPATH 指向构建目录；复制到 target/deps/bin 并改为 \$ORIGIN，便于随 altgo 分发。
     cp -a "${cache}/build/src"/libwhisper.so* "${BIN_DIR}/"
     cp -a "${cache}/build/ggml/src"/libggml*.so* "${BIN_DIR}/"
     cp -f "${whisper_bin}" "${target}"

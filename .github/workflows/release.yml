@@ -13,7 +13,8 @@ permissions:
 jobs:
   build-linux:
     name: Build Linux
-    runs-on: ubuntu-latest
+    # ubuntu-22.04 → glibc 2.35，deb 可在 Jammy 等旧版发行版上运行（ubuntu-latest 常为更新 glibc）
+    runs-on: ubuntu-22.04
 
     steps:
       - uses: actions/checkout@v4

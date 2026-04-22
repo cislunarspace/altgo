@@ -17,7 +17,7 @@ ensure-binary-deps:
 		$(MAKE) deps-linux; \
 	fi
 
-# Release 可执行文件在 src-tauri/target/release/altgo-tauri；同目录下需有 bin/whisper-cli
+# Release 可执行文件在 src-tauri/target/release/altgo；同目录下需有 bin/whisper-cli
 # （resource.rs 会查找）。因此 build 前先拉取依赖，编译后再拷贝到 target/release/bin/。
 build: ensure-frontend-deps ensure-binary-deps
 	cargo tauri build
@@ -34,7 +34,7 @@ build: ensure-frontend-deps ensure-binary-deps
 		fi; \
 	done
 	@test -x $(RELEASE_BIN_DIR)/whisper-cli || ( echo "error: $(RELEASE_BIN_DIR)/whisper-cli missing — run 'make deps-linux' (needs git, cmake, g++)"; exit 1 )
-	@echo "Run: src-tauri/target/release/altgo-tauri (local mode needs a GGML model from Settings)"
+	@echo "Run: src-tauri/target/release/altgo (local mode needs a GGML model from Settings)"
 
 test:
 	cargo test --manifest-path=src-tauri/Cargo.toml
@@ -48,7 +48,7 @@ lint:
 install: build
 	install -d $(DESTDIR)/usr/local/bin
 	install -m 755 src-tauri/target/release/bundle/deb/*/usr/local/bin/$(BINARY) $(DESTDIR)/usr/local/bin/$(BINARY) 2>/dev/null || \
-		install -m 755 src-tauri/target/release/altgo-tauri $(DESTDIR)/usr/local/bin/$(BINARY)
+		install -m 755 src-tauri/target/release/altgo $(DESTDIR)/usr/local/bin/$(BINARY)
 	install -d $(DESTDIR)/usr/lib/altgo/bin
 	install -m 755 target/deps/bin/* $(DESTDIR)/usr/lib/altgo/bin/
 	install -d $(DESTDIR)/etc/altgo
@@ -66,7 +66,7 @@ deps-windows:
 
 # 一键构建并运行
 run: build
-	$(REPO_ROOT)/src-tauri/target/release/altgo-tauri
+	$(REPO_ROOT)/src-tauri/target/release/altgo
 
 package-deb: build
 	cargo deb --manifest-path=src-tauri/Cargo.toml --no-build
