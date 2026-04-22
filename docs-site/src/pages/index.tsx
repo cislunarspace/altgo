@@ -1,136 +1,233 @@
+import React from 'react';
 import clsx from 'clsx';
 import Link from '@docusaurus/Link';
 import useDocusaurusContext from '@docusaurus/useDocusaurusContext';
 import Layout from '@theme/Layout';
-
+import {
+  Mic,
+  Infinity,
+  Brain,
+  Sparkles,
+  Monitor,
+  ClipboardCopy,
+  ArrowRight,
+  Download,
+  BookOpen,
+} from 'lucide-react';
 import styles from './index.module.css';
 
 const features = [
   {
-    icon: (
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/>
-        <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
-        <line x1="12" x2="12" y1="19" y2="22"/>
-      </svg>
-    ),
+    icon: Mic,
     title: '长按即录',
     description: '按住右 Alt 说话，松开即转写。无需切换窗口，不打断工作流。',
   },
   {
-    icon: (
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <rect width="18" height="11" x="3" y="11" rx="2" ry="2"/>
-        <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
-      </svg>
-    ),
-    title: '本地 + 云端 ASR',
-    description: '支持 whisper.cpp 离线转写，完全断网可用。也支持 Whisper API 云端转写。',
+    icon: Infinity,
+    title: '连续模式',
+    description: '双击进入连续录音，适合长篇发言或会议记录。单击停止。',
   },
   {
-    icon: (
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/>
-      </svg>
-    ),
+    icon: Brain,
+    title: '本地 + 云端 ASR',
+    description: 'whisper.cpp 本地转写完全断网可用，也支持 Whisper API 云端转写。',
+  },
+  {
+    icon: Sparkles,
     title: 'LLM 润色',
     description: '四档润色强度，支持 OpenAI / DeepSeek / Anthropic / Ollama。',
   },
   {
-    icon: (
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <rect width="20" height="14" x="2" y="3" rx="2"/>
-        <line x1="8" x2="16" y1="21" y2="21"/>
-        <line x1="12" x2="12" y1="17" y2="21"/>
-      </svg>
-    ),
+    icon: Monitor,
     title: '跨平台',
-    description: 'Linux（X11 / Wayland）与 Windows；以 Linux 为第一目标，Windows 附带支持。',
+    description: 'Linux（X11 / Wayland）与 Windows；以 Linux 为第一目标平台。',
   },
   {
-    icon: (
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/>
-        <rect width="8" height="4" x="8" y="2" rx="1" ry="1"/>
-      </svg>
-    ),
+    icon: ClipboardCopy,
     title: '剪贴板 + 悬浮窗',
-    description: '转写成功后写入剪贴板并弹出悬浮窗；可核对文本或在悬浮窗内再次复制。',
+    description: '转写成功后写入剪贴板并弹出悬浮窗；可核对文本或再次复制。',
   },
-  {
-    icon: (
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/>
-        <polyline points="16 7 22 7 22 13"/>
-      </svg>
-    ),
-    title: '连续模式',
-    description: '双击进入连续录音，适合长篇发言或会议记录。',
-  },
+];
+
+const screenshots = [
+  { src: '/altgo/img/screenshot-main.png', alt: '主界面' },
+  { src: '/altgo/img/screenshot-home.png', alt: '首页转写中' },
+  { src: '/altgo/img/screenshot-overlay.png', alt: '悬浮窗' },
+  { src: '/altgo/img/screenshot-settings.png', alt: '设置页面' },
+  { src: '/altgo/img/screenshot-history.png', alt: '转录历史' },
 ];
 
 export default function Home(): JSX.Element {
   const { siteConfig } = useDocusaurusContext();
+  const [activeShot, setActiveShot] = React.useState(0);
+
+  React.useEffect(() => {
+    const timer = setInterval(() => {
+      setActiveShot((prev) => (prev + 1) % screenshots.length);
+    }, 4000);
+    return () => clearInterval(timer);
+  }, []);
 
   return (
     <Layout title={siteConfig.title} description={siteConfig.tagline}>
+      {/* ─── Hero ─── */}
       <header className={styles.heroBanner}>
-        <div className={styles.heroInner}>
-          <h1 className={styles.heroTitle}>{siteConfig.title}</h1>
-          <p className={styles.heroTagline}>{siteConfig.tagline}</p>
+        <div className={styles.heroGlow} />
+        <div className={styles.heroGrid} />
+        <div className={clsx('container', styles.heroInner)}>
+          <div className={styles.heroBadge}>
+            <span className={styles.heroBadgeDot} />
+            跨平台语音转文字桌面工具
+          </div>
+          <h1 className={styles.heroTitle}>
+            无需打字
+            <br />
+            <span className={styles.heroTitleAccent}>言出法随</span>
+          </h1>
+          <p className={styles.heroTagline}>
+            基于 Tauri + React + Rust 的语音转文字应用。
+            <br />
+            按住 Alt 说话，松开后在本地用 whisper.cpp 转写，可接入 LLM 润色。
+          </p>
           <div className={styles.buttons}>
-            <Link className="button button--primary button--lg" to="/docs/quick-start">
+            <Link
+              className={clsx('button', styles.btnPrimary)}
+              to="/docs/quick-start"
+            >
+              <Download size={18} />
               快速开始
             </Link>
-            <Link className="button button--outline button--lg" to="/docs/usage" style={{ borderColor: '#30363d', color: '#8b949e' }}>
+            <Link
+              className={clsx('button', styles.btnSecondary)}
+              to="/docs/usage"
+            >
+              <BookOpen size={18} />
               使用说明
             </Link>
+            <Link
+              className={clsx('button', styles.btnGhost)}
+              href="https://github.com/cislunarspace/altgo"
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.403 5.403 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4"/>
+                <path d="M9 18c-4.51 2-5-2-7-2"/>
+              </svg>
+              GitHub
+            </Link>
           </div>
-          <div className={styles.heroSteps}>
-            <div className={styles.heroStep}>
-              <span className={styles.heroStepIcon}>⌥</span>
-              <span>按住 Alt</span>
+
+          {/* Screenshot showcase */}
+          <div className={styles.showcase}>
+            <div className={styles.showcaseFrame}>
+              {screenshots.map((s, i) => (
+                <img
+                  key={s.src}
+                  src={s.src}
+                  alt={s.alt}
+                  className={clsx(
+                    styles.showcaseImg,
+                    i === activeShot && styles.showcaseImgActive
+                  )}
+                />
+              ))}
+              <div className={styles.showcaseOverlay} />
             </div>
-            <span className={styles.heroArrow}>→</span>
-            <div className={styles.heroStep}>
-              <span className={styles.heroStepIcon}>🎙</span>
-              <span>说话</span>
-            </div>
-            <span className={styles.heroArrow}>→</span>
-            <div className={styles.heroStep}>
-              <span className={styles.heroStepIcon}>📋</span>
-              <span>文字已在剪贴板</span>
+            <div className={styles.showcaseDots}>
+              {screenshots.map((_, i) => (
+                <button
+                  key={i}
+                  className={clsx(
+                    styles.showcaseDot,
+                    i === activeShot && styles.showcaseDotActive
+                  )}
+                  onClick={() => setActiveShot(i)}
+                  aria-label={`查看截图 ${i + 1}`}
+                />
+              ))}
             </div>
           </div>
         </div>
       </header>
 
       <main>
-        <section className={styles.features}>
+        {/* ─── How it works ─── */}
+        <section className={styles.howItWorks}>
           <div className="container">
-            <p className={styles.featuresHeading}>功能特点</p>
-            <h2 className={styles.featuresTitle}>为你设计的细节体验</h2>
-            <div className={styles.featureGrid}>
-              {features.map((f, idx) => (
-                <div key={idx} className={styles.feature}>
-                  <div className={styles.featureCard}>
-                    <div className={styles.featureIcon}>{f.icon}</div>
-                    <h3>{f.title}</h3>
-                    <p>{f.description}</p>
-                  </div>
-                </div>
-              ))}
+            <p className={styles.sectionKicker}>三步上手</p>
+            <h2 className={styles.sectionTitle}>简单到不需要教程</h2>
+            <div className={styles.steps}>
+              <div className={styles.step}>
+                <div className={styles.stepNum}>1</div>
+                <h3>安装并设置</h3>
+                <p>
+                  下载 deb / AppImage / MSI 安装包，在设置中选择转写引擎与模型。
+                </p>
+              </div>
+              <ArrowRight className={styles.stepArrow} size={24} />
+              <div className={styles.step}>
+                <div className={styles.stepNum}>2</div>
+                <h3>按住 Alt 说话</h3>
+                <p>
+                  长按右 Alt 开始录音，松开自动转写；双击进入连续模式。
+                </p>
+              </div>
+              <ArrowRight className={styles.stepArrow} size={24} />
+              <div className={styles.step}>
+                <div className={styles.stepNum}>3</div>
+                <h3>粘贴使用</h3>
+                <p>
+                  转写结果自动写入剪贴板，悬浮窗同步展示，随时可再次复制。
+                </p>
+              </div>
             </div>
           </div>
         </section>
 
+        {/* ─── Features ─── */}
+        <section className={styles.features}>
+          <div className="container">
+            <p className={styles.sectionKicker}>功能特点</p>
+            <h2 className={styles.sectionTitle}>为你设计的细节体验</h2>
+            <div className={styles.featureGrid}>
+              {features.map((f) => {
+                const Icon = f.icon;
+                return (
+                  <div key={f.title} className={styles.featureCard}>
+                    <div className={styles.featureIcon}>
+                      <Icon size={22} strokeWidth={2} />
+                    </div>
+                    <h3>{f.title}</h3>
+                    <p>{f.description}</p>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </section>
+
+        {/* ─── CTA ─── */}
         <section className={styles.cta}>
-          <div className="container text--center">
-            <h2 className={styles.ctaTitle}>准备好开始了吗？</h2>
-            <p className={styles.ctaSubtitle}>30 秒安装，永久提升输入效率</p>
-            <Link className="button button--primary button--lg" to="/docs/quick-start">
-              快速开始 →
-            </Link>
+          <div className="container">
+            <div className={styles.ctaBox}>
+              <h2 className={styles.ctaTitle}>准备好提升输入效率了吗？</h2>
+              <p className={styles.ctaSubtitle}>
+                30 秒安装，永久改变你的输入方式
+              </p>
+              <div className={styles.buttons}>
+                <Link
+                  className={clsx('button', styles.btnPrimary)}
+                  to="/docs/quick-start"
+                >
+                  快速开始 <ArrowRight size={18} />
+                </Link>
+                <Link
+                  className={clsx('button', styles.btnGhost)}
+                  href="https://github.com/cislunarspace/altgo/releases"
+                >
+                  下载最新版
+                </Link>
+              </div>
+            </div>
           </div>
         </section>
       </main>

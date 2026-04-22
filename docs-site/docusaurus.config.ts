@@ -49,7 +49,7 @@ const config: Config = {
           'altgo：跨平台语音转文字桌面工具（Tauri）。whisper.cpp 本地转写，可选 OpenAI 兼容 LLM 润色；剪贴板与悬浮窗输出。以 Linux 为第一目标平台。',
       },
     ],
-    image: 'img/docusaurus-social-card.jpg',
+    image: 'img/screenshot-main.png',
     colorMode: {
       defaultMode: 'dark',
       respectPrefersColorScheme: true,
