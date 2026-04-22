@@ -1,6 +1,6 @@
 [package]
 name = "altgo-tauri"
-version = "2.2.3"
+version = "2.2.4"
 edition = "2021"
 description = "altgo Tauri desktop application"
 
