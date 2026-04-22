@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## v2.2.4 (2026-04-22)
+
+### Packaging / CI
+
+- Linux **deb** 在 **ubuntu-22.04** 上构建，链接 **glibc 2.35**，可在 **Ubuntu 22.04 (Jammy)** 等环境运行（避免在更新 runner 上出现 GLIBC_2.39+ 仅新系统可用的问题）
+- Tauri 可执行文件统一为 **`altgo`**（与文档、桌面项、`make install` 一致；不再使用 `altgo-tauri` 作为安装名）
+
+### Release
+
+- GitHub Release 正文本版本起从 **CHANGELOG** 自动生成，并附与上一 tag 的对比链接
+
 ## v2.1.0 (2026-04-21)
 
 ### Features

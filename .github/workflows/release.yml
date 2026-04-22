@@ -104,6 +104,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # 需要完整历史：生成 Release 说明时解析上一 tag、CHANGELOG 小节
+          fetch-depth: 0
+
+      - name: Write release notes from CHANGELOG
+        env:
+          GITHUB_REF_NAME: ${{ github.ref_name }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: bash packaging/scripts/extract-release-notes.sh release_notes.md
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
@@ -121,7 +130,7 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          generate_release_notes: true
+          body_path: release_notes.md
           files: |
             release-assets/*
             checksums.txt
