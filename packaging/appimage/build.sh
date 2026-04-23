@@ -125,7 +125,8 @@ npm ci --prefix "${PROJECT_ROOT}/frontend"
 echo "[INFO] Building Tauri app..."
 cargo install tauri-cli --version "^2" --locked --quiet
 
-cargo tauri build --no-bundle --manifest-path="${PROJECT_ROOT}/src-tauri/Cargo.toml"
+cd "${PROJECT_ROOT}"
+cargo tauri build --no-bundle
 
 # Locate the built binary
 TAURI_BINARY=$(find "${PROJECT_ROOT}/src-tauri/target/release" -name "altgo" -type f | head -1)
