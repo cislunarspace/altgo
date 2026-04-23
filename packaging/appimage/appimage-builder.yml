@@ -1,8 +1,14 @@
 version: 1
-AppImage.appname: altgo
-AppImage.id: com.altgo.app
-AppImage.version: "@VERSION@"
-AppImage.architectures: ["@ARCH@"]
+AppDir:
+  path: @APPDIR@
+  app_info:
+    id: com.altgo.app
+    name: altgo
+    icon: altgo
+    version: "@VERSION@"
+    exec: usr/bin/altgo
+AppImage:
+  arch: "@ARCH@"
 
 script: |
   # Copy application binary

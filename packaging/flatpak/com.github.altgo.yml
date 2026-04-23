@@ -9,7 +9,7 @@ finish-args:
   - --socket=pulseaudio
   - --share=ipc
   - --talk-name=org.freedesktop.Notifications
-  - --device=input
+  - --device=all
   - --filesystem=home
   - --env=PATH=/app/bin:/app/altgo/bin
 
