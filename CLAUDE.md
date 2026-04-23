@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**altgo** is a cross-platform desktop voice-to-text tool written in Rust (product docs target **Linux** first, Ubuntu 20.04 tested). Hold the right Alt key to record speech, release to transcribe with **local whisper.cpp**, optionally polish via any **OpenAI-compatible LLM** API, then **write the result to the system clipboard** and show it in a **floating overlay** (overlay copy is a fallback if clipboard tools fail). Successful transcriptions (raw + displayed text) are **persisted as text-only history** in a local JSON file (`~/.config/altgo/history.json`); audio is never stored. Code may still include optional HTTP Whisper API paths for advanced use.
+**altgo** is a Linux-only desktop voice-to-text tool written in Rust (Ubuntu 20.04+ tested). Hold the right Alt key to record speech, release to transcribe with **local whisper.cpp**, optionally polish via any **OpenAI-compatible LLM** API, then **write the result to the system clipboard** and show it in a **floating overlay** (overlay copy is a fallback if clipboard tools fail). Successful transcriptions (raw + displayed text) are **persisted as text-only history** in a local JSON file (`~/.config/altgo/history.json`); audio is never stored. Code may still include optional HTTP Whisper API paths for advanced use.
 
 ## Build & Test Commands
 
@@ -19,7 +19,7 @@ cargo clippy --manifest-path=src-tauri/Cargo.toml -- -D warnings
 cargo tauri dev               # Dev mode (frontend dev server + desktop window)
 cargo tauri build            # Production GUI build
 
-# make build: runs ensure-binary-deps (may run deps-linux / deps-windows), then
+# make build: runs ensure-binary-deps (deps-linux), then
 # cargo tauri build, then copies target/deps/bin/* into src-tauri/target/release/bin/
 make build
 make install                  # After build: altgo -> /usr/local/bin, deps -> /usr/lib/altgo/bin, config -> /etc/altgo/
@@ -54,10 +54,10 @@ Key Listener → State Machine → Recorder → Transcriber → Polisher → Out
 - **`model.rs`** — whisper.cpp GGML model management (download, switch, storage in `~/.config/altgo/models/`).
 - **`tray.rs`** — System tray configuration (show window, quit menu).
 - **`resource.rs`** — Resource file management.
-- **`key_capture.rs`** — One-shot activation key capture for Settings (Linux evdev / Windows VK resolution).
-- **`key_listener/`** — Platform-specific key detection. Linux: `xinput test-xi2`. Windows: PowerShell + `GetAsyncKeyState`.
-- **`recorder/`** — Platform-specific audio capture. Linux: `parecord`. Windows: `ffmpeg`.
-- **`output/`** — Platform-specific clipboard + notifications. Linux: `xclip`/`xsel`/`wl-copy` + `notify-send`. Windows: `clip.exe`/PowerShell + BurntToast.
+- **`key_capture.rs`** — One-shot activation key capture for Settings (Linux evdev).
+- **`key_listener/`** — Key detection via `xinput test-xi2` (XInput2).
+- **`recorder/`** — Audio capture via `parecord` (PulseAudio).
+- **`output/`** — Clipboard (`xclip`/`xsel`/`wl-copy`) + notifications (`notify-send`).
 
 ### Frontend Structure (`frontend/src/`)
 
@@ -90,9 +90,7 @@ Key Listener → State Machine → Recorder → Transcriber → Polisher → Out
 
 ### Key Patterns
 
-**Cross-platform dispatch** — Each platform module (`key_listener`, `recorder`, `output`) uses `#[cfg(target_os = ...)]` in `mod.rs` to expose a single type alias (`PlatformListener`, `PlatformRecorder`, etc.). No trait objects; statically dispatched.
-
-**Subprocess-based system interaction** — All platform integration shells out to CLI tools rather than using FFI. This simplifies cross-compilation.
+**Subprocess-based system interaction** — All platform integration shells out to CLI tools rather than using FFI. This simplifies building and avoids native dependency complexity.
 
 **Async channel pipeline** — `tokio::sync::mpsc` channels decouple stages. Key events flow via unbounded channel, commands via bounded (capacity 16). Processing spawned as independent `tokio::spawn` tasks.
 
@@ -100,10 +98,9 @@ Key Listener → State Machine → Recorder → Transcriber → Polisher → Out
 
 **Transcription history** — `~/.config/altgo/history.json` (same directory as config). Entries: `id`, `createdAtMs`, `rawText`, `text`. The floating window and frontend listen for the **`history-updated`** event to refresh lists.
 
-### Platform System Requirements
+### System Requirements
 
-- **Linux**: `xinput`, `xmodmap`, `parecord`, `xclip`/`xsel`/`wl-copy`, `notify-send`
-- **Windows**: `ffmpeg`, PowerShell
+- `xinput`, `xmodmap`, `parecord`, `xclip`/`xsel`/`wl-copy`, `notify-send`
 
 ### Tauri GUI Development
 

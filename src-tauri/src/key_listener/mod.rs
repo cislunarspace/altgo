@@ -1,26 +1,12 @@
-//! 按键监听器模块（跨平台）。
+//! 按键监听器模块（Linux）。
 //!
-//! 通过 `#[cfg(target_os)]` 条件编译为每个平台导出统一的类型别名 `PlatformListener`，
-//! 实现静态分派，无需 trait 对象。
-//!
-//! - Linux：`xinput test-xi2`（XInput2 扩展）
-//! - Windows：PowerShell + `GetAsyncKeyState` 轮询
+//! 使用 `xinput test-xi2`（XInput2 扩展）监听按键事件。
 
-#[cfg(target_os = "linux")]
 mod linux;
 
-#[cfg(target_os = "linux")]
 pub(crate) use linux::list_keyboard_devices;
-#[cfg(target_os = "windows")]
-mod windows;
-
-#[cfg(target_os = "linux")]
 #[allow(dead_code)]
 pub type PlatformListener = linux::X11Listener;
-
-#[cfg(target_os = "windows")]
-#[allow(dead_code)]
-pub type PlatformListener = windows::WindowsListener;
 
 /// 按键事件。
 #[derive(Debug)]

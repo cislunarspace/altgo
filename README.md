@@ -1,12 +1,12 @@
 # altgo
 
-**无需打字，言出法随** — 跨平台语音转文字桌面工具
+**无需打字，言出法随** — Linux 语音转文字桌面工具
 
 按住右 Alt 键说话，松开后在本地用 **whisper.cpp** 转写，可选通过 **OpenAI 兼容 API 或 Anthropic Messages API** 调用 LLM 润色；成功后**会尝试将结果写入系统剪贴板**，并在**悬浮窗**中展示，便于核对；也可在悬浮窗内再次点击复制（例如剪贴板工具不可用或需二次确认时）。所有转写文本（原始 + 润色后）会自动保存到本地**历史记录**，随时可查、可复制、可再次润色。
 
 **在线文档**：[https://cislunarspace.github.io/altgo/](https://cislunarspace.github.io/altgo/)（与 [`docs-site/`](docs-site/) 同源，由 GitHub Pages 部署）。
 
-本仓库**主要面向 Linux 用户**：在 Windows 上已有大量同类工具，而能在 Linux 上持续开发、维护的同类项目仍然很少。Windows 版仅作附带支持，安装与排障说明相对简略。**不提供 macOS 构建或发布**（历史设计文档见 [`docs/superpowers/`](docs/superpowers/)）。
+本仓库**仅支持 Linux**（Ubuntu 20.04+）。**不提供 Windows 或 macOS 构建或发布**（历史设计文档见 [`docs/superpowers/`](docs/superpowers/)）。
 
 ![APP首页](figures/app_front_image.png)
 
@@ -70,12 +70,7 @@
 3. **务必**完成 [系统要求](#系统要求linux) 中的 **`input` 组** 步骤（与按键监听相关，安装包无法代劳）。
 4. 启动应用，在 **[设置](#首次使用应用内设置)** 里完成转写模型与可选润色等；**不要**一上来编辑配置文件。
 
-**预编译包与捆绑内容**：官方构建会把 **ffmpeg**、**whisper-cli** 等与程序一起打进 **deb / AppImage / MSI / zip**，目标是 **安装或解压后开箱即用**，无需再为录音与转写去单独安装这些二进制。
-
-#### Windows（附带支持）
-
-1. 从 [Releases](../../releases) 安装 **MSI** 或使用 zip 绿色版。
-2. 同上，**ffmpeg 等已随包提供**；直接打开应用，在 **设置** 中完成首次配置即可。
+**预编译包与捆绑内容**：官方构建会把 **ffmpeg**、**whisper-cli** 等与程序一起打进 **deb / AppImage**，目标是 **安装后开箱即用**，无需再为录音与转写去单独安装这些二进制。
 
 ### 给开发者（从本仓库构建）
 
@@ -86,14 +81,14 @@ git clone <本仓库 URL>
 cd altgo
 cd frontend && npm install && cd ..
 # Linux：先安装 Tauri 所需的 GTK/WebKit 等开发包，见下文「开发环境」
-make deps-linux    # 或 Windows：make deps-windows / pwsh packaging/scripts/download-deps.ps1
+make deps-linux
 make build
 # 可选：sudo make install
 ```
 
 若需快速改前端界面，可临时使用 `cargo tauri dev` 获得热重载；**完整链路（含捆绑二进制、与发布一致）仍以 `make build` 为准。**
 
-从源码自行构建且**未**走 `make deps-*` 时，才需要自行保证 **ffmpeg** / **whisper-cli** 可被程序找到（例如加入 `PATH` 或执行 `make deps-windows`）。
+从源码自行构建且**未**走 `make deps-linux` 时，才需要自行保证 **ffmpeg** / **whisper-cli** 可被程序找到（例如加入 `PATH`）。
 
 ## 首次使用：应用内设置
 
@@ -104,7 +99,7 @@ make build
 - **润色**：选择是否启用以及轻/中/重度；选择 API 协议（OpenAI 兼容 或 Anthropic）；填写地址、模型名与密钥（适用于云端或本地网关如 Ollama 等）。
 - **外观**：浅色 / 深色 / 跟随系统；**界面语言**。
 - **录音 / 触发键**：预设左右 Alt 或 **「按下以设置」** 捕获快捷键。
-- **输出**：开关桌面通知、剪贴板行为等（Windows 还可开启**光标位置注入**）。
+- **输出**：开关桌面通知、剪贴板行为等。
 - 点击 **保存**；多数情况下管道会自动重载，无需重启应用。
 
 跟着界面走即可完成日常使用。
@@ -115,8 +110,7 @@ make build
 
 仅在需要 **脚本化、批量部署、或与 GUI 未暴露的字段打交道** 时使用：
 
-- **Linux**：`~/.config/altgo/altgo.toml`
-- **Windows**：`%APPDATA%\altgo\altgo.toml`
+- **配置路径**：`~/.config/altgo/altgo.toml`
 
 仓库内 [`configs/altgo.toml`](configs/altgo.toml) 列出全部字段及注释；与界面保存的是同一套配置。
 
@@ -165,10 +159,10 @@ altgo 基于 **Tauri**，前端 **React**，核心逻辑 **Rust**。关键模块
 | 模块 | 职责 |
 |------|------|
 | `state_machine` | 按键状态管理（单击 / 长按 / 双击 / 连续录音） |
-| `recorder` | 跨平台音频采集（Linux: `parecord` / Windows: `ffmpeg`） |
+| `recorder` | 音频采集（`parecord`） |
 | `transcriber` | 本地 `whisper-cli` 或 OpenAI 兼容 API 转写 |
 | `polisher` | OpenAI 兼容 API 或 Anthropic Messages API 润色 |
-| `output` | 剪贴板写入、桌面通知、Windows 光标注入 |
+| `output` | 剪贴板写入、桌面通知 |
 | `history` | 本地 `history.json` 的追加 / 列表 / 删除 / 更新 |
 | `model` | GGML 模型下载与管理 |
 
@@ -206,7 +200,7 @@ cd frontend && npm run build
 
 | 目标 | 说明 |
 | ---- | ---- |
-| `make deps-linux` / `make deps-windows` | 下载 whisper-cli、ffmpeg 等至 `target/deps/bin/` |
+| `make deps-linux` | 下载 whisper-cli、ffmpeg 等至 `target/deps/bin/` |
 | `make build` | 依赖上述二进制后 `cargo tauri build`，并拷贝到 `src-tauri/target/release/bin/` |
 | `make install` | 安装可执行文件与 `/etc/altgo` 配置（通常需 `sudo`） |
 | `make run` | 构建后直接运行 |

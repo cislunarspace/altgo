@@ -1,28 +1,11 @@
-//! 输出模块（跨平台）。
+//! 输出模块（Linux）。
 //!
-//! 通过 `#[cfg(target_os)]` 条件编译为每个平台导出统一的函数接口：
-//! `write_clipboard`、`notify_processing`、`notify_result`。
-//!
-//! - Linux：`xclip`/`xsel`/`wl-copy`（剪切板）+ `notify-send`（通知）
-//! - Windows：`Set-Clipboard`（原生 Unicode）+ SendInput 注入光标 + PowerShell/WPF 悬浮窗
-//!
+//! 使用 `xclip`/`xsel`/`wl-copy`（剪切板）+ `notify-send`（通知）。
 //! 还提供 `truncate_text` 工具函数，用于安全地截断 UTF-8 文本。
 
-#[cfg(target_os = "linux")]
 mod linux;
-#[cfg(target_os = "windows")]
-mod windows;
 
-// Re-export platform-specific functions with a uniform API.
-#[cfg(target_os = "linux")]
 pub use linux::{
-    close_recording_window, notify, notify_processing, notify_result, output_text,
-    show_recording_window, write_clipboard,
-};
-
-#[cfg(target_os = "windows")]
-#[allow(unused_imports)]
-pub use windows::{
     close_recording_window, notify, notify_processing, notify_result, output_text,
     show_recording_window, write_clipboard,
 };

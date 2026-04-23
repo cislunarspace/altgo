@@ -5,12 +5,9 @@ title: 快速开始
 
 # 快速开始
 
-文档以 **Linux** 为主：本软件目前仅在 **Ubuntu 20.04** 上做过测试与部署验证；其他系统未保证。Windows 用户请优先使用 [Releases](https://github.com/cislunarspace/altgo/releases) 中的 **MSI** 或 zip。
+本软件**仅支持 Linux**，目前仅在 **Ubuntu 20.04** 上做过测试与部署验证；其他发行版可能可用但未保证。
 
-**官方预编译包**（deb / AppImage / MSI 等）会尽量把 **ffmpeg**、**whisper-cli** 等与程序一并打包，安装或解压后**开箱即用**，无需再为录音、转写单独安装这些二进制。
-
-import Tabs from '@theme/Tabs';
-import TabItem from '@theme/TabItem';
+**官方预编译包**（deb / AppImage）会尽量把 **ffmpeg**、**whisper-cli** 等与程序一并打包，安装后**开箱即用**，无需再为录音、转写单独安装这些二进制。
 
 ## Linux：安装前必做（input 组）
 
@@ -34,30 +31,9 @@ sudo usermod -aG input "$USER"
 
 **不要**把「先复制 `configs/altgo.toml` 再手改」当作默认路径——那是高级用法。日常用户只使用界面即可。
 
-## Windows（附带支持）
-
-<Tabs groupId="win">
-<TabItem value="user" label="用户">
-
-安装 **MSI** 或解压 zip 后直接运行；**ffmpeg 等已随包提供**。在 **设置** 中完成转写与润色即可。
-
-</TabItem>
-<TabItem value="dev" label="开发者">
-
-```powershell
-git clone https://github.com/cislunarspace/altgo.git
-cd altgo
-cd frontend; npm install; cd ..
-make deps-windows   # 或: pwsh packaging/scripts/download-deps.ps1
-make build
-```
-
-</TabItem>
-</Tabs>
-
 ## 开发者：从源码构建
 
-与主仓库一致，使用 **`make deps-linux`** / **`make deps-windows`** 拉取依赖，再用 **`make build`** 打包。**日常验证也建议以 `make build` 为主**。
+与主仓库一致，使用 **`make deps-linux`** 拉取依赖，再用 **`make build`** 打包。**日常验证也建议以 `make build` 为主**。
 
 ```bash
 git clone https://github.com/cislunarspace/altgo.git
@@ -71,7 +47,7 @@ make build
 
 ## 高级：仅当你要手改配置文件时
 
-配置文件路径：**Linux** `~/.config/altgo/altgo.toml`，**Windows** `%APPDATA%\altgo\altgo.toml`。字段说明见主仓库 [`configs/altgo.toml`](https://github.com/cislunarspace/altgo/blob/master/configs/altgo.toml)。
+配置文件路径：`~/.config/altgo/altgo.toml`。字段说明见主仓库 [`configs/altgo.toml`](https://github.com/cislunarspace/altgo/blob/master/configs/altgo.toml)。
 
 ## 启动
 

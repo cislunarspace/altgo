@@ -38,13 +38,13 @@ const features: FeatureItem[] = [
     icon: Sparkles,
   },
   {
-    title: '跨平台',
-    description: 'Linux（X11 / Wayland）与 Windows 使用子进程集成系统工具；发布与 CI 以 Linux 为主。',
+    title: 'Linux 原生',
+    description: '通过子进程集成系统工具（xinput、parecord、xclip 等），无需 FFI，构建简单。',
     icon: Monitor,
   },
   {
     title: '剪贴板与悬浮窗',
-    description: '成功后写入系统剪贴板并弹出悬浮窗核对；可在悬浮窗内再次复制。Windows 可选光标注入。',
+    description: '成功后写入系统剪贴板并弹出悬浮窗核对；可在悬浮窗内再次复制。',
     icon: ClipboardCopy,
   },
 ];

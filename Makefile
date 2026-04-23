@@ -1,4 +1,4 @@
-.PHONY: build ensure-binary-deps ensure-frontend-deps test install clean fmt lint deps-linux deps-windows package-deb run
+.PHONY: build ensure-binary-deps ensure-frontend-deps test install clean fmt lint deps-linux package-deb run
 
 BINARY=altgo
 RELEASE_BIN_DIR=src-tauri/target/release/bin
@@ -60,9 +60,6 @@ clean:
 
 deps-linux:
 	bash packaging/scripts/download-deps.sh x86_64
-
-deps-windows:
-	pwsh packaging/scripts/download-deps.ps1
 
 # 一键构建并运行
 run: build

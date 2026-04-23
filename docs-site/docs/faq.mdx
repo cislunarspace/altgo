@@ -10,36 +10,22 @@ title: 常见问题
 ### 录音没有声音 / 转写结果为空
 
 1. 检查麦克风是否被系统识别
-2. 确认录音工具已安装（Linux: `parecord`, Windows: `ffmpeg`）
+2. 确认录音工具已安装（`parecord`）
 3. 查看日志输出：`RUST_LOG=altgo=debug altgo`
 
-### ffmpeg 录音启动很慢
+### 录音启动慢
 
-ffmpeg 的 `dshow` 设备初始化需要时间。首次启动时会自动预热设备缓存，后续录音会更快。
+首次启动录音时设备初始化可能需要几秒，后续会更快。
 
 ## 按键相关
 
 ### 按右 Alt 没有反应
 
-import Tabs from '@theme/Tabs';
-import TabItem from '@theme/TabItem';
-
-<Tabs groupId="os">
-<TabItem value="linux" label="Linux">
-
-1. **用户是否在 `input` 组并已重新登录？** 无法读取 `/dev/input/event*` 时，Linux 按键监听会失败：`sudo usermod -aG input "$USER"` 后注销/重启再试。
+1. **用户是否在 `input` 组并已重新登录？** 无法读取 `/dev/input/event*` 时，按键监听会失败：`sudo usermod -aG input "$USER"` 后注销/重启再试。
 2. 确认 `xinput` 可用：`which xinput`（X11 路径）。
 3. 检查 Alt 绑定：`xmodmap -pke | grep Alt`；配置里默认 `key_name = "Alt_R"`，与设置页「按下以设置」一致即可。
 4. **Wayland**：仍依赖能访问 evdev；若仅用 XWayland 且无权限，现象与未加 `input` 组类似。剪贴板在 Wayland 上建议安装 **`wl-copy`**（或 `xclip`/`xsel` 经 XWayland）。
-
-</TabItem>
-<TabItem value="windows" label="Windows">
-
-1. 使用打包版时依赖已随包提供；从源码跑时请确认 `make deps-windows` 等与 README 一致。
-2. 若使用 IME，可适当增大 `min_press_duration_ms` 减轻误触。
-
-</TabItem>
-</Tabs>
+5. 若使用 IME，可适当增大 `min_press_duration_ms` 减轻误触。
 
 ### 误触发 / IME 冲突
 
@@ -108,23 +94,10 @@ system_prompt = "只修正标点和错别字，不要改变原文的意思和语
 
 ### 如何后台运行？
 
-<Tabs groupId="os">
-<TabItem value="linux" label="Linux">
-
 ```bash
 nohup altgo &
 # 或使用 systemd user service
 ```
-
-</TabItem>
-<TabItem value="windows" label="Windows">
-
-```powershell
-Start-Process -WindowStyle Hidden .\altgo.exe
-```
-
-</TabItem>
-</Tabs>
 
 ### 如何查看日志？
 

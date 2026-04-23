@@ -57,50 +57,9 @@ jobs:
           path: src-tauri/target/release/bundle/deb/*.deb
           if-no-files-found: error
 
-  build-windows:
-    name: Build Windows
-    runs-on: windows-latest
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: x86_64-pc-windows-msvc
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: x86_64-pc-windows-msvc-release
-
-      - name: Install Tauri CLI
-        run: cargo install tauri-cli --version "^2" --locked
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-
-      - name: Install frontend dependencies
-        run: npm ci
-        working-directory: frontend
-
-      - name: Download bundled binaries (ffmpeg, whisper-cli)
-        shell: pwsh
-        run: pwsh packaging/scripts/download-deps.ps1
-
-      - name: Build Tauri app
-        run: cargo tauri build --bundles msi
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Upload msi artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: altgo-windows-msi
-          path: src-tauri/target/release/bundle/msi/*.msi
-          if-no-files-found: error
-
   release:
     name: Create Release
-    needs: [build-linux, build-windows]
+    needs: [build-linux]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -123,7 +82,7 @@ jobs:
       - name: Generate checksums
         run: |
           cd release-assets
-          find . -type f \( -name '*.deb' -o -name '*.msi' \) -exec sha256sum {} \; > ../checksums.txt
+          find . -type f -name '*.deb' -exec sha256sum {} \; > ../checksums.txt
           cd ..
           cat checksums.txt
 

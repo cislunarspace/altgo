@@ -7,8 +7,7 @@
 //! - `ALTGO_TRANSCRIBER_API_KEY` — 覆盖语音识别 API 密钥
 //! - `ALTGO_POLISHER_API_KEY` — 覆盖文本润色 API 密钥
 //!
-//! 默认配置路径为 `~/.config/altgo/altgo.toml`（Linux/macOS）
-//! 或 `%APPDATA%/altgo/altgo.toml`（Windows）。
+//! 默认配置路径为 `~/.config/altgo/altgo.toml`。
 
 use anyhow::{Context, Result};
 use serde::Deserialize;
@@ -43,15 +42,13 @@ pub struct KeyListenerConfig {
     pub key_name: String,
     /// Linux evtest 回退路径使用的 evdev 键码（由「按下以设置」捕获）；`None` 时沿用 Alt 预设的启发式映射
     pub linux_evdev_code: Option<u16>,
-    /// Windows 虚拟键码；`None` 时由 `key_name` 白名单解析
-    pub windows_vk: Option<i32>,
     /// 长按阈值（毫秒），超过此时间视为长按录音
     pub long_press_threshold_ms: u64,
     /// 双击间隔（毫秒），两次点击在此时间窗口内视为双击
     pub double_click_interval_ms: u64,
-    /// 防抖窗口（毫秒），过滤 Windows 中文输入法导致的按键抖动
+    /// 防抖窗口（毫秒），过滤输入法导致的按键抖动
     pub debounce_window_ms: u64,
-    /// Windows 轮询间隔（毫秒）
+    /// 轮询间隔（毫秒）
     pub poll_interval_ms: u64,
     /// 最短按下时长（毫秒），过滤 IME 导致的瞬时分合
     pub min_press_duration_ms: u64,
@@ -84,7 +81,6 @@ impl Default for KeyListenerConfig {
         Self {
             key_name: "Alt_R".to_string(),
             linux_evdev_code: None,
-            windows_vk: None,
             long_press_threshold_ms: 200,
             double_click_interval_ms: 300,
             debounce_window_ms: 100,
@@ -215,7 +211,7 @@ pub struct OutputConfig {
     pub enable_notify: bool,
     /// 通知显示时长（毫秒）
     pub notify_timeout_ms: u64,
-    /// 是否尝试将文本注入到当前光标位置（仅 Windows）
+    /// 是否尝试将文本注入到当前光标位置（预留字段）
     pub inject_at_cursor: bool,
     /// 注入/复制时是否优先使用润色后的文本
     pub prefer_polished: bool,
@@ -298,8 +294,7 @@ impl Config {
                  \n\
                  解决方法（任选一种）：\n\
                  1. 设置环境变量：\n\
-                    Linux/macOS:  export ALTGO_TRANSCRIBER_API_KEY=\"your-key\"\n\
-                    Windows:      $env:ALTGO_TRANSCRIBER_API_KEY = \"your-key\"\n\
+                    export ALTGO_TRANSCRIBER_API_KEY=\"your-key\"\n\
                  2. 在配置文件中填写 api_key：\n\
                     编辑 {}，在 [transcriber] 下填写 api_key = \"your-key\"\n\
                  3. 使用本地 whisper.cpp（无需 API 密钥）：\n\
@@ -320,8 +315,7 @@ impl Config {
                    protocol = \"openai\"  # 或 \"anthropic\"\n\
                  \n\
                  或通过环境变量设置密钥：\n\
-                   Linux/macOS:  export ALTGO_POLISHER_API_KEY=\"your-key\"\n\
-                   Windows:      $env:ALTGO_POLISHER_API_KEY = \"your-key\"\n\
+                   export ALTGO_POLISHER_API_KEY=\"your-key\"\n\
                  \n\
                  如果不需要润色，将 level 改为 \"none\" 即可跳过此检查。\n\
                  配置文件路径：{}",
@@ -375,7 +369,6 @@ mod tests {
         let cfg = Config::default();
         assert_eq!(cfg.key_listener.key_name, "Alt_R");
         assert!(cfg.key_listener.linux_evdev_code.is_none());
-        assert!(cfg.key_listener.windows_vk.is_none());
         assert_eq!(cfg.key_listener.long_press_threshold_ms, 200);
         assert_eq!(cfg.key_listener.debounce_window_ms, 100);
         assert_eq!(cfg.key_listener.poll_interval_ms, 30);

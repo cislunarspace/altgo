@@ -7,23 +7,9 @@ title: 配置指南
 
 altgo 使用 TOML 格式的配置文件，所有字段都有默认值，只需修改你需要的部分。
 
-import Tabs from '@theme/Tabs';
-import TabItem from '@theme/TabItem';
-
 ## 配置文件位置
 
-<Tabs groupId="os">
-<TabItem value="linux" label="Linux">
-
 `~/.config/altgo/altgo.toml`
-
-</TabItem>
-<TabItem value="windows" label="Windows">
-
-`%APPDATA%\altgo\altgo.toml`（通常是 `C:\Users\<用户名>\AppData\Roaming\altgo\altgo.toml`）
-
-</TabItem>
-</Tabs>
 
 ## 转写引擎配置
 
@@ -128,7 +114,7 @@ export ALTGO_POLISHER_API_KEY="sk-your-key"
 
 ## 按键配置
 
-与 [`configs/altgo.toml`](https://github.com/cislunarspace/altgo/blob/master/configs/altgo.toml) 一致；默认触发键为 **右 Alt** 的 keysym 名 `Alt_R`。若在设置页使用「按下以设置」，可能会写入 `linux_evdev_code` / `windows_vk` 等字段。
+与 [`configs/altgo.toml`](https://github.com/cislunarspace/altgo/blob/master/configs/altgo.toml) 一致；默认触发键为 **右 Alt** 的 keysym 名 `Alt_R`。若在设置页使用「按下以设置」，会写入 `linux_evdev_code` 字段。
 
 ```toml
 [key_listener]
@@ -152,7 +138,7 @@ channels = 1                       # 声道数
 [output]
 enable_notify = true               # 桌面通知
 notify_timeout_ms = 5000
-inject_at_cursor = true            # 尝试注入到光标位置（仅 Windows；失败时仍会走剪贴板/悬浮窗）
+inject_at_cursor = true            # 尝试注入到光标位置（预留字段）
 prefer_polished = true             # 剪贴板/注入优先使用润色成功且非空的文本
 ```
 

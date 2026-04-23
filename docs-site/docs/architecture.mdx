@@ -33,18 +33,15 @@ src-tauri/src/
 ├── transcriber.rs     # Whisper API + 本地 whisper.cpp
 ├── polisher.rs        # LLM 文本润色
 ├── pipeline.rs        # 音频处理核心（转写 + 润色）
-├── key_listener/      # 跨平台按键监听
+├── key_listener/      # 按键监听
 │   ├── mod.rs         # 公共接口 + 去抖逻辑
-│   ├── linux.rs       # xinput test-xi2
-│   └── windows.rs     # PowerShell GetAsyncKeyState
-├── recorder/          # 跨平台音频录制
+│   └── linux.rs       # xinput test-xi2
+├── recorder/          # 音频录制
 │   ├── mod.rs         # 公共接口
-│   ├── linux.rs       # parecord
-│   └── windows.rs     # ffmpeg
-└── output/            # 跨平台剪贴板 + 通知
+│   └── linux.rs       # parecord
+└── output/            # 剪贴板 + 通知
     ├── mod.rs         # 公共接口
-    ├── linux.rs       # xclip / xsel / wl-copy + notify-send
-    └── windows.rs     # clip.exe + PowerShell toast
+    └── linux.rs       # xclip / xsel / wl-copy + notify-send
 ```
 
 ## 按键状态机
@@ -68,21 +65,9 @@ src-tauri/src/
 - **双击**（< 300ms 间隔）→ 进入 `ContinuousRecording`，单击停止
 - 使用 `tokio::select!` 同时等待按键事件和超时
 
-## 跨平台策略
+## 平台策略
 
-每个平台模块（`key_listener`、`recorder`、`output`）通过 `#[cfg(target_os = ...)]` 条件编译：
-
-```rust
-// recorder/mod.rs
-#[cfg(target_os = "linux")]
-pub type PlatformRecorder = LinuxRecorder;
-#[cfg(target_os = "windows")]
-pub type PlatformRecorder = WindowsRecorder;
-```
-
-- **静态分派**，不使用 trait 对象
-- 所有平台交互通过 **子进程调用** CLI 工具，而非 FFI
-- 简化了跨编译和平台适配
+所有平台交互通过 **子进程调用** CLI 工具（如 `parecord`、`xclip`、`xinput`），而非 FFI，简化了构建和依赖管理。
 
 ## 转写引擎
 
@@ -108,4 +93,4 @@ pub type PlatformRecorder = WindowsRecorder;
 - `config.rs` / `audio.rs` / `history.rs` — 全面的单元测试
 - `transcriber.rs` / `polisher.rs` — 使用 `mockito` 进行 HTTP 级别 mock
 - 平台模块 — 仅构造/冒烟测试
-- CI 在 Linux 和 Windows 两个平台上运行：`fmt`、`clippy`、`build --release`、`test`
+- CI 在 Linux 上运行：`fmt`、`clippy`、`build --release`、`test`

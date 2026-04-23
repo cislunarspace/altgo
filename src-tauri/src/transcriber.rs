@@ -295,16 +295,11 @@ fn find_whisper_binary(whisper_path: &str) -> anyhow::Result<std::path::PathBuf>
     }
 
     // 2. Check bundled location.
-    let bundled_name = if cfg!(windows) {
-        "whisper-cli.exe"
-    } else {
-        "whisper-cli"
-    };
-    if let Some(bundled) = crate::resource::bundled_bin(bundled_name) {
+    if let Some(bundled) = crate::resource::bundled_bin("whisper-cli") {
         return Ok(bundled);
     }
 
-    // 3. Search on PATH using `which` (Linux/macOS) or `where` (Windows).
+    // 3. Search on PATH.
     let candidates = ["whisper-cli", "whisper-cpp"];
     for candidate in &candidates {
         if let Ok(found) = which_binary(candidate) {
@@ -318,32 +313,10 @@ fn find_whisper_binary(whisper_path: &str) -> anyhow::Result<std::path::PathBuf>
 }
 
 /// Search for a binary on the system PATH.
-#[cfg(unix)]
 fn which_binary(name: &str) -> anyhow::Result<std::path::PathBuf> {
     let output = std::process::Command::new("which").arg(name).output()?;
     if output.status.success() {
         let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        let p = std::path::PathBuf::from(path);
-        if p.exists() {
-            return Ok(p);
-        }
-    }
-    Err(anyhow!("{} not found on PATH", name))
-}
-
-/// Search for a binary on the system PATH.
-#[cfg(windows)]
-fn which_binary(name: &str) -> anyhow::Result<std::path::PathBuf> {
-    let output = std::process::Command::new("cmd")
-        .args(["/C", "where", name])
-        .output()?;
-    if output.status.success() {
-        let path = String::from_utf8_lossy(&output.stdout)
-            .lines()
-            .next()
-            .unwrap_or("")
-            .trim()
-            .to_string();
         let p = std::path::PathBuf::from(path);
         if p.exists() {
             return Ok(p);

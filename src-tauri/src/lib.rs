@@ -84,14 +84,6 @@ pub fn run() {
                 });
             }
 
-            #[cfg(target_os = "windows")]
-            {
-                std::thread::spawn(|| {
-                    recorder::warmup_device();
-                    tracing::info!("audio device warmup complete");
-                });
-            }
-
             cmd::spawn_pipeline_at_startup(app.handle().clone())?;
 
             Ok(())

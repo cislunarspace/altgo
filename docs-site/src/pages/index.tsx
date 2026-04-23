@@ -39,8 +39,8 @@ const features = [
   },
   {
     icon: Monitor,
-    title: '跨平台',
-    description: 'Linux（X11 / Wayland）与 Windows；以 Linux 为第一目标平台。',
+    title: 'Linux 原生',
+    description: '支持 X11 / Wayland，通过子进程集成系统工具，构建简单。',
   },
   {
     icon: ClipboardCopy,
@@ -160,7 +160,7 @@ export default function Home(): JSX.Element {
                 <div className={styles.stepNum}>1</div>
                 <h3>安装并设置</h3>
                 <p>
-                  下载 deb / AppImage / MSI 安装包，在设置中选择转写引擎与模型。
+                  下载 deb / AppImage 安装包，在设置中选择转写引擎与模型。
                 </p>
               </div>
               <ArrowRight className={styles.stepArrow} size={24} />

@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use serde::{Deserialize, Deserializer, Serialize};
-use tauri::{AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, PhysicalSize, State};
+use tauri::{AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, State};
 
 use crate::{
     config, history, key_listener, output, pipeline, polisher, recorder, state_machine,
@@ -21,58 +21,7 @@ const OVERLAY_RESULT_W: f64 = 520.0;
 const OVERLAY_RESULT_H: f64 = 100.0;
 const OVERLAY_BOTTOM_OFFSET: f64 = 80.0;
 
-#[cfg(target_os = "windows")]
-#[repr(C)]
-#[allow(dead_code)]
-struct WinPoint {
-    x: i32,
-    y: i32,
-}
-
-#[cfg(target_os = "windows")]
-#[link(name = "user32")]
-extern "system" {
-    fn GetAsyncKeyState(vKey: i32) -> i16;
-    #[allow(dead_code)]
-    fn GetCursorPos(lpPoint: *mut WinPoint) -> i32;
-}
-
-#[cfg(target_os = "windows")]
-fn is_key_pressed(vk: i32) -> bool {
-    // SAFETY: GetAsyncKeyState is a thread-safe Win32 API. The vKey parameter
-    // is a valid virtual-key code produced by resolve_vk_code. No pointers or
-    // mutable state are involved.
-    unsafe { (GetAsyncKeyState(vk) as u16 & 0x8000) != 0 }
-}
-
-fn resolve_vk_code(key_name: &str) -> Result<i32, String> {
-    match key_name {
-        "ISO_Level3_Shift" | "Alt_R" | "RightAlt" => Ok(0xA5),
-        "Alt_L" | "LeftAlt" => Ok(0xA4),
-        "Super_L" | "Win_L" => Ok(0x5B),
-        "Super_R" | "Win_R" => Ok(0x5C),
-        "Control_R" => Ok(0xA3),
-        "Shift_R" => Ok(0xA1),
-        _ => Err(format!("unsupported key: {}", key_name)),
-    }
-}
-
-fn resolve_vk_for_pipeline(cfg: &config::KeyListenerConfig) -> Result<i32, String> {
-    if let Some(vk) = cfg.windows_vk {
-        return Ok(vk);
-    }
-    resolve_vk_code(&cfg.key_name)
-}
-
 fn apply_nested_opt_u16(target: &mut Option<u16>, patch: Option<Option<u16>>) {
-    match patch {
-        None => {}
-        Some(None) => *target = None,
-        Some(Some(v)) => *target = Some(v),
-    }
-}
-
-fn apply_nested_opt_i32(target: &mut Option<i32>, patch: Option<Option<i32>>) {
     match patch {
         None => {}
         Some(None) => *target = None,
@@ -99,29 +48,6 @@ where
         }
         _ => Err(serde::de::Error::custom(
             "linux_evdev_code: expected null or number",
-        )),
-    }
-}
-
-/// 同上，用于 Windows 虚拟键码。
-fn deserialize_opt_patch_i32<'de, D>(deserializer: D) -> Result<Option<Option<i32>>, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let v = serde_json::Value::deserialize(deserializer)?;
-    match v {
-        serde_json::Value::Null => Ok(Some(None)),
-        serde_json::Value::Number(n) => {
-            let i = n
-                .as_i64()
-                .ok_or_else(|| serde::de::Error::custom("windows_vk: expected integer"))?;
-            if i < i32::MIN as i64 || i > i32::MAX as i64 {
-                return Err(serde::de::Error::custom("windows_vk out of range"));
-            }
-            Ok(Some(Some(i as i32)))
-        }
-        _ => Err(serde::de::Error::custom(
-            "windows_vk: expected null or number",
         )),
     }
 }
@@ -153,8 +79,7 @@ fn emit_transcription_progress(app: &tauri::AppHandle, phase: &str, fraction: Op
     );
 }
 
-/// Linux: root-window mouse coordinates from `xdotool` (physical pixels).
-#[cfg(target_os = "linux")]
+/// Root-window mouse coordinates from `xdotool` (physical pixels).
 #[allow(dead_code)]
 fn mouse_position_physical() -> Option<(i32, i32)> {
     let mouse_out = std::process::Command::new("xdotool")
@@ -182,26 +107,8 @@ fn mouse_position_physical() -> Option<(i32, i32)> {
     Some((mouse_x, mouse_y))
 }
 
-#[cfg(target_os = "windows")]
-#[allow(dead_code)]
-fn mouse_position_physical() -> Option<(i32, i32)> {
-    let mut pt = WinPoint { x: 0, y: 0 };
-    // SAFETY: GetCursorPos writes to a valid stack POINT; standard Win32 API.
-    let ok = unsafe { GetCursorPos(&mut pt) };
-    if ok == 0 {
-        return None;
-    }
-    Some((pt.x, pt.y))
-}
-
-#[cfg(not(any(target_os = "linux", target_os = "windows")))]
-fn mouse_position_physical() -> Option<(i32, i32)> {
-    None
-}
-
-/// Linux: get the primary (or first) monitor geometry from `xrandr` in X11
+/// Get the primary (or first) monitor geometry from `xrandr` in X11
 /// device coordinates. Returns (x, y, width, height).
-#[cfg(target_os = "linux")]
 fn xrandr_primary_monitor() -> Option<(i32, i32, i32, i32)> {
     let output = std::process::Command::new("xrandr").output().ok()?;
     if !output.status.success() {
@@ -218,7 +125,6 @@ fn xrandr_primary_monitor() -> Option<(i32, i32, i32, i32)> {
         .or_else(|| monitors.into_iter().next().map(|m| (m.0, m.1, m.2, m.3)))
 }
 
-#[cfg(target_os = "linux")]
 fn parse_xrandr_geometry(output: &str) -> Vec<(i32, i32, i32, i32, bool)> {
     let mut monitors = Vec::new();
     for line in output.lines() {
@@ -264,8 +170,7 @@ fn parse_xrandr_geometry(output: &str) -> Vec<(i32, i32, i32, i32, bool)> {
     monitors
 }
 
-/// Linux: position overlay on the **primary** monitor only.
-#[cfg(target_os = "linux")]
+/// Position overlay on the **primary** monitor only.
 fn position_overlay_linux(
     overlay: &tauri::WebviewWindow,
     width: f64,
@@ -301,49 +206,9 @@ fn position_overlay_linux(
         .map_err(|e| e.to_string())
 }
 
-/// Windows / fallback: position overlay on the **primary** monitor only.
-fn position_overlay_tauri(overlay: &tauri::WebviewWindow, width: f64, height: f64) {
-    let _ = overlay.set_size(LogicalSize::new(width, height));
-
-    let Some(monitor) = overlay.primary_monitor().ok().flatten() else {
-        tracing::warn!("no primary monitor available for overlay positioning");
-        return;
-    };
-
-    let scale = monitor.scale_factor();
-    let phys: PhysicalSize<u32> = LogicalSize::new(width, height).to_physical(scale);
-    let phys_w = phys.width as i32;
-    let phys_h = phys.height as i32;
-    let offset_phys = (OVERLAY_BOTTOM_OFFSET * scale).round() as i32;
-
-    let pos = monitor.position();
-    let size = monitor.size();
-    let mw = size.width as i32;
-    let mh = size.height as i32;
-
-    let x = pos.x + (mw - phys_w) / 2;
-    let y = pos.y + mh - phys_h - offset_phys;
-
-    let _ = overlay.set_position(PhysicalPosition::new(x, y));
-}
-
 fn position_overlay(overlay: &tauri::WebviewWindow, width: f64, height: f64) {
-    #[cfg(target_os = "linux")]
-    {
-        if let Err(e) = position_overlay_linux(overlay, width, height) {
-            tracing::warn!("linux overlay positioning failed ({}), falling back", e);
-            position_overlay_tauri(overlay, width, height);
-        }
-    }
-
-    #[cfg(target_os = "windows")]
-    {
-        position_overlay_tauri(overlay, width, height);
-    }
-
-    #[cfg(not(any(target_os = "linux", target_os = "windows")))]
-    {
-        position_overlay_tauri(overlay, width, height);
+    if let Err(e) = position_overlay_linux(overlay, width, height) {
+        tracing::warn!("overlay positioning failed: {}", e);
     }
 }
 
@@ -352,7 +217,6 @@ fn position_overlay(overlay: &tauri::WebviewWindow, width: f64, height: f64) {
 pub struct ConfigResponse {
     pub key_name: String,
     pub linux_evdev_code: Option<u16>,
-    pub windows_vk: Option<i32>,
     pub language: String,
     pub engine: String,
     pub model: String,
@@ -371,7 +235,6 @@ pub async fn get_config(state: State<'_, AppState>) -> Result<ConfigResponse, St
     Ok(ConfigResponse {
         key_name: cfg.key_listener.key_name.clone(),
         linux_evdev_code: cfg.key_listener.linux_evdev_code,
-        windows_vk: cfg.key_listener.windows_vk,
         language: cfg.transcriber.language.clone(),
         engine: cfg.transcriber.engine.clone(),
         model: cfg.transcriber.model.clone(),
@@ -392,8 +255,6 @@ pub struct SaveConfigRequest {
     /// `None` = 请求中未带此字段（不修改）；`Some(None)` = JSON `null`（清除）；`Some(Some)` = 设置键码。
     #[serde(default, deserialize_with = "deserialize_opt_patch_u16")]
     pub linux_evdev_code: Option<Option<u16>>,
-    #[serde(default, deserialize_with = "deserialize_opt_patch_i32")]
-    pub windows_vk: Option<Option<i32>>,
     pub language: Option<String>,
     pub engine: Option<String>,
     pub model: Option<String>,
@@ -463,7 +324,6 @@ pub async fn save_config(
         cfg.key_listener.key_name = v;
     }
     apply_nested_opt_u16(&mut cfg.key_listener.linux_evdev_code, req.linux_evdev_code);
-    apply_nested_opt_i32(&mut cfg.key_listener.windows_vk, req.windows_vk);
     if let Some(v) = req.language {
         cfg.transcriber.language = v;
     }
@@ -595,22 +455,6 @@ pub async fn run_pipeline(
     mut stop_rx: tokio::sync::oneshot::Receiver<()>,
     pipeline_status: Arc<std::sync::RwLock<String>>,
 ) {
-    let vk_code = match resolve_vk_for_pipeline(&cfg.key_listener) {
-        Ok(vk) => vk,
-        Err(e) => {
-            tracing::error!(error = %e, "failed to resolve key code");
-            let _ = app.emit("pipeline-error", format!("key resolve: {}", e));
-            return;
-        }
-    };
-    tracing::info!(
-        "resolved key '{}' to VK code {}",
-        cfg.key_listener.key_name,
-        vk_code
-    );
-
-    let poll_interval_ms = cfg.key_listener.poll_interval_ms;
-
     // Validate recorder / transcriber / polisher before starting global key capture so errors
     // are visible immediately and we do not leave a key listener running without a main loop.
     let mut recorder =
@@ -687,29 +531,9 @@ pub async fn run_pipeline(
 
     let (raw_key_tx, raw_key_rx) = tokio::sync::mpsc::unbounded_channel();
     let poll_running = Arc::new(AtomicBool::new(true));
-
-    #[cfg(target_os = "windows")]
-    {
-        let poll_running = poll_running.clone();
-        std::thread::spawn(move || {
-            let mut was_down = false;
-            while poll_running.load(Ordering::SeqCst) {
-                let is_down = is_key_pressed(vk_code);
-                if is_down && !was_down {
-                    let _ = raw_key_tx.send(key_listener::KeyEvent { pressed: true });
-                } else if !is_down && was_down {
-                    let _ = raw_key_tx.send(key_listener::KeyEvent { pressed: false });
-                }
-                was_down = is_down;
-                std::thread::sleep(std::time::Duration::from_millis(poll_interval_ms));
-            }
-        });
-    }
+    let poll_interval_ms = cfg.key_listener.poll_interval_ms;
 
     // Must keep `PlatformListener` alive for the whole pipeline: its `Drop` stops xinput/evtest.
-    // Previously the listener lived only inside the block below and was dropped before the main
-    // loop — global keys were never delivered.
-    #[cfg(not(target_os = "windows"))]
     let _linux_key_listener = {
         let mut listener = match key_listener::PlatformListener::new(&cfg.key_listener) {
             Ok(l) => l,
