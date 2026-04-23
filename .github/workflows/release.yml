@@ -99,46 +99,6 @@ jobs:
           path: src-tauri/target/release/bundle/rpm/*.rpm
           if-no-files-found: error
 
-  build-appimage:
-    name: Build AppImage
-    runs-on: ubuntu-22.04
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf libasound2-dev build-essential cmake git curl xz-utils libudev-dev pkg-config libssl-dev python3 python3-pip
-
-      - name: Install appimage-builder
-        run: pip3 install appimage-builder
-
-      - uses: dtolnay/rust-toolchain@stable
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-
-      - name: Get version from tag
-        id: version
-        run: echo "value=${GITHUB_REF_NAME}" >> $GITHUB_OUTPUT
-
-      - name: Build AppImage
-        run: bash packaging/appimage/build.sh x86_64 "${{ steps.version.outputs.value }}" appimage-builder
-
-      - name: Find AppImage artifact
-        id: find_artifact
-        run: |
-          APPIMAGE=$(find target/appimage-build -name '*.AppImage' | head -1)
-          echo "path=${APPIMAGE}" >> $GITHUB_OUTPUT
-          echo "name=$(basename ${APPIMAGE})" >> $GITHUB_OUTPUT
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: ${{ steps.find_artifact.outputs.name }}
-          path: ${{ steps.find_artifact.outputs.path }}
-          if-no-files-found: error
-
   build-flatpak:
     name: Build Flatpak
     runs-on: ubuntu-22.04
@@ -237,7 +197,7 @@ jobs:
 
   release:
     name: Create Release
-    needs: [build-deb, build-rpm, build-appimage, build-flatpak, gen-aur]
+    needs: [build-deb, build-rpm, build-flatpak, gen-aur]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -262,7 +222,7 @@ jobs:
       - name: Generate checksums
         run: |
           cd release-assets
-          find . -type f \( -name '*.deb' -o -name '*.rpm' -o -name '*.AppImage' -o -name '*.flatpak' \) -exec sha256sum {} \; > ../checksums.txt
+          find . -type f \( -name '*.deb' -o -name '*.rpm' -o -name '*.flatpak' \) -exec sha256sum {} \; > ../checksums.txt
           cd ..
           cat checksums.txt
 
