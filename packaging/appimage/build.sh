@@ -156,6 +156,6 @@ cd "${BUILD_APPIMAGE_DIR}"
 DEPS_DIR="${DEPS_DIR}" \
 CMAKE_SOURCE_DIR="${PROJECT_ROOT}" \
 CMAKE_CURRENT_BINARY_DIR="${PROJECT_ROOT}/src-tauri/target/release" \
-${APPIMAGE_BUILDER} build --recipe "${TEMP_APPIMAGEBuilder_YML}"
+${APPIMAGE_BUILDER} --recipe "${TEMP_APPIMAGEBuilder_YML}"
 
 echo "[OK] AppImage built"

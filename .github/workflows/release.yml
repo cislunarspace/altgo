@@ -175,6 +175,14 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Stage sources for Flatpak
+        run: |
+          mkdir -p flatpak-src/bin flatpak-src/icons
+          cp src-tauri/target/release/altgo flatpak-src/altgo
+          cp -r target/deps/bin/* flatpak-src/bin/
+          cp src-tauri/icons/128x128.png flatpak-src/icons/
+          cp packaging/appimage/altgo.desktop.in flatpak-src/com.github.altgo.desktop
+
       - name: Build Flatpak bundle
         run: |
           sudo flatpak-builder --force-clean --repo=repo build-dir packaging/flatpak/com.github.altgo.yml
@@ -206,10 +214,17 @@ jobs:
 
       - name: Generate PKGBUILD
         run: |
-          DEB_FILE=$(find deb-artifact -name '*.deb' | head -1)
+          echo "Contents of deb-artifact:"
+          find deb-artifact -type f || true
+          DEB_FILE=$(find deb-artifact -name '*.deb' -type f | head -1)
+          echo "Found deb: ${DEB_FILE}"
+          if [[ -z "${DEB_FILE}" ]]; then
+            echo "ERROR: No deb file found in deb-artifact/"
+            exit 1
+          fi
           mkdir -p aur-output
           cd aur-output
-          bash ../packaging/aur/generate-pkgbuild.sh "${{ steps.version.outputs.value }}" "${DEB_FILE}"
+          bash ../packaging/aur/generate-pkgbuild.sh "${{ steps.version.outputs.value }}" "$(pwd)/../${DEB_FILE}"
 
       - name: Upload AUR artifacts
         uses: actions/upload-artifact@v4
