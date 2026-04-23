@@ -46,10 +46,18 @@ pub fn run() {
             let config_path = config::Config::default_config_path();
             let history_path = config_path
                 .parent()
-                .expect("config path has parent")
-                .join("history.json");
-            let cfg = config::Config::load(&config_path).expect("failed to load config");
-            cfg.validate().expect("invalid config");
+                .map(|p| p.join("history.json"))
+                .unwrap_or_else(|| config_path.with_extension("history.json"));
+            let cfg = match config::Config::load(&config_path) {
+                Ok(cfg) => cfg,
+                Err(e) => {
+                    tracing::warn!(error = %e, "failed to load config, using defaults");
+                    config::Config::default()
+                }
+            };
+            if let Err(e) = cfg.validate() {
+                tracing::warn!(error = %e, "config validation failed");
+            }
 
             let pipeline_status = Arc::new(std::sync::RwLock::new(String::from("idle")));
             let state = AppState {
@@ -111,11 +119,11 @@ pub fn run() {
         .run(|app_handle, event| {
             if let tauri::RunEvent::ExitRequested { .. } = event {
                 let state = app_handle.state::<AppState>();
-                let guard = state.pipeline.try_lock();
-                if let Ok(mut p) = guard {
-                    if let Some(h) = p.take() {
-                        let _ = h.stop_tx.send(());
-                    }
+                // Use blocking_lock to ensure pipeline cleanup completes on exit.
+                // If the mutex is poisoned, recover and still send the stop signal.
+                let mut p = state.pipeline.blocking_lock();
+                if let Some(h) = p.take() {
+                    let _ = h.stop_tx.send(());
                 }
             }
         });

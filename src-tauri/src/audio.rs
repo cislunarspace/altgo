@@ -94,6 +94,9 @@ pub fn encode_wav(
 
     let byte_rate = sample_rate * channels as u32 * bits_per_sample as u32 / 8;
     let block_align = channels * bits_per_sample / 8;
+    if pcm_data.len() > u32::MAX as usize {
+        return Err(anyhow::anyhow!("PCM data too large for WAV format (>4GB)"));
+    }
     let data_size = pcm_data.len() as u32;
     let file_size = 36 + data_size; // RIFF header - 8 + data
 

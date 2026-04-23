@@ -215,10 +215,13 @@ fn spawn_ps_script(script: &str) {
         }
     };
 
+    // Let the temp file auto-delete after the child process finishes.
+    // Spawn a thread to wait on the child, then drop the temp path guard.
     let tmp_path = tmp.into_temp_path();
-    let _ = tmp_path.keep();
     std::thread::spawn(move || {
         let _ = child.wait();
+        // tmp_path is dropped here, which deletes the temp file.
+        drop(tmp_path);
     });
 }
 
@@ -260,8 +263,16 @@ pub fn show_result_window(
         "润色结果"
     };
 
-    // Escape single quotes for PowerShell string
-    let escape_ps = |s: &str| s.replace('\'', "''").replace('\n', " ").replace('\r', "");
+    // Escape for PowerShell string interpolation (covers both single and double-quoted contexts).
+    // Order matters: escape backticks first, then other metacharacters.
+    let escape_ps = |s: &str| {
+        s.replace('\'', "''")
+            .replace('`', "``")
+            .replace('$', "`$")
+            .replace('\n', " ")
+            .replace('\r', "")
+            .replace('\0', "")
+    };
 
     let script = include_str!("windows_result.ps1")
         .replace("{left}", &left.to_string())

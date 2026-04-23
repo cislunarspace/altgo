@@ -361,8 +361,8 @@ pub struct ConfigResponse {
     pub polish_model: String,
     pub polish_api_base_url: String,
     pub gui_language: String,
-    pub transcriber_api_key: String,
-    pub polisher_api_key: String,
+    pub has_transcriber_api_key: bool,
+    pub has_polisher_api_key: bool,
 }
 
 #[tauri::command]
@@ -380,8 +380,8 @@ pub async fn get_config(state: State<'_, AppState>) -> Result<ConfigResponse, St
         polish_model: cfg.polisher.model.clone(),
         polish_api_base_url: cfg.polisher.api_base_url.clone(),
         gui_language: cfg.gui.language.clone(),
-        transcriber_api_key: cfg.transcriber.api_key.clone(),
-        polisher_api_key: cfg.polisher.api_key.clone(),
+        has_transcriber_api_key: !cfg.transcriber.api_key.trim().is_empty(),
+        has_polisher_api_key: !cfg.polisher.api_key.trim().is_empty(),
     })
 }
 

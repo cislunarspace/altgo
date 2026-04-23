@@ -345,6 +345,13 @@ impl Config {
         std::fs::write(path, content)
             .with_context(|| format!("write config to {}", path.display()))?;
 
+        // Restrict file permissions to owner-only (protect API keys at rest).
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
+        }
+
         tracing::info!(path = %path.display(), "config saved");
         Ok(())
     }
@@ -352,7 +359,7 @@ impl Config {
     /// 返回默认配置文件路径（`~/.config/altgo/altgo.toml`）。
     pub fn default_config_path() -> PathBuf {
         dirs::config_dir()
-            .expect("could not determine config directory")
+            .unwrap_or_else(|| PathBuf::from("."))
             .join("altgo")
             .join("altgo.toml")
     }

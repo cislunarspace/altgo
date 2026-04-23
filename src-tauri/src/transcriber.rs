@@ -279,19 +279,14 @@ impl LocalWhisper {
 /// 2. 捆绑安装的二进制文件
 /// 3. 系统 PATH 中的 `whisper-cli` 和 `whisper-cpp`
 fn find_whisper_binary(whisper_path: &str) -> anyhow::Result<std::path::PathBuf> {
-    static CACHE: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
-
-    if let Some(cached) = CACHE.get() {
-        return Ok(cached.clone());
-    }
+    // No caching — config changes (whisper_path) should take effect on pipeline restart
+    // without requiring an app restart.
 
     // 1. Use explicitly configured path.
     if !whisper_path.is_empty() {
         let path = std::path::Path::new(whisper_path);
         if path.exists() {
-            let buf = path.to_path_buf();
-            let _ = CACHE.set(buf.clone());
-            return Ok(buf);
+            return Ok(path.to_path_buf());
         }
         return Err(anyhow!(
             "whisper-cli not found at configured path: {}",
@@ -306,7 +301,6 @@ fn find_whisper_binary(whisper_path: &str) -> anyhow::Result<std::path::PathBuf>
         "whisper-cli"
     };
     if let Some(bundled) = crate::resource::bundled_bin(bundled_name) {
-        let _ = CACHE.set(bundled.clone());
         return Ok(bundled);
     }
 
@@ -314,7 +308,6 @@ fn find_whisper_binary(whisper_path: &str) -> anyhow::Result<std::path::PathBuf>
     let candidates = ["whisper-cli", "whisper-cpp"];
     for candidate in &candidates {
         if let Ok(found) = which_binary(candidate) {
-            let _ = CACHE.set(found.clone());
             return Ok(found);
         }
     }

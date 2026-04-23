@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { getVersion } from "@tauri-apps/api/app";
 import { message as showMessageDialog } from "@tauri-apps/plugin-dialog";
 import { useTranslation } from "../i18n";
 import { useModelDownloadProgress } from "../hooks/useTauri";
@@ -37,8 +38,12 @@ interface AppConfig {
   polishModel: string;
   polishApiBaseUrl: string;
   guiLanguage: string;
+  /** User-entered API key (empty = keep existing if hasTranscriberApiKey is true) */
   transcriberApiKey: string;
+  /** User-entered API key (empty = keep existing if hasPolisherApiKey is true) */
   polisherApiKey: string;
+  hasTranscriberApiKey: boolean;
+  hasPolisherApiKey: boolean;
 }
 
 interface ModelEntry {
@@ -80,11 +85,12 @@ function saveRequestBody(c: AppConfig) {
     language: c.language,
     engine: c.engine,
     model: c.model,
-    apiKey: c.transcriberApiKey,
+    // Only send API keys when user entered a new value (empty = keep existing)
+    ...(c.transcriberApiKey ? { apiKey: c.transcriberApiKey } : {}),
     apiBaseUrl: c.apiBaseUrl,
     polishLevel: c.polishLevel,
     polishModel: c.polishModel,
-    polishApiKey: c.polisherApiKey,
+    ...(c.polisherApiKey ? { polishApiKey: c.polisherApiKey } : {}),
     polishApiBaseUrl: c.polishApiBaseUrl,
     guiLanguage: c.guiLanguage,
   };
@@ -95,6 +101,11 @@ function normalizeConfig(c: AppConfig): AppConfig {
     ...c,
     linuxEvdevCode: c.linuxEvdevCode ?? null,
     windowsVk: c.windowsVk ?? null,
+    // API keys are not returned from backend; start empty (user enters only when changing)
+    transcriberApiKey: "",
+    polisherApiKey: "",
+    hasTranscriberApiKey: c.hasTranscriberApiKey ?? false,
+    hasPolisherApiKey: c.hasPolisherApiKey ?? false,
   };
 }
 
@@ -110,7 +121,12 @@ export default function Settings() {
   const [polishOpen, setPolishOpen] = useState(false);
   const [advancedPath, setAdvancedPath] = useState(false);
   const [keyCapturing, setKeyCapturing] = useState(false);
+  const [appVersion, setAppVersion] = useState<string>("");
   const progress = useModelDownloadProgress();
+
+  useEffect(() => {
+    getVersion().then(setAppVersion).catch(() => {});
+  }, []);
 
   const refreshModels = useCallback(() => {
     invoke<ModelEntry[]>("list_models").then(setModels).catch(() => {});
@@ -142,7 +158,9 @@ export default function Settings() {
         setConfig(normalizeConfig(c));
         refreshResolved(c.model, c.engine);
       })
-      .catch(() => {});
+      .catch((e) => {
+        setMessage(String(e));
+      });
     refreshModels();
   }, [refreshModels, refreshResolved]);
 
@@ -520,7 +538,7 @@ export default function Settings() {
                     className="settings-input"
                     value={config.transcriberApiKey}
                     onChange={(e) => update("transcriberApiKey", e.target.value)}
-                    placeholder="sk-..."
+                    placeholder={config.hasTranscriberApiKey ? "sk-***" : "sk-..."}
                   />
                 </div>
               </div>
@@ -696,7 +714,7 @@ export default function Settings() {
                     className="settings-input"
                     value={config.polisherApiKey}
                     onChange={(e) => update("polisherApiKey", e.target.value)}
-                    placeholder="sk-..."
+                    placeholder={config.hasPolisherApiKey ? "sk-***" : "sk-..."}
                   />
                 </div>
               </div>
@@ -760,7 +778,7 @@ export default function Settings() {
           <div className="settings-field">
             <span className="settings-field-label-text">{t("settings.version")}</span>
             <div className="settings-field-control">
-              <span className="settings-muted">2.1.0</span>
+              <span className="settings-muted">{appVersion || "…"}</span>
             </div>
           </div>
         </section>

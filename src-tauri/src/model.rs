@@ -47,10 +47,13 @@ fn model_download_client() -> &'static Client {
                 " (whisper.cpp ggml model download)"
             ))
             .connect_timeout(Duration::from_secs(120))
-            // 大文件下载耗时较长，放宽连接在池中的空闲保留时间，降低长时间拉流被断开概率。
             .pool_idle_timeout(Duration::from_secs(600))
             .build()
-            .expect("reqwest client for model downloads")
+            .unwrap_or_else(|e| {
+                tracing::error!(error = %e, "failed to build model download client");
+                // Fallback to default client — download may still work with less optimal settings.
+                Client::new()
+            })
     })
 }
 
@@ -102,7 +105,7 @@ pub fn models_info() -> &'static [ModelInfo] {
 /// 返回模型存储目录（`~/.config/altgo/models/` 或 `%APPDATA%/altgo/models/`）。
 pub fn models_dir() -> PathBuf {
     dirs::config_dir()
-        .expect("could not determine config directory")
+        .unwrap_or_else(|| PathBuf::from("."))
         .join("altgo")
         .join("models")
 }

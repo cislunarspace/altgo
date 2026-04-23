@@ -62,16 +62,17 @@ pub(crate) fn list_keyboard_devices() -> Result<Vec<PathBuf>> {
             let name = entry.file_name().to_string_lossy().to_string();
             if name.starts_with("event") {
                 let path = entry.path();
-                let output = Command::new("sh")
-                    .arg("-c")
-                    .arg(format!(
-                        "evtest --info {} 2>&1 | grep -q 'EV_KEY.*KEY' && echo YES || echo NO",
-                        path.display()
-                    ))
+                // Avoid shell interpolation — pass args directly to evtest.
+                let output = Command::new("evtest")
+                    .arg("--info")
+                    .arg(&path)
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::null())
                     .output();
 
                 if let Ok(output) = output {
-                    if String::from_utf8_lossy(&output.stdout).contains("YES") {
+                    let info = String::from_utf8_lossy(&output.stdout);
+                    if info.contains("EV_KEY") && info.contains("KEY") {
                         devices.push(path);
                     }
                 }

@@ -345,14 +345,12 @@ impl LLMFormatter {
             match result {
                 Ok(r) => return Ok(r),
                 Err(e) => {
+                    // Only check for typed HttpStatusError — avoid brittle string matching
+                    // that could false-positive on body text containing "401" etc.
                     if let Some(status) = e.downcast_ref::<HttpStatusError>() {
                         if status.0 == 401 || status.0 == 403 {
                             return Err(e);
                         }
-                    }
-                    let err_str = e.to_string();
-                    if err_str.contains("401") || err_str.contains("403") {
-                        return Err(e);
                     }
                     tracing::warn!(attempt, error = %e, "polish request failed");
                     last_err = Some(e);
@@ -569,13 +567,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_polish_api_error_retries_and_fails() {
+    async fn test_polish_api_error_401_no_retry() {
+        // 401 should NOT be retried — it's an auth error, not a transient failure.
         let mut server = mockito::Server::new_async().await;
         let _mock = server
             .mock("POST", "/v1/chat/completions")
             .with_status(401)
             .with_body("unauthorized")
-            .expect(3)
+            .expect(1)
             .create_async()
             .await;
 

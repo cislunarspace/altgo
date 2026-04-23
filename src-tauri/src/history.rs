@@ -14,8 +14,8 @@ static HISTORY_IO_LOCK: Mutex<()> = Mutex::new(());
 pub fn default_history_path() -> PathBuf {
     crate::config::Config::default_config_path()
         .parent()
-        .expect("config path has parent")
-        .join("history.json")
+        .map(|p| p.join("history.json"))
+        .unwrap_or_else(|| PathBuf::from("history.json"))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -50,7 +50,16 @@ fn save_raw(path: &Path, data: &HistoryFile) -> Result<()> {
         fs::create_dir_all(parent).context("create history directory")?;
     }
     let s = serde_json::to_string_pretty(data).context("serialize history")?;
-    fs::write(path, s).context("write history file")
+    fs::write(path, s).context("write history file")?;
+
+    // Restrict file permissions to owner-only (protect transcription data at rest).
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(path, fs::Permissions::from_mode(0o600));
+    }
+
+    Ok(())
 }
 
 /// 追加一条记录（最新在前）。

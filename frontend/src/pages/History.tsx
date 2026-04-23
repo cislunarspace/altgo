@@ -15,7 +15,7 @@ import "../styles/components.css";
 interface PolishConfig {
   polishModel: string;
   polishApiBaseUrl: string;
-  polisherApiKey: string;
+  hasPolisherApiKey: boolean;
 }
 
 interface HistoryEntry {
@@ -174,7 +174,8 @@ export default function HistoryPage() {
   const handlePolish = async (id: string) => {
     if (
       !polishConfig?.polishApiBaseUrl?.trim() ||
-      !polishConfig?.polishModel?.trim()
+      !polishConfig?.polishModel?.trim() ||
+      !polishConfig?.hasPolisherApiKey
     ) {
       setError(t("history.polish_config_missing"));
       return;
