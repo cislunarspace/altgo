@@ -11,11 +11,9 @@ permissions:
   contents: write
 
 jobs:
-  build-linux:
-    name: Build Linux
-    # ubuntu-22.04 → glibc 2.35，deb 可在 Jammy 等旧版发行版上运行（ubuntu-latest 常为更新 glibc）
+  build-deb:
+    name: Build DEB
     runs-on: ubuntu-22.04
-
     steps:
       - uses: actions/checkout@v4
 
@@ -42,10 +40,10 @@ jobs:
         run: npm ci
         working-directory: frontend
 
-      - name: Download bundled binaries (ffmpeg, whisper-cli)
+      - name: Download bundled binaries
         run: bash packaging/scripts/download-deps.sh x86_64
 
-      - name: Build Tauri app
+      - name: Build deb
         run: cargo tauri build --bundles deb
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -57,14 +55,170 @@ jobs:
           path: src-tauri/target/release/bundle/deb/*.deb
           if-no-files-found: error
 
+  build-rpm:
+    name: Build RPM
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev patchelf libasound2-dev build-essential cmake rpm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-gnu
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: x86_64-unknown-linux-gnu-release-rpm
+
+      - name: Install Tauri CLI
+        run: cargo install tauri-cli --version "^2" --locked
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install frontend dependencies
+        run: npm ci
+        working-directory: frontend
+
+      - name: Download bundled binaries
+        run: bash packaging/scripts/download-deps.sh x86_64
+
+      - name: Build rpm
+        run: cargo tauri build --bundles rpm
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload rpm artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: altgo-x86_64-rpm
+          path: src-tauri/target/release/bundle/rpm/*.rpm
+          if-no-files-found: error
+
+  build-appimage:
+    name: Build AppImage
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf libasound2-dev build-essential cmake git curl xz-utils libudev-dev pkg-config libssl-dev python3 python3-pip
+
+      - name: Install appimage-builder
+        run: pip3 install appimage-builder
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Get version from tag
+        id: version
+        run: echo "value=${GITHUB_REF_NAME}" >> $GITHUB_OUTPUT
+
+      - name: Build AppImage
+        run: bash packaging/appimage/build.sh x86_64 "${{ steps.version.outputs.value }}" appimage-builder
+
+      - name: Find AppImage artifact
+        id: find_artifact
+        run: |
+          APPIMAGE=$(find target/appimage-build -name '*.AppImage' | head -1)
+          echo "path=${APPIMAGE}" >> $GITHUB_OUTPUT
+          echo "name=$(basename ${APPIMAGE})" >> $GITHUB_OUTPUT
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.find_artifact.outputs.name }}
+          path: ${{ steps.find_artifact.outputs.path }}
+          if-no-files-found: error
+
+  build-flatpak:
+    name: Build Flatpak
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev patchelf libasound2-dev build-essential cmake flatpak flatpak-builder
+
+      - name: Install Flatpak SDK
+        run: |
+          flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+          flatpak install -y --noninteractive flathub org.freedesktop.Platform//23.08 org.freedesktop.Sdk//23.08
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install frontend dependencies
+        run: npm ci
+        working-directory: frontend
+
+      - name: Download bundled binaries
+        run: bash packaging/scripts/download-deps.sh x86_64
+
+      - name: Build Tauri binary (no bundle)
+        run: |
+          cargo install tauri-cli --version "^2" --locked
+          cargo tauri build --no-bundle
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build Flatpak bundle
+        run: |
+          flatpak-builder --force-clean --repo=repo build-dir packaging/flatpak/com.github.altgo.yml
+          flatpak build-bundle repo altgo-x86_64.flatpak com.github.altgo
+
+      - name: Upload flatpak artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: altgo-x86_64-flatpak
+          path: altgo-x86_64.flatpak
+          if-no-files-found: error
+
+  gen-aur:
+    name: Generate AUR PKGBUILD
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get version from tag
+        id: version
+        run: echo "value=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
+
+      - name: Generate PKGBUILD
+        run: |
+          mkdir -p aur-output
+          cd aur-output
+          bash ../packaging/aur/generate-pkgbuild.sh "${{ steps.version.outputs.value }}"
+
+      - name: Upload AUR artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: altgo-aur-pkgbuild
+          path: |
+            aur-output/PKGBUILD
+            aur-output/.SRCINFO
+          if-no-files-found: warn
+
   release:
     name: Create Release
-    needs: [build-linux]
+    needs: [build-deb, build-rpm, build-appimage, build-flatpak, gen-aur]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          # 需要完整历史：生成 Release 说明时解析上一 tag、CHANGELOG 小节
           fetch-depth: 0
 
       - name: Write release notes from CHANGELOG
@@ -79,10 +233,13 @@ jobs:
           path: release-assets
           merge-multiple: true
 
+      - name: List release assets
+        run: find release-assets -type f | sort
+
       - name: Generate checksums
         run: |
           cd release-assets
-          find . -type f -name '*.deb' -exec sha256sum {} \; > ../checksums.txt
+          find . -type f \( -name '*.deb' -o -name '*.rpm' -o -name '*.AppImage' -o -name '*.flatpak' \) -exec sha256sum {} \; > ../checksums.txt
           cd ..
           cat checksums.txt
 
