@@ -189,9 +189,16 @@ jobs:
 
   gen-aur:
     name: Generate AUR PKGBUILD
+    needs: [build-deb]
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
+
+      - name: Download deb artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: altgo-amd64-deb
+          path: deb-artifact
 
       - name: Get version from tag
         id: version
@@ -199,9 +206,10 @@ jobs:
 
       - name: Generate PKGBUILD
         run: |
+          DEB_FILE=$(find deb-artifact -name '*.deb' | head -1)
           mkdir -p aur-output
           cd aur-output
-          bash ../packaging/aur/generate-pkgbuild.sh "${{ steps.version.outputs.value }}"
+          bash ../packaging/aur/generate-pkgbuild.sh "${{ steps.version.outputs.value }}" "${DEB_FILE}"
 
       - name: Upload AUR artifacts
         uses: actions/upload-artifact@v4
