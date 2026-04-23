@@ -1,0 +1,36 @@
+app-id: com.github.altgo
+runtime: org.freedesktop.Platform
+runtime-version: '23.08'
+sdk: org.freedesktop.Sdk
+command: altgo
+finish-args:
+  - --socket=x11
+  - --socket=wayland
+  - --socket=pulseaudio
+  - --share=ipc
+  - --talk-name=org.freedesktop.Notifications
+  - --device=input
+  - --filesystem=home
+  - --env=PATH=/app/bin:/app/altgo/bin
+
+modules:
+  - name: altgo
+    buildsystem: simple
+    build-commands:
+      - install -Dm755 altgo /app/bin/altgo
+      - cp -r bin/* /app/altgo/bin/
+      - mkdir -p /app/share/icons/hicolor/128x128/apps
+      - install -Dm644 icons/128x128.png /app/share/icons/hicolor/128x128/apps/com.github.altgo.png
+      - install -Dm644 com.github.altgo.desktop /app/share/applications/com.github.altgo.desktop
+    sources:
+      - type: file
+        path: ../../src-tauri/target/release/altgo
+      - type: dir
+        path: ../../target/deps/bin
+        dest: bin
+      - type: dir
+        path: ../../src-tauri/icons
+        dest: icons
+      - type: file
+        path: ../../packaging/appimage/altgo.desktop.in
+        dest-filename: com.github.altgo.desktop
