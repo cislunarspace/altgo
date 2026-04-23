@@ -141,7 +141,7 @@ echo "[INFO] Assembling AppImage..."
 
 # Write effective VERSION and ARCH to a temp file for appimage-builder
 TEMP_APPIMAGEBuilder_YML="${BUILD_APPIMAGE_DIR}/appimage-builder.yml"
-sed "s|@VERSION@|${VERSION}|g; s|@ARCH@|${ARCH}|g" \
+sed "s|@VERSION@|${VERSION}|g; s|@ARCH@|${ARCH}|g; s|@APPDIR@|${BUILD_APPIMAGE_DIR}/AppDir|g" \
     "${SCRIPT_DIR}/appimage-builder.yml" > "${TEMP_APPIMAGEBuilder_YML}"
 
 TEMP_APPRUN="${BUILD_APPIMAGE_DIR}/AppRun"
