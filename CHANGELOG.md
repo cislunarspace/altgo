@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## v2.3.1 (2026-04-23)
+
+### Packaging / CI
+
+- Unified release pipeline: tag push now auto-builds **deb**, **rpm**, **AppImage**, **Flatpak**, and **AUR PKGBUILD**
+- Added **RPM** bundle target for Fedora/RHEL/openSUSE
+- Added **Flatpak** manifest (`.flatpak` artifact on GitHub Release)
+- Added **AUR** PKGBUILD template and generator script
+- Integrated AppImage build into `release.yml` (removed standalone `appimage.yml`)
+- Unified version constants in `packaging/scripts/versions.sh` (fixed whisper.cpp v1.7.5 → v1.8.4 skew)
+
 ## v2.2.4 (2026-04-22)
 
 ### Packaging / CI
