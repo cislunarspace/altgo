@@ -29,6 +29,9 @@ DEPS_DIR="${PROJECT_ROOT}/target/deps"
 BIN_DIR="${DEPS_DIR}/bin"
 BUILD_APPIMAGE_DIR="${PROJECT_ROOT}/target/appimage-build"
 
+# Source unified version constants
+source "${SCRIPT_DIR}/../scripts/versions.sh"
+
 echo "=== AppImage build for ${ARCH} ==="
 echo "VERSION=${VERSION}"
 echo "PROJECT_ROOT=${PROJECT_ROOT}"
@@ -44,7 +47,7 @@ fi
 mkdir -p "${BIN_DIR}" "${BUILD_APPIMAGE_DIR}"
 
 # ─── Step 1: Build whisper.cpp from source ────────────────────────────────────
-WHISPER_VERSION="1.7.5"
+WHISPER_VERSION="${WHISPER_CPP_VERSION}"
 WHISPER_TARGET="${BIN_DIR}/whisper-cli"
 
 if [[ -f "${WHISPER_TARGET}" ]]; then
@@ -84,7 +87,6 @@ if [[ -f "${FFMPEG_TARGET}" ]]; then
     echo "[OK] ffmpeg already exists"
 else
     echo "[INFO] Downloading ffmpeg..."
-    FFMPEG_VERSION="7.1.1"
     if [[ "${ARCH}" == "x86_64" ]]; then
         FFMPEG_URL="https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz"
     else
