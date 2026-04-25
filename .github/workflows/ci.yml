@@ -38,6 +38,9 @@ jobs:
         run: npm ci
         working-directory: frontend
 
+      - name: Download bundled binaries (ffmpeg, whisper-cli)
+        run: bash packaging/scripts/download-deps.sh x86_64
+
       - name: Check formatting
         run: cargo fmt --manifest-path=src-tauri/Cargo.toml --all -- --check
 
@@ -52,9 +55,6 @@ jobs:
 
       - name: Install Tauri CLI
         run: cargo install tauri-cli --version "^2" --locked
-
-      - name: Download bundled binaries (ffmpeg, whisper-cli)
-        run: bash packaging/scripts/download-deps.sh x86_64
 
       - name: Build Tauri GUI
         run: cargo tauri build --bundles deb
