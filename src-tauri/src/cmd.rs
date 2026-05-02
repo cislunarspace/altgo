@@ -6,9 +6,14 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, State};
 
 use crate::{
-    config, config_store::{ConfigPatch, ConfigStore}, history, history::HistoryStore,
-    output, pipeline, pipeline_controller::{PipelineController, PipelineStatus},
-    pipeline_sink::PipelineSink, polisher,
+    config,
+    config_store::{ConfigPatch, ConfigStore},
+    history,
+    history::HistoryStore,
+    output, pipeline,
+    pipeline_controller::{PipelineController, PipelineStatus},
+    pipeline_sink::PipelineSink,
+    polisher,
 };
 
 const OVERLAY_RECORDING_W: f64 = 200.0;
@@ -98,7 +103,13 @@ fn position_overlay_linux(
 
     tracing::debug!(
         "linux overlay pos: primary=({},{},{},{}) pos=({},{}) scale={}",
-        mx, my, mw, mh, x, y, scale
+        mx,
+        my,
+        mw,
+        mh,
+        x,
+        y,
+        scale
     );
 
     overlay
@@ -116,7 +127,7 @@ fn position_overlay(overlay: &tauri::WebviewWindow, width: f64, height: f64) {
 struct TauriPipelineSink {
     app: tauri::AppHandle,
     pipeline_status: Arc<std::sync::RwLock<PipelineStatus>>,
-    cfg: Arc<config::Config>,
+    event_handler: crate::pipeline_event_handler::PipelineEventHandler,
 }
 
 impl TauriPipelineSink {
@@ -125,7 +136,13 @@ impl TauriPipelineSink {
         pipeline_status: Arc<std::sync::RwLock<PipelineStatus>>,
         cfg: Arc<config::Config>,
     ) -> Self {
-        Self { app, pipeline_status, cfg }
+        let event_handler =
+            crate::pipeline_event_handler::PipelineEventHandler::new(cfg.output.prefer_polished);
+        Self {
+            app,
+            pipeline_status,
+            event_handler,
+        }
     }
 }
 
@@ -178,43 +195,34 @@ impl PipelineSink for TauriPipelineSink {
             return;
         }
 
-        let prefer_polished = self.cfg.output.prefer_polished;
         let app = self.app.clone();
         let status = self.pipeline_status.clone();
-        let raw_text = output.raw_text.clone();
-        let polish_failed = output.polish_failed;
-        let text = output.text.clone();
+        let output_clone = output.clone();
+        let event_handler = self.event_handler.clone();
 
         tauri::async_runtime::spawn(async move {
-            let text_to_use = if prefer_polished && !polish_failed && !text.trim().is_empty() {
-                text.clone()
-            } else {
-                raw_text.clone()
-            };
+            let history_store = app.state::<HistoryStore>().inner().clone();
+            let result = event_handler
+                .handle_transcription(&output_clone, &history_store)
+                .await;
 
-            let _ = output::write_clipboard(&text_to_use).await;
+            match result {
+                Some(res) => {
+                    if res.history_appended {
+                        let _ = app.emit("history-updated", ());
+                    }
 
-            let store = app.state::<HistoryStore>().inner().clone();
-            let raw = raw_text.clone();
-            let display = text_to_use.clone();
-            match tokio::task::spawn_blocking(move || store.append(raw, display)).await {
-                Ok(Ok(_)) => {
-                    let _ = app.emit("history-updated", ());
+                    emit_pipeline_status(&app, &status, PipelineStatus::Done);
+                    if let Some(overlay) = app.get_webview_window("overlay") {
+                        position_overlay(&overlay, OVERLAY_RESULT_W, OVERLAY_RESULT_H);
+                        let _ = overlay.show();
+                    }
+                    let _ = app.emit("transcription-result", &res.clipboard_text);
                 }
-                Ok(Err(e)) => {
-                    tracing::warn!(error = %e, "failed to append transcription history");
-                }
-                Err(e) => {
-                    tracing::warn!(error = %e, "history append task failed");
+                None => {
+                    emit_pipeline_status(&app, &status, PipelineStatus::Idle);
                 }
             }
-
-            emit_pipeline_status(&app, &status, PipelineStatus::Done);
-            if let Some(overlay) = app.get_webview_window("overlay") {
-                position_overlay(&overlay, OVERLAY_RESULT_W, OVERLAY_RESULT_H);
-                let _ = overlay.show();
-            }
-            let _ = app.emit("transcription-result", &text_to_use);
         });
     }
 
@@ -282,9 +290,7 @@ pub struct ConfigResponse {
 }
 
 #[tauri::command]
-pub async fn get_config(
-    config_store: State<'_, ConfigStore>,
-) -> Result<ConfigResponse, String> {
+pub async fn get_config(config_store: State<'_, ConfigStore>) -> Result<ConfigResponse, String> {
     let cfg = config_store.config.lock().await;
     Ok(ConfigResponse {
         key_name: cfg.key_listener.key_name.clone(),
@@ -505,9 +511,7 @@ pub async fn delete_history_entries(
 }
 
 #[tauri::command]
-pub async fn clear_history(
-    history_store: State<'_, HistoryStore>,
-) -> Result<(), String> {
+pub async fn clear_history(history_store: State<'_, HistoryStore>) -> Result<(), String> {
     let store = history_store.inner().clone();
     tokio::task::spawn_blocking(move || store.clear())
         .await

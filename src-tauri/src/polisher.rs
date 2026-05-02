@@ -12,10 +12,43 @@
 //!
 //! 使用兼容 OpenAI 的聊天 API，支持指数退避重试（最多 3 次）。
 
+use crate::error::PolisherError;
 use anyhow::{anyhow, Context};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
+
+/// Polisher configuration subset.
+#[derive(Debug, Clone)]
+pub struct PolisherConfig {
+    pub api_key: String,
+    pub api_base_url: String,
+    pub model: String,
+    pub protocol: String,
+    pub max_tokens: u32,
+    pub temperature: f32,
+    pub system_prompt: String,
+    pub timeout: Duration,
+    pub level: String,
+    pub language: String,
+}
+
+impl From<&crate::config::Config> for PolisherConfig {
+    fn from(cfg: &crate::config::Config) -> Self {
+        Self {
+            api_key: cfg.polisher.api_key.clone(),
+            api_base_url: cfg.polisher.api_base_url.clone(),
+            model: cfg.polisher.model.clone(),
+            protocol: cfg.polisher.protocol.clone(),
+            max_tokens: cfg.polisher.max_tokens,
+            temperature: cfg.polisher.temperature,
+            system_prompt: cfg.polisher.system_prompt.clone(),
+            timeout: cfg.polisher.timeout(),
+            level: cfg.polisher.level.clone(),
+            language: cfg.transcriber.language.clone(),
+        }
+    }
+}
 
 /// 重试延迟基数（毫秒），用于指数退避计算。
 const RETRY_BASE_DELAY_MS: u64 = 500;
@@ -24,10 +57,13 @@ const RETRY_BASE_DELAY_MS: u64 = 500;
 ///
 /// Retries the given async operation up to `max_retries` times.
 /// Non-retryable errors (401, 403) are returned immediately.
-async fn retry_with_backoff<F, Fut, T>(max_retries: u32, mut operation: F) -> anyhow::Result<T>
+async fn retry_with_backoff<F, Fut, T>(
+    max_retries: u32,
+    mut operation: F,
+) -> Result<T, PolisherError>
 where
     F: FnMut() -> Fut,
-    Fut: std::future::Future<Output = anyhow::Result<T>>,
+    Fut: std::future::Future<Output = Result<T, PolisherError>>,
 {
     let mut last_err = None;
     for attempt in 0..max_retries {
@@ -39,12 +75,13 @@ where
         match operation().await {
             Ok(result) => return Ok(result),
             Err(e) => {
-                // Only check for typed HttpStatusError — avoid brittle string matching
-                // that could false-positive on body text containing "401" etc.
-                if let Some(status) = e.downcast_ref::<HttpStatusError>() {
-                    if status.0 == 401 || status.0 == 403 {
-                        return Err(e);
-                    }
+                // Check for non-retryable auth errors
+                if matches!(
+                    e,
+                    PolisherError::ApiError { status: 401, .. }
+                        | PolisherError::ApiError { status: 403, .. }
+                ) {
+                    return Err(e);
                 }
                 tracing::warn!(attempt, error = %e, "request failed");
                 last_err = Some(e);
@@ -52,7 +89,7 @@ where
         }
     }
 
-    Err(last_err.unwrap_or_else(|| anyhow!("all retry attempts exhausted")))
+    Err(last_err.unwrap_or(PolisherError::RetriesExhausted))
 }
 
 struct HttpStatusError(u16);
@@ -268,6 +305,7 @@ impl ApiProtocol {
 /// System prompts are loaded from PromptStore if available,
 /// otherwise falls back to custom_system_prompt from config.
 #[derive(Clone)]
+#[derive(Debug)]
 pub struct LLMFormatter {
     api_key: String,
     api_base_url: String,
@@ -283,35 +321,41 @@ pub struct LLMFormatter {
 }
 
 impl TryFrom<&crate::config::Config> for LLMFormatter {
-    type Error = anyhow::Error;
+    type Error = PolisherError;
 
-    fn try_from(cfg: &crate::config::Config) -> anyhow::Result<Self> {
-        let protocol = ApiProtocol::from_str(&cfg.polisher.protocol).unwrap_or_else(|e| {
-            tracing::warn!(error = %e, "invalid polisher protocol, defaulting to openai");
-            ApiProtocol::OpenAi
-        });
-        Self::with_config(
-            cfg.polisher.api_key.clone(),
-            cfg.polisher.api_base_url.clone(),
-            cfg.polisher.model.clone(),
-            cfg.polisher.timeout(),
-            cfg.polisher.max_tokens,
-            protocol,
-            cfg.polisher.temperature,
-            cfg.transcriber.language.clone(),
-            cfg.polisher.system_prompt.clone(),
-        )
+    fn try_from(cfg: &crate::config::Config) -> Result<Self, Self::Error> {
+        let polisher_cfg = PolisherConfig::from(cfg);
+        Self::from_config(&polisher_cfg)
     }
 }
 
 impl LLMFormatter {
+    /// Create LLMFormatter from PolisherConfig.
+    pub fn from_config(cfg: &PolisherConfig) -> Result<Self, PolisherError> {
+        let protocol = ApiProtocol::from_str(&cfg.protocol).map_err(|_| {
+            PolisherError::UnknownProtocol {
+                protocol: cfg.protocol.clone(),
+            }
+        })?;
+        Self::with_config(
+            cfg.api_key.clone(),
+            cfg.api_base_url.clone(),
+            cfg.model.clone(),
+            cfg.timeout,
+            cfg.max_tokens,
+            protocol,
+            cfg.temperature,
+            cfg.language.clone(),
+            cfg.system_prompt.clone(),
+        )
+    }
     #[allow(dead_code)]
     pub fn new(
         api_key: String,
         api_base_url: String,
         model: String,
         timeout: Duration,
-    ) -> anyhow::Result<Self> {
+    ) -> Result<Self, PolisherError> {
         Self::with_config(
             api_key,
             api_base_url,
@@ -336,11 +380,11 @@ impl LLMFormatter {
         temperature: f32,
         language: String,
         custom_system_prompt: String,
-    ) -> anyhow::Result<Self> {
+    ) -> Result<Self, PolisherError> {
         let client = Client::builder()
             .timeout(timeout)
             .build()
-            .context("failed to build HTTP client for LLMFormatter")?;
+            .map_err(|e| PolisherError::HttpError(format!("failed to build HTTP client: {}", e)))?;
         Ok(Self {
             api_key,
             api_base_url,
@@ -366,7 +410,7 @@ impl LLMFormatter {
     ///
     /// 如果级别为 `None` 或文本为空，直接返回原文。
     /// 润色失败时返回错误。
-    pub async fn polish(&self, text: &str, level: PolishLevel) -> anyhow::Result<String> {
+    pub async fn polish(&self, text: &str, level: PolishLevel) -> Result<String, PolisherError> {
         if matches!(level, PolishLevel::None) || text.is_empty() {
             return Ok(text.to_string());
         }
@@ -428,7 +472,7 @@ impl LLMFormatter {
         .await
     }
 
-    async fn do_openai_request(&self, body: &ChatRequest) -> anyhow::Result<String> {
+    async fn do_openai_request(&self, body: &ChatRequest) -> Result<String, PolisherError> {
         let url = format!("{}/v1/chat/completions", self.api_base_url);
         let resp = self
             .client
@@ -437,31 +481,36 @@ impl LLMFormatter {
             .json(body)
             .send()
             .await
-            .context("OpenAI API request failed")?;
+            .map_err(|e| PolisherError::HttpError(e.to_string()))?;
 
         let status = resp.status().as_u16();
         if status == 429 {
-            return Err(anyhow!("rate limited"));
+            return Err(PolisherError::RateLimited);
         }
         if !resp.status().is_success() {
-            let resp_body = resp.text().await.context("failed to read API error body")?;
-            let mut err = anyhow!("LLM API returned {}: {}", status, resp_body);
-            if status == 401 || status == 403 {
-                err = err.context(HttpStatusError(status));
-            }
-            return Err(err);
+            let resp_body = resp
+                .text()
+                .await
+                .unwrap_or_else(|_| "failed to read error body".to_string());
+            return Err(PolisherError::ApiError {
+                status,
+                body: resp_body,
+            });
         }
 
-        let chat_resp: ChatResponse = resp.json().await.context("failed to parse LLM response")?;
+        let chat_resp: ChatResponse = resp
+            .json()
+            .await
+            .map_err(|e| PolisherError::JsonError(e.to_string()))?;
         chat_resp
             .choices
             .into_iter()
             .next()
             .map(|c| c.message.content)
-            .ok_or_else(|| anyhow!("LLM returned empty choices"))
+            .ok_or(PolisherError::EmptyResponse)
     }
 
-    async fn do_anthropic_request(&self, body: &AnthropicRequest) -> anyhow::Result<String> {
+    async fn do_anthropic_request(&self, body: &AnthropicRequest) -> Result<String, PolisherError> {
         let url = format!("{}/v1/messages", self.api_base_url);
         let resp = self
             .client
@@ -471,31 +520,33 @@ impl LLMFormatter {
             .json(body)
             .send()
             .await
-            .context("Anthropic API request failed")?;
+            .map_err(|e| PolisherError::HttpError(e.to_string()))?;
 
         let status = resp.status().as_u16();
         if status == 429 {
-            return Err(anyhow!("rate limited"));
+            return Err(PolisherError::RateLimited);
         }
         if !resp.status().is_success() {
-            let resp_body = resp.text().await.context("failed to read API error body")?;
-            let mut err = anyhow!("LLM API returned {}: {}", status, resp_body);
-            if status == 401 || status == 403 {
-                err = err.context(HttpStatusError(status));
-            }
-            return Err(err);
+            let resp_body = resp
+                .text()
+                .await
+                .unwrap_or_else(|_| "failed to read error body".to_string());
+            return Err(PolisherError::ApiError {
+                status,
+                body: resp_body,
+            });
         }
 
         let anthropic_resp: AnthropicResponse = resp
             .json()
             .await
-            .context("failed to parse Anthropic response")?;
+            .map_err(|e| PolisherError::JsonError(e.to_string()))?;
         anthropic_resp
             .content
             .into_iter()
             .next()
             .map(|c| c.text)
-            .ok_or_else(|| anyhow!("Anthropic returned empty content"))
+            .ok_or(PolisherError::EmptyResponse)
     }
 }
 

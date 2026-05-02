@@ -9,7 +9,7 @@ use crate::polisher::{LLMFormatter, PolishLevel};
 use crate::transcriber::Transcriber;
 
 /// 管道处理结果。
-#[derive(Debug)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct PipelineOutput {
     /// 处理后的文本（润色成功时为润色文本，否则为原始转写文本）
     pub text: String,

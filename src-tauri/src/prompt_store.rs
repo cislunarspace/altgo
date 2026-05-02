@@ -37,7 +37,7 @@ pub enum PromptError {
 }
 
 /// Manages prompt templates with hot-reload support.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct PromptStore {
     prompts_dir: PathBuf,
     cache: Arc<Mutex<PromptCache>>,
@@ -46,6 +46,15 @@ pub struct PromptStore {
 struct PromptCache {
     base: String,
     suffixes: HashMap<PolishLevel, String>,
+}
+
+impl std::fmt::Debug for PromptCache {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PromptCache")
+            .field("base_len", &self.base.len())
+            .field("suffixes_count", &self.suffixes.len())
+            .finish()
+    }
 }
 
 impl PromptStore {

@@ -95,7 +95,10 @@ impl ConfigStore {
         if let Some(v) = patch.key_name {
             cfg.key_listener.key_name = v;
         }
-        apply_nested_opt_u16(&mut cfg.key_listener.linux_evdev_code, patch.linux_evdev_code);
+        apply_nested_opt_u16(
+            &mut cfg.key_listener.linux_evdev_code,
+            patch.linux_evdev_code,
+        );
         if let Some(v) = patch.language {
             cfg.transcriber.language = v;
         }

@@ -7,6 +7,7 @@
 //!
 //! 两种后端均返回 `TranscribeResult`，包含识别文本和语言信息。
 
+use crate::error::TranscriberError;
 use anyhow::{anyhow, Context};
 use regex::Regex;
 use reqwest::Client;
@@ -15,6 +16,36 @@ use std::path::PathBuf;
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
 use tokio::sync::mpsc::UnboundedSender;
+
+/// Transcriber configuration subset.
+#[derive(Debug, Clone)]
+pub struct TranscriberConfig {
+    pub engine: String,
+    pub model: String,
+    pub language: String,
+    pub whisper_path: String,
+    pub api_key: String,
+    pub api_base_url: String,
+    pub temperature: f32,
+    pub prompt: String,
+    pub timeout: Duration,
+}
+
+impl From<&crate::config::Config> for TranscriberConfig {
+    fn from(cfg: &crate::config::Config) -> Self {
+        Self {
+            engine: cfg.transcriber.engine.clone(),
+            model: cfg.transcriber.model.clone(),
+            language: cfg.transcriber.language.clone(),
+            whisper_path: cfg.transcriber.whisper_path.clone(),
+            api_key: cfg.transcriber.api_key.clone(),
+            api_base_url: cfg.transcriber.api_base_url.clone(),
+            temperature: cfg.transcriber.temperature,
+            prompt: cfg.transcriber.prompt.clone(),
+            timeout: cfg.transcriber.timeout(),
+        }
+    }
+}
 
 /// Expand tilde in path to home directory.
 fn stderr_fraction(line: &str, re_percent: &Regex, re_ratio: &Regex) -> Option<f32> {
@@ -63,7 +94,7 @@ struct WhisperResponse {
 /// OpenAI Whisper API 语音识别器。
 ///
 /// 通过 HTTP multipart 请求调用兼容 OpenAI 的 Whisper API 端点。
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct WhisperApi {
     api_key: String,
     api_base_url: String,
@@ -100,19 +131,20 @@ impl WhisperApi {
     }
 
     /// 通过 API 识别音频数据，返回识别结果。
-    pub async fn transcribe(&self, audio_data: &[u8]) -> anyhow::Result<TranscribeResult> {
+    pub async fn transcribe(&self, audio_data: &[u8]) -> Result<TranscribeResult, TranscriberError> {
         if audio_data.is_empty() {
-            return Err(anyhow!("empty audio data"));
+            return Err(TranscriberError::EmptyAudio);
         }
         if self.api_key.is_empty() {
-            return Err(anyhow!("transcriber API key not configured"));
+            return Err(TranscriberError::MissingApiKey);
         }
 
         let url = format!("{}/v1/audio/transcriptions", self.api_base_url);
 
         let audio_part = reqwest::multipart::Part::bytes(audio_data.to_vec())
             .file_name("audio.wav")
-            .mime_str("audio/wav")?;
+            .mime_str("audio/wav")
+            .map_err(|e| TranscriberError::HttpError(e.to_string()))?;
 
         let mut form = reqwest::multipart::Form::new()
             .part("file", audio_part)
@@ -131,21 +163,24 @@ impl WhisperApi {
             .multipart(form)
             .send()
             .await
-            .context("Whisper API request failed")?;
+            .map_err(|e| TranscriberError::HttpError(e.to_string()))?;
 
         let status = resp.status();
         if !status.is_success() {
             let body = resp
                 .text()
                 .await
-                .context("failed to read Whisper API error body")?;
-            return Err(anyhow!("Whisper API returned {}: {}", status, body));
+                .unwrap_or_else(|_| "failed to read error body".to_string());
+            return Err(TranscriberError::ApiError {
+                status: status.as_u16(),
+                body,
+            });
         }
 
         let result: WhisperResponse = resp
             .json()
             .await
-            .context("failed to parse Whisper response")?;
+            .map_err(|e| TranscriberError::JsonError(e.to_string()))?;
 
         Ok(TranscribeResult {
             text: result.text,
@@ -157,7 +192,7 @@ impl WhisperApi {
 /// 本地 whisper.cpp 语音识别器。
 ///
 /// 通过子进程调用 `whisper-cli` 二进制文件，避免 FFI 构建复杂性。
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct LocalWhisper {
     model_path: String,
     language: String,
@@ -186,15 +221,22 @@ impl LocalWhisper {
         &self,
         audio_data: &[u8],
         progress: Option<UnboundedSender<f32>>,
-    ) -> anyhow::Result<TranscribeResult> {
+    ) -> Result<TranscribeResult, TranscriberError> {
         if audio_data.is_empty() {
-            return Err(anyhow!("empty audio data"));
+            return Err(TranscriberError::EmptyAudio);
         }
 
         // Write audio to a temp file.
-        let tmp_dir = tempfile::tempdir().context("create temp dir")?;
+        let tmp_dir = tempfile::tempdir()
+            .map_err(|e| TranscriberError::WhisperCliFailed {
+                code: -1,
+                output: format!("create temp dir: {}", e),
+            })?;
         let wav_path = tmp_dir.path().join("audio.wav");
-        std::fs::write(&wav_path, audio_data).context("write temp wav file")?;
+        std::fs::write(&wav_path, audio_data).map_err(|e| TranscriberError::WhisperCliFailed {
+            code: -1,
+            output: format!("write temp wav file: {}", e),
+        })?;
 
         // Find whisper-cli binary.
         let whisper_bin = find_whisper_binary(&self.whisper_path)?;
@@ -213,9 +255,18 @@ impl LocalWhisper {
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped());
 
-        let mut child = cmd.spawn().context("failed to spawn whisper-cli")?;
-        let stdout = child.stdout.take().context("whisper-cli stdout")?;
-        let stderr = child.stderr.take().context("whisper-cli stderr")?;
+        let mut child = cmd.spawn().map_err(|e| TranscriberError::WhisperCliFailed {
+            code: -1,
+            output: format!("failed to spawn whisper-cli: {}", e),
+        })?;
+        let stdout = child.stdout.take().ok_or_else(|| TranscriberError::WhisperCliFailed {
+            code: -1,
+            output: "whisper-cli stdout unavailable".to_string(),
+        })?;
+        let stderr = child.stderr.take().ok_or_else(|| TranscriberError::WhisperCliFailed {
+            code: -1,
+            output: "whisper-cli stderr unavailable".to_string(),
+        })?;
 
         let stderr_task = progress.map(|tx| {
             let re_percent = Regex::new(r"(\d{1,3})\s*%").expect("valid regex");
@@ -245,22 +296,30 @@ impl LocalWhisper {
             Ok::<_, std::io::Error>(buf)
         });
 
-        let status = child.wait().await.context("failed to run whisper-cli")?;
+        let status = child.wait().await.map_err(|e| TranscriberError::WhisperCliFailed {
+            code: -1,
+            output: format!("failed to run whisper-cli: {}", e),
+        })?;
         let stdout_buf = stdout_task
             .await
-            .context("whisper stdout task")?
-            .context("read whisper stdout")?;
+            .map_err(|e| TranscriberError::WhisperCliFailed {
+                code: -1,
+                output: format!("whisper stdout task: {}", e),
+            })?
+            .map_err(|e| TranscriberError::WhisperCliFailed {
+                code: -1,
+                output: format!("read whisper stdout: {}", e),
+            })?;
 
         if let Some(t) = stderr_task {
             let _ = t.await;
         }
 
         if !status.success() {
-            return Err(anyhow!(
-                "whisper-cli failed (status {:?}); stdout: {}",
-                status,
-                String::from_utf8_lossy(&stdout_buf)
-            ));
+            return Err(TranscriberError::WhisperCliFailed {
+                code: status.code().unwrap_or(-1),
+                output: String::from_utf8_lossy(&stdout_buf).to_string(),
+            });
         }
 
         let text = String::from_utf8_lossy(&stdout_buf).trim().to_string();
@@ -278,7 +337,7 @@ impl LocalWhisper {
 /// 1. 用户通过配置指定的路径（`whisper_path`）
 /// 2. 捆绑安装的二进制文件
 /// 3. 系统 PATH 中的 `whisper-cli` 和 `whisper-cpp`
-fn find_whisper_binary(whisper_path: &str) -> anyhow::Result<std::path::PathBuf> {
+fn find_whisper_binary(whisper_path: &str) -> Result<std::path::PathBuf, TranscriberError> {
     // No caching — config changes (whisper_path) should take effect on pipeline restart
     // without requiring an app restart.
 
@@ -288,10 +347,9 @@ fn find_whisper_binary(whisper_path: &str) -> anyhow::Result<std::path::PathBuf>
         if path.exists() {
             return Ok(path.to_path_buf());
         }
-        return Err(anyhow!(
-            "whisper-cli not found at configured path: {}",
-            whisper_path
-        ));
+        return Err(TranscriberError::WhisperCliNotFound {
+            path: whisper_path.to_string(),
+        });
     }
 
     // 2. Check bundled location.
@@ -307,14 +365,20 @@ fn find_whisper_binary(whisper_path: &str) -> anyhow::Result<std::path::PathBuf>
         }
     }
 
-    Err(anyhow!(
-        "whisper-cli not found — set whisper_path in config or add whisper-cli to PATH"
-    ))
+    Err(TranscriberError::WhisperCliNotFound {
+        path: "whisper-cli not found — set whisper_path in config or add whisper-cli to PATH"
+            .to_string(),
+    })
 }
 
 /// Search for a binary on the system PATH.
-fn which_binary(name: &str) -> anyhow::Result<std::path::PathBuf> {
-    let output = std::process::Command::new("which").arg(name).output()?;
+fn which_binary(name: &str) -> Result<std::path::PathBuf, TranscriberError> {
+    let output = std::process::Command::new("which")
+        .arg(name)
+        .output()
+        .map_err(|e| TranscriberError::WhisperCliNotFound {
+            path: format!("which command failed: {}", e),
+        })?;
     if output.status.success() {
         let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
         let p = std::path::PathBuf::from(path);
@@ -322,11 +386,13 @@ fn which_binary(name: &str) -> anyhow::Result<std::path::PathBuf> {
             return Ok(p);
         }
     }
-    Err(anyhow!("{} not found on PATH", name))
+    Err(TranscriberError::WhisperCliNotFound {
+        path: format!("{} not found on PATH", name),
+    })
 }
 
 /// Unified transcription backend — dispatches between API and local engines.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum Transcriber {
     Api(WhisperApi),
     Local(LocalWhisper),
@@ -338,7 +404,7 @@ impl Transcriber {
         &self,
         wav_data: &[u8],
         progress: Option<UnboundedSender<f32>>,
-    ) -> anyhow::Result<TranscribeResult> {
+    ) -> Result<TranscribeResult, TranscriberError> {
         match self {
             Transcriber::Api(api) => {
                 let _ = progress;
@@ -378,7 +444,8 @@ mod tests {
         .unwrap();
         let result = api.transcribe(&[]).await;
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("empty"));
+        let err = result.unwrap_err();
+        assert!(matches!(err, TranscriberError::EmptyAudio));
     }
 
     #[tokio::test]
