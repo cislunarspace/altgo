@@ -115,3 +115,17 @@ cd frontend && npm install
 - `config.rs`, `audio.rs`, `model.rs`, and `history.rs` have comprehensive tests.
 - `transcriber.rs` and `polisher.rs` use `mockito` for HTTP-level mocking.
 - Platform-specific modules have minimal tests (construction/smoke tests only).
+
+## Agent skills
+
+### Issue tracker
+
+Issues live in GitHub Issues (`cislunarspace/altgo`). Uses `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Five canonical triage labels with default names. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context layout (`CONTEXT.md` + `docs/adr/` at repo root). See `docs/agents/domain.md`.
