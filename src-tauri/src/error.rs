@@ -37,7 +37,10 @@ impl PipelineError {
 #[derive(Debug, thiserror::Error)]
 pub enum FatalError {
     #[error("Model not found: {model}")]
-    ModelNotFound { model: String, searched: Vec<PathBuf> },
+    ModelNotFound {
+        model: String,
+        searched: Vec<PathBuf>,
+    },
 
     #[error("API authentication failed: {service} returned {status}")]
     ApiAuthFailed { service: &'static str, status: u16 },
@@ -76,9 +79,15 @@ impl FatalError {
             }
             Self::ApiAuthFailed { service, status } => {
                 if lang == "zh" {
-                    format!("{} API 认证失败（HTTP {}）。请检查 API 密钥配置。", service, status)
+                    format!(
+                        "{} API 认证失败（HTTP {}）。请检查 API 密钥配置。",
+                        service, status
+                    )
                 } else {
-                    format!("{} API authentication failed (HTTP {}). Check your API key configuration.", service, status)
+                    format!(
+                        "{} API authentication failed (HTTP {}). Check your API key configuration.",
+                        service, status
+                    )
                 }
             }
             Self::KeyListenerFailed { backend, reason } => {
@@ -259,9 +268,15 @@ impl PolisherError {
         match self {
             Self::UnknownProtocol { protocol } => {
                 if lang == "zh" {
-                    format!("未知的润色协议: '{}'。请使用 'openai' 或 'anthropic'。", protocol)
+                    format!(
+                        "未知的润色协议: '{}'。请使用 'openai' 或 'anthropic'。",
+                        protocol
+                    )
                 } else {
-                    format!("Unknown polisher protocol: '{}'. Use 'openai' or 'anthropic'.", protocol)
+                    format!(
+                        "Unknown polisher protocol: '{}'. Use 'openai' or 'anthropic'.",
+                        protocol
+                    )
                 }
             }
             Self::MissingApiKey => {

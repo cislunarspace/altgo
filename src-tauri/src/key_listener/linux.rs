@@ -37,8 +37,8 @@ pub struct X11Listener {
     child: Option<Child>,
 }
 
-/// 枚举可用于 `evtest` 回退的键盘设备（crate 内共享，供按键捕获使用）。
-pub(crate) fn list_keyboard_devices() -> Result<Vec<PathBuf>> {
+/// 枚举可用于 `evtest` 回退的键盘设备（供按键捕获使用）。
+pub fn list_keyboard_devices() -> Result<Vec<PathBuf>> {
     let by_id_path = PathBuf::from("/dev/input/by-id");
     let mut devices = Vec::new();
 

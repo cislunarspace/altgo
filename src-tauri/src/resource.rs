@@ -5,6 +5,16 @@
 
 use std::path::PathBuf;
 
+/// 将以 `~` 开头的路径展开为用户主目录路径。
+pub fn expand_tilde(path: &str) -> PathBuf {
+    if path.starts_with("~/") {
+        if let Some(home) = dirs::home_dir() {
+            return home.join(path.trim_start_matches("~/"));
+        }
+    }
+    PathBuf::from(path)
+}
+
 /// 查找捆绑的二进制文件。
 ///
 /// 搜索逻辑：

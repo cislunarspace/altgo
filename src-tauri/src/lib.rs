@@ -16,6 +16,7 @@ pub mod output;
 pub mod pipeline;
 pub mod pipeline_builder;
 pub mod pipeline_command_handler;
+pub mod pipeline_context;
 pub mod pipeline_controller;
 pub mod pipeline_event_handler;
 pub mod pipeline_orchestrator;
@@ -25,6 +26,7 @@ pub mod prompt_store;
 pub mod recorder;
 pub mod resource;
 pub mod state_machine;
+pub mod tauri_sink;
 pub mod transcriber;
 pub mod tray;
 

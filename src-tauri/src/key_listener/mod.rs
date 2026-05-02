@@ -4,9 +4,7 @@
 
 mod linux;
 
-pub(crate) use linux::list_keyboard_devices;
-#[allow(dead_code)]
-pub type PlatformListener = linux::X11Listener;
+pub use linux::{list_keyboard_devices, X11Listener};
 
 /// KeyListener configuration subset.
 #[derive(Debug, Clone)]
@@ -41,14 +39,12 @@ pub struct KeyEvent {
     pub pressed: bool,
 }
 
-/// 将原始按键事件转发给状态机。
+/// 将原始按键事件转发给状态机（无防抖，即时转发）。
 ///
-/// 此前实现曾错误地在松开时延迟发送 release（防抖），导致短按松开后 `release`
-/// 晚于长按定时器，状态机误触发录音。现改为即时转发；若需抑制 IME 抖动，可在上层调参。
+/// 即时转发避免了短按松开后 `release` 晚于长按定时器导致状态机误触发录音的问题。
 pub async fn debounce_task(
     mut key_events: tokio::sync::mpsc::UnboundedReceiver<KeyEvent>,
     key_tx: tokio::sync::mpsc::UnboundedSender<crate::state_machine::KeyEvent>,
-    _debounce_window: std::time::Duration,
 ) {
     while let Some(evt) = key_events.recv().await {
         if key_tx

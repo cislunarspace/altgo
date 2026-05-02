@@ -5,7 +5,21 @@
 //!
 //! 桌面通知通过 `notify-send` 发送。
 
-use super::truncate_text;
+/// 截断文本到指定字节数，尊重 UTF-8 字符边界。
+///
+/// 超过 `max_len` 的文本会被截断并附加 `...`。
+fn truncate_text(text: &str, max_len: usize) -> String {
+    if text.len() <= max_len {
+        return text.to_string();
+    }
+
+    // Find a safe truncation point (don't cut multi-byte chars).
+    let mut end = max_len;
+    while end > 0 && !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}...", &text[..end])
+}
 use std::process::Command;
 
 /// Linux 上可用的剪切板管理工具。
@@ -126,6 +140,7 @@ pub fn notify(title: &str, body: &str, timeout_ms: u64) -> anyhow::Result<()> {
 }
 
 /// 显示处理中通知。
+#[allow(dead_code)]
 pub fn notify_processing(message: &str) -> anyhow::Result<()> {
     notify("altgo", message, 5000)
 }

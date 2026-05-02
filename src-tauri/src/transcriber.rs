@@ -8,11 +8,11 @@
 //! 两种后端均返回 `TranscribeResult`，包含识别文本和语言信息。
 
 use crate::error::TranscriberError;
-use anyhow::{anyhow, Context};
+use crate::resource::expand_tilde;
+use anyhow::Context;
 use regex::Regex;
 use reqwest::Client;
 use serde::Deserialize;
-use std::path::PathBuf;
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
 use tokio::sync::mpsc::UnboundedSender;
@@ -64,15 +64,6 @@ fn stderr_fraction(line: &str, re_percent: &Regex, re_ratio: &Regex) -> Option<f
         }
     }
     None
-}
-
-fn expand_tilde(path: &str) -> PathBuf {
-    if path.starts_with("~/") {
-        if let Some(home) = dirs::home_dir() {
-            return home.join(path.trim_start_matches("~/"));
-        }
-    }
-    PathBuf::from(path)
 }
 
 /// 语音识别结果。
@@ -131,7 +122,10 @@ impl WhisperApi {
     }
 
     /// 通过 API 识别音频数据，返回识别结果。
-    pub async fn transcribe(&self, audio_data: &[u8]) -> Result<TranscribeResult, TranscriberError> {
+    pub async fn transcribe(
+        &self,
+        audio_data: &[u8],
+    ) -> Result<TranscribeResult, TranscriberError> {
         if audio_data.is_empty() {
             return Err(TranscriberError::EmptyAudio);
         }
@@ -227,11 +221,10 @@ impl LocalWhisper {
         }
 
         // Write audio to a temp file.
-        let tmp_dir = tempfile::tempdir()
-            .map_err(|e| TranscriberError::WhisperCliFailed {
-                code: -1,
-                output: format!("create temp dir: {}", e),
-            })?;
+        let tmp_dir = tempfile::tempdir().map_err(|e| TranscriberError::WhisperCliFailed {
+            code: -1,
+            output: format!("create temp dir: {}", e),
+        })?;
         let wav_path = tmp_dir.path().join("audio.wav");
         std::fs::write(&wav_path, audio_data).map_err(|e| TranscriberError::WhisperCliFailed {
             code: -1,
@@ -255,18 +248,26 @@ impl LocalWhisper {
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped());
 
-        let mut child = cmd.spawn().map_err(|e| TranscriberError::WhisperCliFailed {
-            code: -1,
-            output: format!("failed to spawn whisper-cli: {}", e),
-        })?;
-        let stdout = child.stdout.take().ok_or_else(|| TranscriberError::WhisperCliFailed {
-            code: -1,
-            output: "whisper-cli stdout unavailable".to_string(),
-        })?;
-        let stderr = child.stderr.take().ok_or_else(|| TranscriberError::WhisperCliFailed {
-            code: -1,
-            output: "whisper-cli stderr unavailable".to_string(),
-        })?;
+        let mut child = cmd
+            .spawn()
+            .map_err(|e| TranscriberError::WhisperCliFailed {
+                code: -1,
+                output: format!("failed to spawn whisper-cli: {}", e),
+            })?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| TranscriberError::WhisperCliFailed {
+                code: -1,
+                output: "whisper-cli stdout unavailable".to_string(),
+            })?;
+        let stderr = child
+            .stderr
+            .take()
+            .ok_or_else(|| TranscriberError::WhisperCliFailed {
+                code: -1,
+                output: "whisper-cli stderr unavailable".to_string(),
+            })?;
 
         let stderr_task = progress.map(|tx| {
             let re_percent = Regex::new(r"(\d{1,3})\s*%").expect("valid regex");
@@ -296,10 +297,13 @@ impl LocalWhisper {
             Ok::<_, std::io::Error>(buf)
         });
 
-        let status = child.wait().await.map_err(|e| TranscriberError::WhisperCliFailed {
-            code: -1,
-            output: format!("failed to run whisper-cli: {}", e),
-        })?;
+        let status = child
+            .wait()
+            .await
+            .map_err(|e| TranscriberError::WhisperCliFailed {
+                code: -1,
+                output: format!("failed to run whisper-cli: {}", e),
+            })?;
         let stdout_buf = stdout_task
             .await
             .map_err(|e| TranscriberError::WhisperCliFailed {

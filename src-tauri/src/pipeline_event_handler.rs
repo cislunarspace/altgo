@@ -40,10 +40,7 @@ impl PipelineEventHandler {
 
     /// Select which text to use based on preferences and polish status.
     pub fn select_text(&self, output: &PipelineOutput) -> String {
-        if self.prefer_polished
-            && !output.polish_failed
-            && !output.text.trim().is_empty()
-        {
+        if self.prefer_polished && !output.polish_failed && !output.text.trim().is_empty() {
             output.text.clone()
         } else {
             output.raw_text.clone()

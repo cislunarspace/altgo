@@ -5,12 +5,12 @@
 
 use crate::pipeline_sink::PipelineSink;
 use crate::polisher::{LLMFormatter, PolishLevel};
-use crate::recorder::PlatformRecorder;
+use crate::recorder::PulseRecorder;
 use crate::transcriber::Transcriber;
 
 /// Handle StartRecord command: start recording and notify sink.
 pub fn handle_start_record(
-    recorder: &mut PlatformRecorder,
+    recorder: &mut PulseRecorder,
     sink: &impl PipelineSink,
 ) -> Result<(), String> {
     tracing::info!("recording started");
@@ -24,7 +24,7 @@ pub fn handle_start_record(
 
 /// Handle StopRecord command: stop recording, process audio, notify sink.
 pub async fn handle_stop_record(
-    recorder: &mut PlatformRecorder,
+    recorder: &mut PulseRecorder,
     transcriber: &Transcriber,
     formatter: &LLMFormatter,
     polish_level: PolishLevel,
@@ -42,25 +42,69 @@ pub async fn handle_stop_record(
         }
     };
 
-    match crate::pipeline::process_audio_core(
-        transcriber,
-        formatter,
-        &wav_data,
-        polish_level,
-        |phase, fraction| {
-            sink.on_progress(phase, fraction);
-        },
-    )
-    .await
-    {
-        Ok(output) => {
-            sink.on_transcription_result(&output);
+    sink.on_progress("transcribe", None);
+
+    let (progress_tx, mut progress_rx) = tokio::sync::mpsc::unbounded_channel::<f32>();
+    let wav_owned = wav_data.to_vec();
+    let transcribe_jh = tokio::spawn({
+        let t = transcriber.clone();
+        async move { t.transcribe(&wav_owned, Some(progress_tx)).await }
+    });
+
+    while let Some(fr) = progress_rx.recv().await {
+        sink.on_progress("transcribe", Some(fr));
+    }
+
+    let result = match transcribe_jh.await {
+        Ok(Ok(r)) => r,
+        Ok(Err(e)) => {
+            tracing::error!(error = %e, "transcription failed");
+            sink.on_error(&format!("transcription: {}", e));
+            return;
         }
         Err(e) => {
-            tracing::error!(error = %e, "audio processing failed");
-            sink.on_error(&format!("processing: {}", e));
+            tracing::error!(error = %e, "transcribe task join");
+            sink.on_error("transcription: task join");
+            return;
         }
+    };
+
+    tracing::info!(text = %result.text, "transcribed");
+
+    if result.text.is_empty() {
+        tracing::warn!("empty transcription, skipping");
+        sink.on_progress("done", Some(1.0));
+        sink.on_transcription_result(&crate::pipeline::PipelineOutput {
+            text: String::new(),
+            raw_text: String::new(),
+            polish_failed: false,
+        });
+        return;
     }
+
+    sink.on_progress("polish", None);
+
+    let mut polish_failed = false;
+    let raw_text = result.text.clone();
+    let polished = match formatter.polish(&raw_text, polish_level).await {
+        Ok(p) => p,
+        Err(e) => {
+            tracing::warn!(error = %e, "polish failed, using raw text");
+            polish_failed = true;
+            raw_text.clone()
+        }
+    };
+
+    tracing::info!(text = %polished, "polished");
+
+    sink.on_progress("done", Some(1.0));
+
+    let output = crate::pipeline::PipelineOutput {
+        text: polished,
+        raw_text,
+        polish_failed,
+    };
+    sink.on_transcription_result(&output);
 }
 
 #[cfg(test)]
@@ -114,7 +158,7 @@ mod tests {
 
     #[test]
     fn test_handle_start_record_success() {
-        let mut recorder = PlatformRecorder::new(16000, 1);
+        let mut recorder = PulseRecorder::new(16000, 1);
         let sink = MockSink::new();
 
         let result = handle_start_record(&mut recorder, &sink);
@@ -124,20 +168,19 @@ mod tests {
 
     #[tokio::test]
     async fn test_handle_stop_record_empty_audio() {
-        let mut recorder = PlatformRecorder::new(16000, 1);
+        let mut recorder = PulseRecorder::new(16000, 1);
         let sink = MockSink::new();
 
         // Start and immediately stop to get empty audio
         let _ = recorder.start();
         std::thread::sleep(std::time::Duration::from_millis(10));
 
-        let transcriber = crate::transcriber::Transcriber::Local(
-            crate::transcriber::LocalWhisper::new(
+        let transcriber =
+            crate::transcriber::Transcriber::Local(crate::transcriber::LocalWhisper::new(
                 "/nonexistent/model".to_string(),
                 "zh".to_string(),
                 "whisper-cli".to_string(),
-            ),
-        );
+            ));
         let formatter = crate::polisher::LLMFormatter::new(
             "test-key".to_string(),
             "http://localhost".to_string(),

@@ -12,10 +12,10 @@
 //!
 //! 使用兼容 OpenAI 的聊天 API，支持指数退避重试（最多 3 次）。
 
+pub mod protocol;
+
 use crate::error::PolisherError;
-use anyhow::{anyhow, Context};
 use reqwest::Client;
-use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
 /// Polisher configuration subset.
@@ -92,6 +92,7 @@ where
     Err(last_err.unwrap_or(PolisherError::RetriesExhausted))
 }
 
+#[allow(dead_code)]
 struct HttpStatusError(u16);
 
 impl std::fmt::Display for HttpStatusError {
@@ -215,88 +216,6 @@ fn get_system_prompt(level: PolishLevel, language: &str) -> String {
     }
 }
 
-#[derive(Debug, Serialize)]
-struct ChatRequest {
-    model: String,
-    messages: Vec<ChatMessage>,
-    temperature: f32,
-    max_tokens: u32,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct ChatMessage {
-    role: String,
-    content: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct ChatResponse {
-    choices: Vec<ChatChoice>,
-}
-
-#[derive(Debug, Deserialize)]
-struct ChatChoice {
-    message: ChatMessage,
-}
-
-/// Anthropic Messages API 请求体。
-#[derive(Debug, Serialize)]
-struct AnthropicRequest {
-    model: String,
-    max_tokens: u32,
-    system: String,
-    messages: Vec<AnthropicMessage>,
-    temperature: f32,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct AnthropicMessage {
-    role: String,
-    content: String,
-}
-
-/// Anthropic Messages API 响应。
-#[derive(Debug, Deserialize)]
-struct AnthropicResponse {
-    content: Vec<AnthropicContent>,
-}
-
-#[derive(Debug, Deserialize)]
-struct AnthropicContent {
-    text: String,
-}
-
-/// API 协议类型。
-#[derive(Debug, Clone, Copy)]
-pub enum ApiProtocol {
-    /// OpenAI 兼容接口（/v1/chat/completions）
-    OpenAi,
-    /// Anthropic Messages 接口（/v1/messages）
-    Anthropic,
-}
-
-impl std::str::FromStr for ApiProtocol {
-    type Err = anyhow::Error;
-
-    fn from_str(s: &str) -> anyhow::Result<Self> {
-        match s.to_lowercase().as_str() {
-            "openai" => Ok(ApiProtocol::OpenAi),
-            "anthropic" => Ok(ApiProtocol::Anthropic),
-            other => Err(anyhow!(
-                "unknown polisher protocol: '{}'. Use 'openai' or 'anthropic'",
-                other
-            )),
-        }
-    }
-}
-
-impl ApiProtocol {
-    #[allow(clippy::should_implement_trait)]
-    pub fn from_str(s: &str) -> anyhow::Result<Self> {
-        <Self as std::str::FromStr>::from_str(s)
-    }
-}
-
 /// LLM 文本润色器。
 ///
 /// 支持 OpenAI 和 Anthropic 两种 API 协议，
@@ -304,8 +223,7 @@ impl ApiProtocol {
 ///
 /// System prompts are loaded from PromptStore if available,
 /// otherwise falls back to custom_system_prompt from config.
-#[derive(Clone)]
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct LLMFormatter {
     api_key: String,
     api_base_url: String,
@@ -313,7 +231,7 @@ pub struct LLMFormatter {
     client: Client,
     max_retries: u32,
     max_tokens: u32,
-    protocol: ApiProtocol,
+    protocol: protocol::ApiProtocol,
     temperature: f32,
     language: String,
     custom_system_prompt: String,
@@ -332,7 +250,7 @@ impl TryFrom<&crate::config::Config> for LLMFormatter {
 impl LLMFormatter {
     /// Create LLMFormatter from PolisherConfig.
     pub fn from_config(cfg: &PolisherConfig) -> Result<Self, PolisherError> {
-        let protocol = ApiProtocol::from_str(&cfg.protocol).map_err(|_| {
+        let protocol = protocol::ApiProtocol::from_str(&cfg.protocol).map_err(|_| {
             PolisherError::UnknownProtocol {
                 protocol: cfg.protocol.clone(),
             }
@@ -362,7 +280,7 @@ impl LLMFormatter {
             model,
             timeout,
             1024,
-            ApiProtocol::OpenAi,
+            protocol::ApiProtocol::OpenAi,
             0.3,
             "zh".to_string(),
             String::new(),
@@ -376,7 +294,7 @@ impl LLMFormatter {
         model: String,
         timeout: Duration,
         max_tokens: u32,
-        protocol: ApiProtocol,
+        protocol: protocol::ApiProtocol,
         temperature: f32,
         language: String,
         custom_system_prompt: String,
@@ -436,15 +354,15 @@ impl LLMFormatter {
 
         retry_with_backoff(self.max_retries, || async {
             match self.protocol {
-                ApiProtocol::OpenAi => {
-                    let body = ChatRequest {
+                protocol::ApiProtocol::OpenAi => {
+                    let body = protocol::ChatRequest {
                         model: self.model.clone(),
                         messages: vec![
-                            ChatMessage {
+                            protocol::ChatMessage {
                                 role: "system".to_string(),
                                 content: system_prompt.clone(),
                             },
-                            ChatMessage {
+                            protocol::ChatMessage {
                                 role: "user".to_string(),
                                 content: text.to_string(),
                             },
@@ -454,12 +372,12 @@ impl LLMFormatter {
                     };
                     self.do_openai_request(&body).await
                 }
-                ApiProtocol::Anthropic => {
-                    let body = AnthropicRequest {
+                protocol::ApiProtocol::Anthropic => {
+                    let body = protocol::AnthropicRequest {
                         model: self.model.clone(),
                         max_tokens: self.max_tokens,
                         system: system_prompt.clone(),
-                        messages: vec![AnthropicMessage {
+                        messages: vec![protocol::AnthropicMessage {
                             role: "user".to_string(),
                             content: text.to_string(),
                         }],
@@ -472,7 +390,10 @@ impl LLMFormatter {
         .await
     }
 
-    async fn do_openai_request(&self, body: &ChatRequest) -> Result<String, PolisherError> {
+    async fn do_openai_request(
+        &self,
+        body: &protocol::ChatRequest,
+    ) -> Result<String, PolisherError> {
         let url = format!("{}/v1/chat/completions", self.api_base_url);
         let resp = self
             .client
@@ -498,7 +419,7 @@ impl LLMFormatter {
             });
         }
 
-        let chat_resp: ChatResponse = resp
+        let chat_resp: protocol::ChatResponse = resp
             .json()
             .await
             .map_err(|e| PolisherError::JsonError(e.to_string()))?;
@@ -510,7 +431,10 @@ impl LLMFormatter {
             .ok_or(PolisherError::EmptyResponse)
     }
 
-    async fn do_anthropic_request(&self, body: &AnthropicRequest) -> Result<String, PolisherError> {
+    async fn do_anthropic_request(
+        &self,
+        body: &protocol::AnthropicRequest,
+    ) -> Result<String, PolisherError> {
         let url = format!("{}/v1/messages", self.api_base_url);
         let resp = self
             .client
@@ -537,7 +461,7 @@ impl LLMFormatter {
             });
         }
 
-        let anthropic_resp: AnthropicResponse = resp
+        let anthropic_resp: protocol::AnthropicResponse = resp
             .json()
             .await
             .map_err(|e| PolisherError::JsonError(e.to_string()))?;
@@ -674,7 +598,7 @@ mod tests {
             "model".to_string(),
             Duration::from_secs(5),
             1024,
-            ApiProtocol::OpenAi,
+            protocol::ApiProtocol::OpenAi,
             0.3,
             "zh".to_string(),
             String::new(),

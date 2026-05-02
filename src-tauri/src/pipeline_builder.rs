@@ -4,8 +4,9 @@
 //! polisher, key listener). Extracts the 75-line setup block from pipeline_orchestrator
 //! into focused, testable builder methods.
 
+#[allow(unused_imports)]
 use crate::error::{FatalError, PipelineError, PolisherError, TranscriberError};
-use std::sync::Arc;
+use std::sync::{atomic::AtomicBool, Arc};
 
 /// Builds pipeline components from configuration.
 pub struct PipelineBuilder {
@@ -18,9 +19,9 @@ impl PipelineBuilder {
     }
 
     /// Build recorder from config.
-    pub fn build_recorder(&self) -> crate::recorder::PlatformRecorder {
+    pub fn build_recorder(&self) -> crate::recorder::PulseRecorder {
         let recorder_cfg = crate::recorder::RecorderConfig::from(&*self.cfg);
-        crate::recorder::PlatformRecorder::new(recorder_cfg.sample_rate, recorder_cfg.channels)
+        crate::recorder::PulseRecorder::new(recorder_cfg.sample_rate, recorder_cfg.channels)
     }
 
     /// Build transcriber from config.
@@ -35,11 +36,7 @@ impl PipelineBuilder {
                 None => {
                     return Err(PipelineError::Fatal(FatalError::ModelNotFound {
                         model: transcriber_cfg.model.clone(),
-                        searched: vec![
-                            dirs::config_dir()
-                                .unwrap_or_default()
-                                .join("altgo/models"),
-                        ],
+                        searched: vec![dirs::config_dir().unwrap_or_default().join("altgo/models")],
                     }));
                 }
             }
@@ -115,14 +112,14 @@ impl PipelineBuilder {
         &self,
     ) -> Result<
         (
-            crate::key_listener::PlatformListener,
+            crate::key_listener::X11Listener,
             tokio::sync::mpsc::UnboundedReceiver<crate::key_listener::KeyEvent>,
             String,
         ),
         PipelineError,
     > {
-        let mut listener = crate::key_listener::PlatformListener::new(&self.cfg.key_listener)
-            .map_err(|e| {
+        let mut listener =
+            crate::key_listener::X11Listener::new(&self.cfg.key_listener).map_err(|e| {
                 PipelineError::Fatal(FatalError::KeyListenerFailed {
                     backend: "unknown".to_string(),
                     reason: e.to_string(),
@@ -147,6 +144,37 @@ impl PipelineBuilder {
     /// Get key listener config for state machine setup.
     pub fn key_listener_config(&self) -> crate::key_listener::KeyListenerConfig {
         crate::key_listener::KeyListenerConfig::from(&*self.cfg)
+    }
+
+    /// Build the full pipeline context from configuration.
+    ///
+    /// Returns error if any component fails to initialize.
+    pub fn build_context(&self) -> Result<crate::pipeline_context::PipelineContext, PipelineError> {
+        let recorder = self.build_recorder();
+        let transcriber = self.build_transcriber()?;
+        let formatter = self.build_polisher()?;
+        let polish_level = self.polish_level();
+        let key_listener_config = self.key_listener_config();
+        let poll_interval_ms = key_listener_config.poll_interval_ms;
+
+        let listener =
+            crate::key_listener::X11Listener::new(&self.cfg.key_listener).map_err(|e| {
+                PipelineError::Fatal(FatalError::KeyListenerFailed {
+                    backend: "x11".to_string(),
+                    reason: e.to_string(),
+                })
+            })?;
+
+        Ok(crate::pipeline_context::PipelineContext {
+            recorder,
+            transcriber,
+            formatter,
+            polish_level,
+            poll_running: Arc::new(AtomicBool::new(true)),
+            key_listener_config,
+            poll_interval_ms,
+            listener: std::sync::Mutex::new(Some(listener)),
+        })
     }
 }
 

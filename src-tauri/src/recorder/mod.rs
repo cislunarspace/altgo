@@ -4,7 +4,7 @@
 
 mod linux;
 
-pub type PlatformRecorder = linux::PulseRecorder;
+pub use linux::PulseRecorder;
 
 /// Recorder configuration subset.
 #[derive(Debug, Clone)]
