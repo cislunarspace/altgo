@@ -6,9 +6,10 @@ use tokio::sync::Mutex;
 
 use crate::PipelineHandle;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum PipelineStatus {
+    #[default]
     Idle,
     Recording,
     Processing,
@@ -31,6 +32,7 @@ impl PipelineStatus {
 /// Callers spawn the pipeline thread externally and inject the handle via
 /// `start_with` / `start_with_blocking`, keeping this module free of Tauri
 /// and sink dependencies.
+#[derive(Default)]
 pub struct PipelineController {
     handle: Mutex<Option<PipelineHandle>>,
     status: Arc<std::sync::RwLock<PipelineStatus>>,
@@ -38,10 +40,7 @@ pub struct PipelineController {
 
 impl PipelineController {
     pub fn new() -> Self {
-        Self {
-            handle: Mutex::new(None),
-            status: Arc::new(std::sync::RwLock::new(PipelineStatus::Idle)),
-        }
+        Self::default()
     }
 
     /// Clone of the shared status arc — passed to the sink at spawn time.

@@ -20,6 +20,41 @@ use std::time::Duration;
 /// 重试延迟基数（毫秒），用于指数退避计算。
 const RETRY_BASE_DELAY_MS: u64 = 500;
 
+/// Generic retry helper with exponential backoff.
+///
+/// Retries the given async operation up to `max_retries` times.
+/// Non-retryable errors (401, 403) are returned immediately.
+async fn retry_with_backoff<F, Fut, T>(max_retries: u32, mut operation: F) -> anyhow::Result<T>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = anyhow::Result<T>>,
+{
+    let mut last_err = None;
+    for attempt in 0..max_retries {
+        if attempt > 0 {
+            let delay = Duration::from_millis(RETRY_BASE_DELAY_MS * 2u64.pow(attempt - 1));
+            tokio::time::sleep(delay).await;
+        }
+
+        match operation().await {
+            Ok(result) => return Ok(result),
+            Err(e) => {
+                // Only check for typed HttpStatusError — avoid brittle string matching
+                // that could false-positive on body text containing "401" etc.
+                if let Some(status) = e.downcast_ref::<HttpStatusError>() {
+                    if status.0 == 401 || status.0 == 403 {
+                        return Err(e);
+                    }
+                }
+                tracing::warn!(attempt, error = %e, "request failed");
+                last_err = Some(e);
+            }
+        }
+    }
+
+    Err(last_err.unwrap_or_else(|| anyhow!("all retry attempts exhausted")))
+}
+
 struct HttpStatusError(u16);
 
 impl std::fmt::Display for HttpStatusError {
@@ -36,7 +71,7 @@ impl std::fmt::Debug for HttpStatusError {
 
 impl std::error::Error for HttpStatusError {}
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PolishLevel {
     /// 不润色
     None,
@@ -229,6 +264,9 @@ impl ApiProtocol {
 ///
 /// 支持 OpenAI 和 Anthropic 两种 API 协议，
 /// 支持指数退避重试（最多 3 次）。
+///
+/// System prompts are loaded from PromptStore if available,
+/// otherwise falls back to custom_system_prompt from config.
 #[derive(Clone)]
 pub struct LLMFormatter {
     api_key: String,
@@ -241,6 +279,7 @@ pub struct LLMFormatter {
     temperature: f32,
     language: String,
     custom_system_prompt: String,
+    prompt_store: Option<crate::prompt_store::PromptStore>,
 }
 
 impl TryFrom<&crate::config::Config> for LLMFormatter {
@@ -313,7 +352,14 @@ impl LLMFormatter {
             temperature,
             language,
             custom_system_prompt,
+            prompt_store: None,
         })
+    }
+
+    /// Sets the PromptStore for loading system prompts from external files.
+    pub fn with_prompt_store(mut self, store: crate::prompt_store::PromptStore) -> Self {
+        self.prompt_store = Some(store);
+        self
     }
 
     /// 使用 LLM 润色文本。
@@ -325,20 +371,27 @@ impl LLMFormatter {
             return Ok(text.to_string());
         }
 
-        let system_prompt = if self.custom_system_prompt.is_empty() {
+        // Try PromptStore first, fall back to custom_system_prompt or hardcoded prompts
+        let system_prompt = if let Some(ref store) = self.prompt_store {
+            match store.get_system_prompt(level) {
+                Ok(prompt) => prompt,
+                Err(e) => {
+                    tracing::warn!(error = %e, "failed to load prompt from PromptStore, falling back");
+                    if self.custom_system_prompt.is_empty() {
+                        get_system_prompt(level, &self.language)
+                    } else {
+                        self.custom_system_prompt.clone()
+                    }
+                }
+            }
+        } else if self.custom_system_prompt.is_empty() {
             get_system_prompt(level, &self.language)
         } else {
             self.custom_system_prompt.clone()
         };
 
-        let mut last_err = None;
-        for attempt in 0..self.max_retries {
-            if attempt > 0 {
-                let delay = Duration::from_millis(RETRY_BASE_DELAY_MS * 2u64.pow(attempt - 1));
-                tokio::time::sleep(delay).await;
-            }
-
-            let result = match self.protocol {
+        retry_with_backoff(self.max_retries, || async {
+            match self.protocol {
                 ApiProtocol::OpenAi => {
                     let body = ChatRequest {
                         model: self.model.clone(),
@@ -370,25 +423,9 @@ impl LLMFormatter {
                     };
                     self.do_anthropic_request(&body).await
                 }
-            };
-
-            match result {
-                Ok(r) => return Ok(r),
-                Err(e) => {
-                    // Only check for typed HttpStatusError — avoid brittle string matching
-                    // that could false-positive on body text containing "401" etc.
-                    if let Some(status) = e.downcast_ref::<HttpStatusError>() {
-                        if status.0 == 401 || status.0 == 403 {
-                            return Err(e);
-                        }
-                    }
-                    tracing::warn!(attempt, error = %e, "polish request failed");
-                    last_err = Some(e);
-                }
             }
-        }
-
-        Err(last_err.unwrap_or_else(|| anyhow!("all retry attempts exhausted")))
+        })
+        .await
     }
 
     async fn do_openai_request(&self, body: &ChatRequest) -> anyhow::Result<String> {

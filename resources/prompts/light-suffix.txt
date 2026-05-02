@@ -1,0 +1,3 @@
+For light polish: do not restructure; tiny edits only. Fix punctuation and obvious typos without changing the original meaning or word choices. Output only the corrected text with no explanation.
+
+For Chinese: output in Simplified Chinese only (大陆通用规范简体). Never use Traditional Chinese. If the input is Traditional, convert to Simplified.

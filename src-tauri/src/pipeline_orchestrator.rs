@@ -63,7 +63,7 @@ pub async fn run(
 
     // --- 构建润色器 ---
     let polish_level = crate::polisher::PolishLevel::effective(&cfg.polisher.level);
-    let formatter = match crate::polisher::LLMFormatter::try_from(&*cfg) {
+    let mut formatter = match crate::polisher::LLMFormatter::try_from(&*cfg) {
         Ok(f) => f,
         Err(e) => {
             tracing::error!(error = %e, "failed to create polisher");
@@ -71,6 +71,26 @@ pub async fn run(
             return;
         }
     };
+
+    // Try to load PromptStore from resources/prompts/
+    let prompts_dir = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(|p| p.join("resources/prompts")))
+        .or_else(|| Some(std::path::PathBuf::from("resources/prompts")));
+
+    if let Some(dir) = prompts_dir {
+        if dir.exists() {
+            let store = crate::prompt_store::PromptStore::new(dir);
+            if let Err(e) = store.ensure_loaded() {
+                tracing::warn!(error = %e, "failed to load prompts from PromptStore, using fallback");
+            } else {
+                tracing::info!("PromptStore loaded successfully");
+                formatter = formatter.with_prompt_store(store);
+            }
+        } else {
+            tracing::debug!("prompts directory not found, using hardcoded prompts");
+        }
+    }
 
     // --- 构建按键监听器 ---
     let (raw_key_tx, raw_key_rx) = tokio::sync::mpsc::unbounded_channel();

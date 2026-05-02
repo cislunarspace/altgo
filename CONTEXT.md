@@ -40,6 +40,15 @@ The floating status window shown during recording, processing, and result displa
 **Polisher**
 The optional LLM post-processing step. Controlled by `PolishLevel` (`none`/`light`/`medium`/`heavy`). Communicates with any OpenAI-compatible chat API.
 
+**PromptStore**
+Manages prompt template files for the Polisher: loads from `resources/prompts/`, composes base + level-specific suffix into complete system prompts, validates on first use, and hot-reloads when files change. Validation errors degrade gracefully—polishing continues with raw transcription text and an overlay error message.
+
+**Prompt Template**
+A text file in `resources/prompts/`: either `base.txt` (shared instruction + Chinese writing guidance) or `{level}-suffix.txt` (level-specific instruction appended to base). Runtime composition produces the complete system prompt sent to the LLM.
+
+**System Prompt**
+The complete prompt text sent to the LLM for polishing, composed at runtime from `base.txt` + `{level}-suffix.txt`. Cached in memory and reloaded when template files change.
+
 ## Key Input
 
 **Activation Key**

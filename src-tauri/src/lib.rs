@@ -17,6 +17,7 @@ pub mod pipeline_controller;
 pub mod pipeline_orchestrator;
 pub mod pipeline_sink;
 pub mod polisher;
+pub mod prompt_store;
 pub mod recorder;
 pub mod resource;
 pub mod state_machine;
@@ -72,7 +73,9 @@ pub fn run() {
 
             let controller = app.state::<pipeline_controller::PipelineController>();
             let status_arc = controller.status_arc();
-            controller.start_with_blocking(|| cmd::spawn_pipeline_thread(app.handle(), cfg, status_arc))?;
+            controller.start_with_blocking(|| {
+                cmd::spawn_pipeline_thread(app.handle(), cfg, status_arc)
+            })?;
 
             Ok(())
         })
