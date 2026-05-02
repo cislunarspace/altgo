@@ -6,12 +6,14 @@
 pub mod audio;
 pub mod cmd;
 pub mod config;
+pub mod config_store;
 pub mod history;
 pub mod key_capture;
 pub mod key_listener;
 pub mod model;
 pub mod output;
 pub mod pipeline;
+pub mod pipeline_controller;
 pub mod pipeline_orchestrator;
 pub mod pipeline_sink;
 pub mod polisher;
@@ -25,15 +27,6 @@ pub use pipeline::PipelineOutput;
 
 use std::sync::Arc;
 use tauri::Manager;
-use tokio::sync::Mutex;
-
-pub struct AppState {
-    pub config: Mutex<config::Config>,
-    pub config_path: std::path::PathBuf,
-    pub history_path: std::path::PathBuf,
-    pub pipeline: Mutex<Option<PipelineHandle>>,
-    pub pipeline_status: Arc<std::sync::RwLock<String>>,
-}
 
 pub struct PipelineHandle {
     pub stop_tx: tokio::sync::oneshot::Sender<()>,
@@ -50,26 +43,17 @@ pub fn run() {
                 .parent()
                 .map(|p| p.join("history.json"))
                 .unwrap_or_else(|| config_path.with_extension("history.json"));
-            let cfg = match config::Config::load(&config_path) {
-                Ok(cfg) => cfg,
-                Err(e) => {
-                    tracing::warn!(error = %e, "failed to load config, using defaults");
-                    config::Config::default()
-                }
-            };
-            if let Err(e) = cfg.validate() {
-                tracing::warn!(error = %e, "config validation failed");
-            }
 
-            let pipeline_status = Arc::new(std::sync::RwLock::new(String::from("idle")));
-            let state = AppState {
-                config: Mutex::new(cfg),
-                config_path,
-                history_path,
-                pipeline: Mutex::new(None),
-                pipeline_status: pipeline_status.clone(),
-            };
-            app.manage(state);
+            let config_store = config_store::ConfigStore::load(config_path);
+            let history_store = history::HistoryStore::new(history_path);
+            let pipeline_controller = pipeline_controller::PipelineController::new();
+
+            let cfg = Arc::new(config_store.snapshot_blocking());
+            cfg.validate().map_err(|e| e.to_string())?;
+
+            app.manage(config_store);
+            app.manage(history_store);
+            app.manage(pipeline_controller);
 
             tray::create_tray(app)?;
 
@@ -86,7 +70,9 @@ pub fn run() {
                 });
             }
 
-            cmd::spawn_pipeline_at_startup(app.handle().clone())?;
+            let controller = app.state::<pipeline_controller::PipelineController>();
+            let status_arc = controller.status_arc();
+            controller.start_with_blocking(|| cmd::spawn_pipeline_thread(app.handle(), cfg, status_arc))?;
 
             Ok(())
         })
@@ -112,13 +98,9 @@ pub fn run() {
         .expect("error while building tauri application")
         .run(|app_handle, event| {
             if let tauri::RunEvent::ExitRequested { .. } = event {
-                let state = app_handle.state::<AppState>();
-                // Use blocking_lock to ensure pipeline cleanup completes on exit.
-                // If the mutex is poisoned, recover and still send the stop signal.
-                let mut p = state.pipeline.blocking_lock();
-                if let Some(h) = p.take() {
-                    let _ = h.stop_tx.send(());
-                }
+                app_handle
+                    .state::<pipeline_controller::PipelineController>()
+                    .stop_blocking();
             }
         });
 }

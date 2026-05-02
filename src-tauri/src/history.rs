@@ -134,6 +134,43 @@ pub fn get_entry(path: &Path, id: &str) -> Result<Option<HistoryEntry>> {
     Ok(file.entries.iter().find(|e| e.id == id).cloned())
 }
 
+/// Holds the history file path and exposes named operations.
+/// Callers never handle the path directly.
+#[derive(Clone)]
+pub struct HistoryStore {
+    path: std::path::PathBuf,
+}
+
+impl HistoryStore {
+    pub fn new(path: std::path::PathBuf) -> Self {
+        Self { path }
+    }
+
+    pub fn list(&self) -> Result<Vec<HistoryEntry>> {
+        list_entries(&self.path)
+    }
+
+    pub fn append(&self, raw_text: String, text: String) -> Result<HistoryEntry> {
+        append_entry(&self.path, raw_text, text)
+    }
+
+    pub fn delete(&self, ids: &[String]) -> Result<usize> {
+        delete_entries(&self.path, ids)
+    }
+
+    pub fn clear(&self) -> Result<()> {
+        clear_all(&self.path)
+    }
+
+    pub fn get(&self, id: &str) -> Result<Option<HistoryEntry>> {
+        get_entry(&self.path, id)
+    }
+
+    pub fn update_text(&self, id: &str, new_text: String) -> Result<HistoryEntry> {
+        update_entry_text(&self.path, id, new_text)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
