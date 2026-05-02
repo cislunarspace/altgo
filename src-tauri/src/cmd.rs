@@ -1,17 +1,12 @@
 //! Tauri commands — 前端通过 IPC 调用的函数。
 
-use std::str::FromStr;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
 use serde::{Deserialize, Deserializer, Serialize};
 use tauri::{AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, State};
 
-use crate::{
-    config, history, key_listener, output, pipeline, polisher, recorder, state_machine,
-    transcriber, AppState,
-};
+use crate::{config, history, output, pipeline, pipeline_sink::PipelineSink, polisher, AppState};
 
 const OVERLAY_RECORDING_W: f64 = 200.0;
 const OVERLAY_RECORDING_H: f64 = 48.0;
@@ -59,24 +54,6 @@ pub enum RecordingStatus {
     Recording,
     Processing,
     Done,
-}
-
-fn emit_pipeline_status(
-    app: &tauri::AppHandle,
-    status: &Arc<std::sync::RwLock<String>>,
-    value: &str,
-) {
-    let _ = app.emit("pipeline-status", value);
-    if let Ok(mut s) = status.write() {
-        *s = value.to_string();
-    }
-}
-
-fn emit_transcription_progress(app: &tauri::AppHandle, phase: &str, fraction: Option<f32>) {
-    let _ = app.emit(
-        "transcription-progress",
-        serde_json::json!({ "phase": phase, "fraction": fraction }),
-    );
 }
 
 /// Root-window mouse coordinates from `xdotool` (physical pixels).
@@ -212,6 +189,150 @@ fn position_overlay(overlay: &tauri::WebviewWindow, width: f64, height: f64) {
     }
 }
 
+/// Tauri 管道事件接收器 — 将管道事件转发为 Tauri 事件和系统操作。
+struct TauriPipelineSink {
+    app: tauri::AppHandle,
+    pipeline_status: Arc<std::sync::RwLock<String>>,
+    cfg: Arc<config::Config>,
+}
+
+impl TauriPipelineSink {
+    fn new(
+        app: tauri::AppHandle,
+        pipeline_status: Arc<std::sync::RwLock<String>>,
+        cfg: Arc<config::Config>,
+    ) -> Self {
+        Self {
+            app,
+            pipeline_status,
+            cfg,
+        }
+    }
+}
+
+/// 发送管道状态事件并更新共享状态。
+fn emit_pipeline_status(
+    app: &tauri::AppHandle,
+    status: &Arc<std::sync::RwLock<String>>,
+    value: &str,
+) {
+    let _ = app.emit("pipeline-status", value);
+    if let Ok(mut s) = status.write() {
+        *s = value.to_string();
+    }
+}
+
+impl PipelineSink for TauriPipelineSink {
+    fn on_status_change(&self, status: &str) {
+        emit_pipeline_status(&self.app, &self.pipeline_status, status);
+        if let Some(overlay) = self.app.get_webview_window("overlay") {
+            match status {
+                "recording" => {
+                    position_overlay(&overlay, OVERLAY_RECORDING_W, OVERLAY_RECORDING_H);
+                    let _ = overlay.show();
+                }
+                "processing" => {
+                    let _ = overlay.hide();
+                    position_overlay(&overlay, OVERLAY_PROCESSING_W, OVERLAY_PROCESSING_H);
+                    let _ = overlay.show();
+                }
+                "idle" | "stopped" => {
+                    let _ = overlay.hide();
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn on_error(&self, message: &str) {
+        let _ = self.app.emit("pipeline-error", message);
+    }
+
+    fn on_transcription_result(&self, output: &pipeline::PipelineOutput) {
+        if output.raw_text.is_empty() {
+            emit_pipeline_status(&self.app, &self.pipeline_status, "idle");
+            return;
+        }
+
+        let prefer_polished = self.cfg.output.prefer_polished;
+        let app = self.app.clone();
+        let status = self.pipeline_status.clone();
+        let raw_text = output.raw_text.clone();
+        let polish_failed = output.polish_failed;
+        let text = output.text.clone();
+
+        tauri::async_runtime::spawn(async move {
+            let text_to_use = if prefer_polished && !polish_failed && !text.trim().is_empty() {
+                text.clone()
+            } else {
+                raw_text.clone()
+            };
+
+            let display_text = text_to_use.clone();
+
+            // 写入剪贴板
+            let _ = output::write_clipboard(&display_text).await;
+
+            // 写入历史
+            let hist_path = app.state::<AppState>().history_path.clone();
+            match tokio::task::spawn_blocking(move || {
+                history::append_entry(&hist_path, raw_text, display_text)
+            })
+            .await
+            {
+                Ok(Ok(_)) => {
+                    let _ = app.emit("history-updated", ());
+                }
+                Ok(Err(e)) => {
+                    tracing::warn!(error = %e, "failed to append transcription history");
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "history append task failed");
+                }
+            }
+
+            // 更新状态和显示 overlay
+            emit_pipeline_status(&app, &status, "done");
+            if let Some(overlay) = app.get_webview_window("overlay") {
+                position_overlay(&overlay, OVERLAY_RESULT_W, OVERLAY_RESULT_H);
+                let _ = overlay.show();
+            }
+            let _ = app.emit("transcription-result", &text_to_use);
+        });
+    }
+
+    fn on_progress(&self, phase: &str, fraction: Option<f32>) {
+        let _ = self.app.emit(
+            "transcription-progress",
+            serde_json::json!({ "phase": phase, "fraction": fraction }),
+        );
+    }
+
+    fn on_key_listener_backend(&self, backend: &str) {
+        let _ = self.app.emit("key-listener-backend", backend);
+    }
+}
+
+/// 在专用线程上启动管道，返回停止句柄。
+fn spawn_pipeline_thread(
+    app: &AppHandle,
+    cfg: Arc<config::Config>,
+    pipeline_status: Arc<std::sync::RwLock<String>>,
+) -> crate::PipelineHandle {
+    let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
+    let app_handle = app.clone();
+    let cfg_clone = cfg.clone();
+    std::thread::spawn(move || {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("failed to build tokio runtime");
+        let sink = TauriPipelineSink::new(app_handle, pipeline_status, cfg_clone);
+        rt.block_on(crate::pipeline_orchestrator::run(cfg, stop_rx, sink));
+    });
+    crate::PipelineHandle { stop_tx }
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConfigResponse {
@@ -270,19 +391,10 @@ pub struct SaveConfigRequest {
 /// Start the main voice pipeline thread (used at app startup).
 pub fn spawn_pipeline_at_startup(app: AppHandle) -> Result<(), String> {
     let state = app.state::<AppState>();
-    let cfg_arc = Arc::new(state.config.blocking_lock().clone());
-    cfg_arc.validate().map_err(|e| e.to_string())?;
-    let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
-    let app_handle = app.clone();
-    let pipeline_status = state.pipeline_status.clone();
-    std::thread::spawn(move || {
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("failed to build tokio runtime");
-        rt.block_on(run_pipeline(app_handle, cfg_arc, stop_rx, pipeline_status));
-    });
-    *state.pipeline.blocking_lock() = Some(crate::PipelineHandle { stop_tx });
+    let cfg = Arc::new(state.config.blocking_lock().clone());
+    cfg.validate().map_err(|e| e.to_string())?;
+    let handle = spawn_pipeline_thread(&app, cfg, state.pipeline_status.clone());
+    *state.pipeline.blocking_lock() = Some(handle);
     Ok(())
 }
 
@@ -296,19 +408,10 @@ async fn restart_pipeline(app: AppHandle) -> Result<(), String> {
         }
     }
     tokio::time::sleep(Duration::from_millis(320)).await;
-    let cfg_arc = Arc::new(state.config.lock().await.clone());
-    cfg_arc.validate().map_err(|e| e.to_string())?;
-    let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
-    let app_handle = app.clone();
-    let pipeline_status = state.pipeline_status.clone();
-    std::thread::spawn(move || {
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("failed to build tokio runtime");
-        rt.block_on(run_pipeline(app_handle, cfg_arc, stop_rx, pipeline_status));
-    });
-    *state.pipeline.lock().await = Some(crate::PipelineHandle { stop_tx });
+    let cfg = Arc::new(state.config.lock().await.clone());
+    cfg.validate().map_err(|e| e.to_string())?;
+    let handle = spawn_pipeline_thread(&app, cfg, state.pipeline_status.clone());
+    *state.pipeline.lock().await = Some(handle);
     Ok(())
 }
 
@@ -392,22 +495,9 @@ pub async fn start_pipeline(
         return Err("pipeline already running".into());
     }
 
-    let cfg = state.config.lock().await.clone();
-    let cfg = Arc::new(cfg);
-
-    let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
-    let pipeline_status = state.pipeline_status.clone();
-
-    let app_clone = app.clone();
-    std::thread::spawn(move || {
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("failed to build tokio runtime");
-        rt.block_on(run_pipeline(app_clone, cfg, stop_rx, pipeline_status));
-    });
-
-    *pipeline = Some(crate::PipelineHandle { stop_tx });
+    let cfg = Arc::new(state.config.lock().await.clone());
+    let handle = spawn_pipeline_thread(&app, cfg, state.pipeline_status.clone());
+    *pipeline = Some(handle);
     Ok(())
 }
 
@@ -447,291 +537,6 @@ pub async fn hide_overlay(app: tauri::AppHandle) -> Result<(), String> {
         let _ = overlay.hide();
     }
     Ok(())
-}
-
-pub async fn run_pipeline(
-    app: tauri::AppHandle,
-    cfg: Arc<config::Config>,
-    mut stop_rx: tokio::sync::oneshot::Receiver<()>,
-    pipeline_status: Arc<std::sync::RwLock<String>>,
-) {
-    // Validate recorder / transcriber / polisher before starting global key capture so errors
-    // are visible immediately and we do not leave a key listener running without a main loop.
-    let mut recorder =
-        recorder::PlatformRecorder::new(cfg.recorder.sample_rate, cfg.recorder.channels);
-
-    let model_path = if cfg.transcriber.engine == "local" {
-        match crate::model::resolve_model_path(&cfg.transcriber.model) {
-            Some(p) => p.to_string_lossy().to_string(),
-            None => {
-                let msg = format!(
-                    "本地模型未找到（配置值: {:?}）。请在 GUI 设置中下载模型，或将 [transcriber] model 设为已下载模型的名称（如 \"base\"）或完整文件路径。",
-                    cfg.transcriber.model
-                );
-                tracing::error!("{}", msg);
-                let _ = app.emit("pipeline-error", &msg);
-                return;
-            }
-        }
-    } else {
-        cfg.transcriber.model.clone()
-    };
-
-    let transcriber: transcriber::Transcriber = match cfg.transcriber.engine.as_str() {
-        "local" => transcriber::Transcriber::Local(transcriber::LocalWhisper::new(
-            model_path,
-            cfg.transcriber.language.clone(),
-            cfg.transcriber.whisper_path.clone(),
-        )),
-        _ => match transcriber::WhisperApi::new(
-            cfg.transcriber.api_key.clone(),
-            cfg.transcriber.api_base_url.clone(),
-            cfg.transcriber.model.clone(),
-            cfg.transcriber.language.clone(),
-            cfg.transcriber.temperature,
-            cfg.transcriber.prompt.clone(),
-            cfg.transcriber.timeout(),
-        ) {
-            Ok(api) => transcriber::Transcriber::Api(api),
-            Err(e) => {
-                tracing::error!(error = %e, "failed to create transcriber");
-                let _ = app.emit("pipeline-error", format!("transcriber: {}", e));
-                return;
-            }
-        },
-    };
-
-    let polish_level = polisher::PolishLevel::from_str(&cfg.polisher.level).unwrap_or_else(|_| {
-        tracing::warn!("invalid polish level, using medium");
-        polisher::PolishLevel::Medium
-    });
-    let polisher_protocol =
-        polisher::ApiProtocol::from_str(&cfg.polisher.protocol).unwrap_or_else(|e| {
-            tracing::warn!(error = %e, "invalid polisher protocol, defaulting to openai");
-            polisher::ApiProtocol::OpenAi
-        });
-    let formatter = match polisher::LLMFormatter::with_config(
-        cfg.polisher.api_key.clone(),
-        cfg.polisher.api_base_url.clone(),
-        cfg.polisher.model.clone(),
-        cfg.polisher.timeout(),
-        cfg.polisher.max_tokens,
-        polisher_protocol,
-        cfg.polisher.temperature,
-        cfg.transcriber.language.clone(),
-        cfg.polisher.system_prompt.clone(),
-    ) {
-        Ok(f) => f,
-        Err(e) => {
-            tracing::error!(error = %e, "failed to create polisher");
-            let _ = app.emit("pipeline-error", format!("polisher: {}", e));
-            return;
-        }
-    };
-
-    let (raw_key_tx, raw_key_rx) = tokio::sync::mpsc::unbounded_channel();
-    let poll_running = Arc::new(AtomicBool::new(true));
-    let poll_interval_ms = cfg.key_listener.poll_interval_ms;
-
-    // Must keep `PlatformListener` alive for the whole pipeline: its `Drop` stops xinput/evtest.
-    let _linux_key_listener = {
-        let mut listener = match key_listener::PlatformListener::new(&cfg.key_listener) {
-            Ok(l) => l,
-            Err(e) => {
-                tracing::error!(error = %e, "failed to create key listener");
-                let _ = app.emit("pipeline-error", format!("key listener: {}", e));
-                return;
-            }
-        };
-        let (mut key_events, key_backend) = match listener.start() {
-            Ok(pair) => pair,
-            Err(e) => {
-                tracing::error!(error = %e, "failed to start key listener");
-                let _ = app.emit("pipeline-error", format!("key listener start: {}", e));
-                return;
-            }
-        };
-        tracing::info!(backend = key_backend, "Linux key listener active");
-        let _ = app.emit("key-listener-backend", key_backend);
-        // Forward PlatformListener events into the shared raw_key channel.
-        let poll_running = poll_running.clone();
-        std::thread::spawn(move || {
-            use tokio::sync::mpsc::error::TryRecvError;
-            while poll_running.load(Ordering::SeqCst) {
-                match key_events.try_recv() {
-                    Ok(ev) => {
-                        let _ = raw_key_tx.send(ev);
-                    }
-                    Err(TryRecvError::Empty) => {
-                        std::thread::sleep(std::time::Duration::from_millis(poll_interval_ms));
-                    }
-                    Err(TryRecvError::Disconnected) => {
-                        tracing::error!("key listener channel closed unexpectedly");
-                        break;
-                    }
-                }
-            }
-        });
-        listener
-    };
-
-    let (key_tx, key_rx) = tokio::sync::mpsc::unbounded_channel();
-    let debounce_window = cfg.key_listener.debounce_window();
-    tokio::spawn(key_listener::debounce_task(
-        raw_key_rx,
-        key_tx,
-        debounce_window,
-    ));
-
-    let sm = state_machine::Machine::new(
-        cfg.key_listener.long_press_threshold(),
-        cfg.key_listener.double_click_interval(),
-        cfg.key_listener.min_press_duration(),
-    );
-    let mut commands = sm.run(key_rx);
-
-    emit_pipeline_status(&app, &pipeline_status, "idle");
-
-    loop {
-        tokio::select! {
-            cmd = commands.recv() => {
-                match cmd {
-                    Some(state_machine::Command::StartRecord) => {
-                        tracing::info!("recording started");
-                        if let Err(e) = recorder.start() {
-                            tracing::error!(error = %e, "failed to start recording");
-                            continue;
-                        }
-                        emit_pipeline_status(&app, &pipeline_status, "recording");
-                        if let Some(overlay) = app.get_webview_window("overlay") {
-                            position_overlay(&overlay, OVERLAY_RECORDING_W, OVERLAY_RECORDING_H);
-                            let _ = overlay.show();
-                        }
-                    }
-                    Some(state_machine::Command::StopRecord) => {
-                        tracing::info!("recording stopped, processing...");
-                        if let Some(overlay) = app.get_webview_window("overlay") {
-                            let _ = overlay.hide();
-                        }
-                        emit_pipeline_status(&app, &pipeline_status, "processing");
-                        if let Some(overlay) = app.get_webview_window("overlay") {
-                            position_overlay(&overlay, OVERLAY_PROCESSING_W, OVERLAY_PROCESSING_H);
-                            let _ = overlay.show();
-                        }
-                        let wav_data = match recorder.stop() {
-                            Ok(data) => data,
-                            Err(e) => {
-                                tracing::error!(error = %e, "failed to stop recording");
-                                emit_pipeline_status(&app, &pipeline_status, "idle");
-                                if let Some(overlay) = app.get_webview_window("overlay") {
-                                    let _ = overlay.hide();
-                                }
-                                continue;
-                            }
-                        };
-
-                        let cfg = Arc::clone(&cfg);
-                        let formatter = formatter.clone();
-                        let transcriber = transcriber.clone();
-                        let app = app.clone();
-                        let pipeline_status = pipeline_status.clone();
-
-                        tokio::spawn(async move {
-                            let app_progress = app.clone();
-                            match pipeline::process_audio_core(
-                                &transcriber,
-                                &formatter,
-                                &wav_data,
-                                polish_level,
-                                |phase, fraction| {
-                                    emit_transcription_progress(&app_progress, phase, fraction);
-                                },
-                            )
-                            .await
-                            {
-                                Ok(output) => {
-                                    // 以原始转写为准：润色侧可能返回空字符串，此时仍应展示/剪贴/入库。
-                                    if !output.raw_text.is_empty() {
-                                        let text_to_use = if cfg.output.prefer_polished
-                                            && !output.polish_failed
-                                            && !output.text.trim().is_empty()
-                                        {
-                                            &output.text
-                                        } else {
-                                            &output.raw_text
-                                        };
-                                        let display_text = text_to_use.clone();
-
-                                        let hist_path =
-                                            app.state::<AppState>().history_path.clone();
-                                        let raw_hist = output.raw_text.clone();
-                                        let text_hist = display_text.clone();
-                                        match tokio::task::spawn_blocking(move || {
-                                            history::append_entry(&hist_path, raw_hist, text_hist)
-                                        })
-                                        .await
-                                        {
-                                            Ok(Ok(_)) => {
-                                                let _ = app.emit("history-updated", ());
-                                            }
-                                            Ok(Err(e)) => {
-                                                tracing::warn!(
-                                                    error = %e,
-                                                    "failed to append transcription history"
-                                                );
-                                            }
-                                            Err(e) => {
-                                                tracing::warn!(
-                                                    error = %e,
-                                                    "history append task failed"
-                                                );
-                                            }
-                                        }
-
-                                        let _ =
-                                            output::write_clipboard(&display_text).await;
-
-                                        emit_pipeline_status(&app, &pipeline_status, "done");
-                                        if let Some(overlay) =
-                                            app.get_webview_window("overlay")
-                                        {
-                                            position_overlay(
-                                                &overlay,
-                                                OVERLAY_RESULT_W,
-                                                OVERLAY_RESULT_H,
-                                            );
-                                            let _ = overlay.show();
-                                        }
-                                        let _ =
-                                            app.emit("transcription-result", &display_text);
-                                    } else {
-                                        emit_pipeline_status(&app, &pipeline_status, "idle");
-                                    }
-                                }
-                                Err(e) => {
-                                    tracing::error!(error = %e, "audio processing failed");
-                                    let _ = app.emit("pipeline-error", format!("processing: {}", e));
-                                    emit_pipeline_status(&app, &pipeline_status, "idle");
-                                    if let Some(overlay) = app.get_webview_window("overlay") {
-                                        let _ = overlay.hide();
-                                    }
-                                }
-                            }
-                        });
-                    }
-                    None => break,
-                }
-            }
-            _ = &mut stop_rx => {
-                tracing::info!("pipeline stop requested");
-                poll_running.store(false, Ordering::SeqCst);
-                break;
-            }
-        }
-    }
-
-    emit_pipeline_status(&app, &pipeline_status, "stopped");
-    tracing::info!("pipeline stopped");
 }
 
 #[derive(Serialize)]
@@ -888,27 +693,8 @@ pub async fn polish_history_entry(
 
     let entry = entry.ok_or_else(|| "history entry not found".to_string())?;
 
-    let polish_level = polisher::PolishLevel::from_str(&cfg.polisher.level).unwrap_or_else(|_| {
-        tracing::warn!("invalid polish level, using medium");
-        polisher::PolishLevel::Medium
-    });
-    let polisher_protocol =
-        polisher::ApiProtocol::from_str(&cfg.polisher.protocol).unwrap_or_else(|e| {
-            tracing::warn!(error = %e, "invalid polisher protocol, defaulting to openai");
-            polisher::ApiProtocol::OpenAi
-        });
-    let formatter = polisher::LLMFormatter::with_config(
-        cfg.polisher.api_key.clone(),
-        cfg.polisher.api_base_url.clone(),
-        cfg.polisher.model.clone(),
-        cfg.polisher.timeout(),
-        cfg.polisher.max_tokens,
-        polisher_protocol,
-        cfg.polisher.temperature,
-        cfg.transcriber.language.clone(),
-        cfg.polisher.system_prompt.clone(),
-    )
-    .map_err(|e| e.to_string())?;
+    let polish_level = polisher::PolishLevel::effective(&cfg.polisher.level);
+    let formatter = polisher::LLMFormatter::try_from(&cfg).map_err(|e| e.to_string())?;
 
     let source = entry.raw_text.clone();
     let polished = formatter

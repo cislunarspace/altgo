@@ -58,6 +58,14 @@ impl PolishLevel {
             PolishLevel::Heavy => "heavy",
         }
     }
+
+    /// 解析润色级别字符串，无效值回退到 `Medium`。
+    pub fn effective(level_str: &str) -> Self {
+        <Self as std::str::FromStr>::from_str(level_str).unwrap_or_else(|_| {
+            tracing::warn!("invalid polish level '{level_str}', using medium");
+            PolishLevel::Medium
+        })
+    }
 }
 
 impl std::str::FromStr for PolishLevel {
@@ -233,6 +241,28 @@ pub struct LLMFormatter {
     temperature: f32,
     language: String,
     custom_system_prompt: String,
+}
+
+impl TryFrom<&crate::config::Config> for LLMFormatter {
+    type Error = anyhow::Error;
+
+    fn try_from(cfg: &crate::config::Config) -> anyhow::Result<Self> {
+        let protocol = ApiProtocol::from_str(&cfg.polisher.protocol).unwrap_or_else(|e| {
+            tracing::warn!(error = %e, "invalid polisher protocol, defaulting to openai");
+            ApiProtocol::OpenAi
+        });
+        Self::with_config(
+            cfg.polisher.api_key.clone(),
+            cfg.polisher.api_base_url.clone(),
+            cfg.polisher.model.clone(),
+            cfg.polisher.timeout(),
+            cfg.polisher.max_tokens,
+            protocol,
+            cfg.polisher.temperature,
+            cfg.transcriber.language.clone(),
+            cfg.polisher.system_prompt.clone(),
+        )
+    }
 }
 
 impl LLMFormatter {

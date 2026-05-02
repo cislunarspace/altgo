@@ -12,6 +12,8 @@ pub mod key_listener;
 pub mod model;
 pub mod output;
 pub mod pipeline;
+pub mod pipeline_orchestrator;
+pub mod pipeline_sink;
 pub mod polisher;
 pub mod recorder;
 pub mod resource;
