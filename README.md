@@ -51,19 +51,29 @@
 
 ### 给开发者（从本仓库构建）
 
-克隆仓库后，使用 **`make build`** 可一次性拉取 **whisper-cli、ffmpeg** 等到 `target/deps/bin/`，执行 `cargo tauri build`，并把依赖二进制拷贝到 `src-tauri/target/release/bin/`，与 CI/打包流程一致。**日常联调与验证同样建议以 `make build` 为主**，确保与发布产物行为一致。
+克隆仓库后，在 **Linux** 上使用 **`make build`** 可一次性拉取 **whisper-cli、ffmpeg** 等到 `target/deps/bin/`，执行 `cargo tauri build`，并把依赖二进制拷贝到 `src-tauri/target/release/bin/`，与 CI/打包流程一致。**日常联调与验证同样建议以 `make build`（或下表 Windows 等价命令）为主**，确保与发布产物行为一致。
+
+在 **Windows** 上无需安装 `make`：使用仓库里的 **`build.ps1` / `build.cmd`**（与 `make build` 同款流程）。需已安装 **Rust（cargo）**、**Node.js（npm）** 与 **PowerShell 7+（`pwsh`，推荐；否则 `build.cmd` 会回退到 Windows PowerShell 5.1）**。
 
 ```bash
 git clone <本仓库 URL>
 cd altgo
 cd frontend && npm install && cd ..
 # Linux：先安装 Tauri 所需的 GTK/WebKit 等开发包，见下文「开发环境」
-make deps-linux    # 或 Windows：make deps-windows / pwsh packaging/scripts/download-deps.ps1
+make deps-linux
 make build
 # 可选：sudo make install
 ```
 
-若需快速改前端界面，可临时使用 `cargo tauri dev` 获得热重载；**完整链路（含捆绑二进制、与发布一致）仍以 `make build` 为准。**
+```powershell
+# Windows（与上列 make build 等价）
+cd frontend; npm install; cd ..
+.\build.ps1
+# 或: pwsh packaging/scripts/build.ps1
+# 或: build.cmd
+```
+
+若需快速改前端界面，可临时使用 `cargo tauri dev` 获得热重载；**完整链路（含捆绑二进制、与发布一致）仍以 `make build` / `.\build.ps1` 为准。**
 
 从源码自行构建且**未**走 `make deps-*` 时，才需要自行保证 **ffmpeg** / **whisper-cli** 可被程序找到（例如加入 `PATH` 或执行 `make deps-windows`）。
 
