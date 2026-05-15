@@ -1,5 +1,8 @@
 import { useState, useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
+import { getVersion } from "@tauri-apps/api/app";
+import { message as showMessageDialog } from "@tauri-apps/plugin-dialog";
 import { useTranslation } from "../i18n";
 import { useModelDownloadProgress } from "../hooks/useTauri";
 import {
@@ -35,8 +38,12 @@ interface AppConfig {
   polishModel: string;
   polishApiBaseUrl: string;
   guiLanguage: string;
+  /** User-entered API key (empty = keep existing if hasTranscriberApiKey is true) */
   transcriberApiKey: string;
+  /** User-entered API key (empty = keep existing if hasPolisherApiKey is true) */
   polisherApiKey: string;
+  hasTranscriberApiKey: boolean;
+  hasPolisherApiKey: boolean;
 }
 
 interface ModelEntry {
@@ -48,10 +55,21 @@ interface ModelEntry {
 }
 
 const KEY_PRESETS: { value: string; labelKey: string }[] = [
-  { value: "ISO_Level3_Shift", labelKey: "settings.key_preset_right_alt" },
-  { value: "Alt_L", labelKey: "settings.key_preset_left_alt" },
-  { value: "Alt_R", labelKey: "settings.key_preset_alt_r" },
+  { value: "Alt_R", labelKey: "settings.key_preset_right_alt" },
 ];
+
+/** 与下拉「右Alt」一致的老 keysym 名，仍视为预设而非自定义输入 */
+function isPresetKeyName(keyName: string): boolean {
+  if (KEY_PRESETS.some((p) => p.value === keyName)) return true;
+  return keyName === "ISO_Level3_Shift" || keyName === "AltGr";
+}
+
+/** 下拉框受控 value：老配置里的右 Alt keysym 显示为「右Alt」 */
+function presetSelectValue(keyName: string): string {
+  if (KEY_PRESETS.some((p) => p.value === keyName)) return keyName;
+  if (keyName === "ISO_Level3_Shift" || keyName === "AltGr") return "Alt_R";
+  return "__custom__";
+}
 
 function formatSize(bytes: number): string {
   const mb = bytes / (1024 * 1024);
@@ -67,11 +85,12 @@ function saveRequestBody(c: AppConfig) {
     language: c.language,
     engine: c.engine,
     model: c.model,
-    apiKey: c.transcriberApiKey,
+    // Only send API keys when user entered a new value (empty = keep existing)
+    ...(c.transcriberApiKey ? { apiKey: c.transcriberApiKey } : {}),
     apiBaseUrl: c.apiBaseUrl,
     polishLevel: c.polishLevel,
     polishModel: c.polishModel,
-    polishApiKey: c.polisherApiKey,
+    ...(c.polisherApiKey ? { polishApiKey: c.polisherApiKey } : {}),
     polishApiBaseUrl: c.polishApiBaseUrl,
     guiLanguage: c.guiLanguage,
   };
@@ -82,6 +101,11 @@ function normalizeConfig(c: AppConfig): AppConfig {
     ...c,
     linuxEvdevCode: c.linuxEvdevCode ?? null,
     windowsVk: c.windowsVk ?? null,
+    // API keys are not returned from backend; start empty (user enters only when changing)
+    transcriberApiKey: "",
+    polisherApiKey: "",
+    hasTranscriberApiKey: c.hasTranscriberApiKey ?? false,
+    hasPolisherApiKey: c.hasPolisherApiKey ?? false,
   };
 }
 
@@ -92,17 +116,31 @@ export default function Settings() {
   const [models, setModels] = useState<ModelEntry[]>([]);
   const [resolvedPath, setResolvedPath] = useState<string | null | undefined>(undefined);
   const [downloading, setDownloading] = useState<string | null>(null);
-  const [modelError, setModelError] = useState("");
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<"saved" | string>("");
   const [polishOpen, setPolishOpen] = useState(false);
   const [advancedPath, setAdvancedPath] = useState(false);
   const [keyCapturing, setKeyCapturing] = useState(false);
+  const [appVersion, setAppVersion] = useState<string>("");
   const progress = useModelDownloadProgress();
+
+  useEffect(() => {
+    getVersion().then(setAppVersion).catch(() => {});
+  }, []);
 
   const refreshModels = useCallback(() => {
     invoke<ModelEntry[]>("list_models").then(setModels).catch(() => {});
   }, []);
+
+  const reportModelFailure = useCallback(
+    async (err: unknown) => {
+      await showMessageDialog(String(err), {
+        title: t("settings.model_error_title"),
+        kind: "error",
+      });
+    },
+    [t],
+  );
 
   const refreshResolved = useCallback((model: string, engine: string) => {
     if (engine !== "local" || !model.trim()) {
@@ -120,7 +158,9 @@ export default function Settings() {
         setConfig(normalizeConfig(c));
         refreshResolved(c.model, c.engine);
       })
-      .catch(() => {});
+      .catch((e) => {
+        setMessage(String(e));
+      });
     refreshModels();
   }, [refreshModels, refreshResolved]);
 
@@ -154,9 +194,44 @@ export default function Settings() {
 
   const downloadAndUse = async (name: string) => {
     setDownloading(name);
-    setModelError("");
+    type FinishPayload = {
+      name: string;
+      success: boolean;
+      path?: string;
+      error?: string;
+    };
+    let resolveFinished!: (v: {
+      success: boolean;
+      path?: string;
+      error?: string;
+    }) => void;
+    const finished = new Promise<{
+      success: boolean;
+      path?: string;
+      error?: string;
+    }>((resolve) => {
+      resolveFinished = resolve;
+    });
+
+    const unlisten = await listen<FinishPayload>("model-download-finished", (event) => {
+      const p = event.payload;
+      if (p.name !== name) return;
+      resolveFinished({
+        success: p.success,
+        path: p.path,
+        error: p.error,
+      });
+    });
+
     try {
       await invoke("download_model", { name });
+      const result = await finished;
+
+      if (!result.success) {
+        await reportModelFailure(result.error ?? "download failed");
+        return;
+      }
+
       const updated = await invoke<ModelEntry[]>("list_models");
       setModels(updated);
       if (!config) return;
@@ -169,8 +244,9 @@ export default function Settings() {
       setMessage("saved");
       refreshResolved(name, "local");
     } catch (e) {
-      setModelError(String(e));
+      await reportModelFailure(e);
     } finally {
+      unlisten();
       setDownloading(null);
     }
   };
@@ -183,7 +259,7 @@ export default function Settings() {
         update("model", "");
       }
     } catch (e) {
-      setModelError(String(e));
+      await reportModelFailure(e);
     }
   };
 
@@ -238,10 +314,21 @@ export default function Settings() {
     }
   };
 
-  const downloadingProgress =
-    downloading && progress.name === downloading
-      ? Math.round((progress.downloaded / Math.max(progress.total, 1)) * 100)
-      : 0;
+  const downloadingProgress = (() => {
+    if (!downloading) return 0;
+    const meta = models.find((m) => m.name === downloading);
+    const total =
+      progress.name === downloading && progress.total > 0
+        ? progress.total
+        : meta?.sizeBytes ?? Math.max(progress.total, 1);
+    const downloaded = progress.name === downloading ? progress.downloaded : 0;
+    return Math.round((downloaded / Math.max(total, 1)) * 100);
+  })();
+
+  const showDownloadConnecting =
+    !!downloading &&
+    (progress.name !== downloading ||
+      (progress.name === downloading && progress.downloaded === 0));
 
   if (!config) {
     return <div className="loading-container">{t("settings.loading")}</div>;
@@ -383,7 +470,11 @@ export default function Settings() {
                                 style={{ width: `${downloadingProgress}%` }}
                               />
                             </div>
-                            <span className="progress-text">{downloadingProgress}%</span>
+                            <span className="progress-text">
+                              {showDownloadConnecting
+                                ? t("settings.model_download_connecting")
+                                : `${downloadingProgress}%`}
+                            </span>
                           </div>
                         ) : (
                           <button
@@ -401,8 +492,6 @@ export default function Settings() {
                   );
                 })}
               </div>
-              {modelError && <p className="input-error">{modelError}</p>}
-
               <button
                 type="button"
                 className="settings-advanced-toggle"
@@ -449,7 +538,7 @@ export default function Settings() {
                     className="settings-input"
                     value={config.transcriberApiKey}
                     onChange={(e) => update("transcriberApiKey", e.target.value)}
-                    placeholder="sk-..."
+                    placeholder={config.hasTranscriberApiKey ? "sk-***" : "sk-..."}
                   />
                 </div>
               </div>
@@ -490,14 +579,10 @@ export default function Settings() {
           <p className="settings-section-lead">{t("settings.recording_lead")}</p>
           <div className="settings-field">
             <span className="settings-field-label-text">{t("settings.key_name")}</span>
-            <div className="settings-field-control">
+            <div className="settings-field-control settings-field-control--trigger-key">
               <select
                 className="settings-select"
-                value={
-                  KEY_PRESETS.some((p) => p.value === config.keyName)
-                    ? config.keyName
-                    : "__custom__"
-                }
+                value={presetSelectValue(config.keyName)}
                 onChange={(e) => {
                   if (e.target.value === "__custom__") return;
                   setConfig((prev) =>
@@ -519,9 +604,15 @@ export default function Settings() {
                 ))}
                 <option value="__custom__">{t("settings.key_custom")}</option>
               </select>
+              {!isPresetKeyName(config.keyName) && (
+                <div className="settings-key-binding-readout">
+                  <span className="settings-muted">{t("settings.key_binding_active")}</span>
+                  <code className="settings-key-binding-code">{config.keyName}</code>
+                </div>
+              )}
             </div>
           </div>
-          {!KEY_PRESETS.some((p) => p.value === config.keyName) && (
+          {!isPresetKeyName(config.keyName) && config.linuxEvdevCode == null && config.windowsVk == null && (
             <div className="settings-field">
               <span className="settings-field-label-text">{t("settings.key_custom_value")}</span>
               <div className="settings-field-control">
@@ -623,7 +714,7 @@ export default function Settings() {
                     className="settings-input"
                     value={config.polisherApiKey}
                     onChange={(e) => update("polisherApiKey", e.target.value)}
-                    placeholder="sk-..."
+                    placeholder={config.hasPolisherApiKey ? "sk-***" : "sk-..."}
                   />
                 </div>
               </div>
@@ -687,7 +778,7 @@ export default function Settings() {
           <div className="settings-field">
             <span className="settings-field-label-text">{t("settings.version")}</span>
             <div className="settings-field-control">
-              <span className="settings-muted">1.4.0</span>
+              <span className="settings-muted">{appVersion || "…"}</span>
             </div>
           </div>
         </section>

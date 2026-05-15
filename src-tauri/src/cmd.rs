@@ -5,80 +5,50 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-use serde::Serialize;
-use tauri::{AppHandle, Emitter, Manager, State};
+use serde::{Deserialize, Deserializer, Serialize};
+use tauri::{AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, State};
 
 use crate::{
-    config, key_listener, output, pipeline, polisher, recorder, state_machine, transcriber,
-    AppState,
+    config, history, key_listener, output, pipeline, polisher, recorder, state_machine,
+    transcriber, AppState,
 };
 
 const OVERLAY_RECORDING_W: f64 = 200.0;
 const OVERLAY_RECORDING_H: f64 = 48.0;
+const OVERLAY_PROCESSING_W: f64 = 268.0;
+const OVERLAY_PROCESSING_H: f64 = 56.0;
 const OVERLAY_RESULT_W: f64 = 520.0;
 const OVERLAY_RESULT_H: f64 = 100.0;
 const OVERLAY_BOTTOM_OFFSET: f64 = 80.0;
 
-#[cfg(target_os = "windows")]
-#[link(name = "user32")]
-extern "system" {
-    fn GetAsyncKeyState(vKey: i32) -> i16;
-}
-
-#[cfg(target_os = "windows")]
-fn is_key_pressed(vk: i32) -> bool {
-    // SAFETY: GetAsyncKeyState is a thread-safe Win32 API. The vKey parameter
-    // is a valid virtual-key code produced by resolve_vk_code. No pointers or
-    // mutable state are involved.
-    unsafe { (GetAsyncKeyState(vk) as u16 & 0x8000) != 0 }
-}
-
-fn resolve_vk_code(key_name: &str) -> Result<i32, String> {
-    match key_name {
-        "ISO_Level3_Shift" | "Alt_R" | "RightAlt" => Ok(0xA5),
-        "Alt_L" | "LeftAlt" => Ok(0xA4),
-        "Super_L" | "Win_L" => Ok(0x5B),
-        "Super_R" | "Win_R" => Ok(0x5C),
-        "Control_R" => Ok(0xA3),
-        "Shift_R" => Ok(0xA1),
-        _ => Err(format!("unsupported key: {}", key_name)),
-    }
-}
-
-fn resolve_vk_for_pipeline(cfg: &config::KeyListenerConfig) -> Result<i32, String> {
-    if let Some(vk) = cfg.windows_vk {
-        return Ok(vk);
-    }
-    resolve_vk_code(&cfg.key_name)
-}
-
-fn apply_json_opt_u16(target: &mut Option<u16>, patch: Option<serde_json::Value>) {
+fn apply_nested_opt_u16(target: &mut Option<u16>, patch: Option<Option<u16>>) {
     match patch {
         None => {}
-        Some(serde_json::Value::Null) => *target = None,
-        Some(serde_json::Value::Number(n)) => {
-            if let Some(u) = n.as_u64() {
-                if u <= u16::MAX as u64 {
-                    *target = Some(u as u16);
-                }
-            }
-        }
-        _ => {}
+        Some(None) => *target = None,
+        Some(Some(v)) => *target = Some(v),
     }
 }
 
-fn apply_json_opt_i32(target: &mut Option<i32>, patch: Option<serde_json::Value>) {
-    match patch {
-        None => {}
-        Some(serde_json::Value::Null) => *target = None,
-        Some(serde_json::Value::Number(n)) => {
-            if let Some(v) = n.as_i64() {
-                if v >= i32::MIN as i64 && v <= i32::MAX as i64 {
-                    *target = Some(v as i32);
-                }
+/// 区分 JSON 中「字段缺失」与「`null`」：前者不修改配置，后者清除已保存的 evdev 键码。
+fn deserialize_opt_patch_u16<'de, D>(deserializer: D) -> Result<Option<Option<u16>>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let v = serde_json::Value::deserialize(deserializer)?;
+    match v {
+        serde_json::Value::Null => Ok(Some(None)),
+        serde_json::Value::Number(n) => {
+            let u = n
+                .as_u64()
+                .ok_or_else(|| serde::de::Error::custom("linux_evdev_code: expected number"))?;
+            if u > u16::MAX as u64 {
+                return Err(serde::de::Error::custom("linux_evdev_code out of range"));
             }
+            Ok(Some(Some(u as u16)))
         }
-        _ => {}
+        _ => Err(serde::de::Error::custom(
+            "linux_evdev_code: expected null or number",
+        )),
     }
 }
 
@@ -102,55 +72,16 @@ fn emit_pipeline_status(
     }
 }
 
-/// Parse monitor geometry from xrandr --listmonitors output.
-/// Format: " <idx>: +[*]<name> <W>/<pw>x<H>/<ph>+<X>+<Y>  <output>"
-fn parse_monitor_geom(line: &str) -> Option<(f64, f64, f64, f64)> {
-    // Find the geometry part: look for pattern like "6144/697x3456/392+3840+0"
-    let line = line.trim_start();
-    // Skip "N: +*name " prefix — find the geometry after the second space
-    let mut spaces = 0;
-    let mut geom_start = 0;
-    for (i, c) in line.char_indices() {
-        if c == ' ' {
-            spaces += 1;
-            if spaces == 2 {
-                geom_start = i + 1;
-                break;
-            }
-        }
-    }
-    if geom_start == 0 {
-        return None;
-    }
-
-    // Find end of geometry (next space or end of line)
-    let geom_end = line[geom_start..]
-        .find(' ')
-        .map(|p| geom_start + p)
-        .unwrap_or(line.len());
-    let geom = &line[geom_start..geom_end];
-
-    // Parse "6144/697x3456/392+3840+0"
-    let (w_part, rest) = geom.split_once('x')?;
-    let w: f64 = w_part.split('/').next()?.parse().ok()?;
-
-    // rest = "3456/392+3840+0"
-    let parts: Vec<&str> = rest.split('+').collect();
-    if parts.len() < 3 {
-        return None;
-    }
-    let h: f64 = parts[0].split('/').next()?.parse().ok()?;
-    let x: f64 = parts[1].parse().ok()?;
-    let y: f64 = parts[2].parse().ok()?;
-
-    Some((x, y, w, h))
+fn emit_transcription_progress(app: &tauri::AppHandle, phase: &str, fraction: Option<f32>) {
+    let _ = app.emit(
+        "transcription-progress",
+        serde_json::json!({ "phase": phase, "fraction": fraction }),
+    );
 }
 
-/// Get monitor info for the screen where the mouse cursor is.
-/// Returns (monitor_x, monitor_y, monitor_width, monitor_height).
-#[cfg(target_os = "linux")]
-fn get_focused_monitor_info() -> Option<(f64, f64, f64, f64)> {
-    // Use mouse position to determine which monitor the user is on
+/// Root-window mouse coordinates from `xdotool` (physical pixels).
+#[allow(dead_code)]
+fn mouse_position_physical() -> Option<(i32, i32)> {
     let mouse_out = std::process::Command::new("xdotool")
         .args(["getmouselocation", "--shell"])
         .output()
@@ -172,50 +103,112 @@ fn get_focused_monitor_info() -> Option<(f64, f64, f64, f64)> {
         }
     }
 
-    tracing::info!("mouse position: ({}, {})", mouse_x, mouse_y);
-
-    // Parse xrandr --listmonitors for reliable monitor geometry
-    let xrandr = std::process::Command::new("xrandr")
-        .args(["--listmonitors"])
-        .output()
-        .ok()?;
-
-    if !xrandr.status.success() {
-        return None;
-    }
-
-    let xrandr_str = String::from_utf8_lossy(&xrandr.stdout);
-
-    for line in xrandr_str.lines() {
-        if let Some((m_x, m_y, m_w, m_h)) = parse_monitor_geom(line) {
-            tracing::info!("monitor: x={}, y={}, w={}, h={}", m_x, m_y, m_w, m_h);
-            if mouse_x >= m_x as i32
-                && mouse_x < (m_x + m_w) as i32
-                && mouse_y >= m_y as i32
-                && mouse_y < (m_y + m_h) as i32
-            {
-                tracing::info!("matched monitor at ({}, {})", m_x, m_y);
-                return Some((m_x, m_y, m_w, m_h));
-            }
-        }
-    }
-
-    tracing::warn!("no monitor matched for mouse ({}, {})", mouse_x, mouse_y);
-    None
+    tracing::debug!("mouse position (physical): ({}, {})", mouse_x, mouse_y);
+    Some((mouse_x, mouse_y))
 }
 
-#[cfg(target_os = "windows")]
-fn get_focused_monitor_info() -> Option<(f64, f64, f64, f64)> {
-    None
+/// Get the primary (or first) monitor geometry from `xrandr` in X11
+/// device coordinates. Returns (x, y, width, height).
+fn xrandr_primary_monitor() -> Option<(i32, i32, i32, i32)> {
+    let output = std::process::Command::new("xrandr").output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let text = String::from_utf8_lossy(&output.stdout);
+    let monitors = parse_xrandr_geometry(&text);
+
+    // Prefer the explicitly-marked primary monitor.
+    monitors
+        .iter()
+        .find(|m| m.4)
+        .map(|m| (m.0, m.1, m.2, m.3))
+        .or_else(|| monitors.into_iter().next().map(|m| (m.0, m.1, m.2, m.3)))
+}
+
+fn parse_xrandr_geometry(output: &str) -> Vec<(i32, i32, i32, i32, bool)> {
+    let mut monitors = Vec::new();
+    for line in output.lines() {
+        // Match lines like:
+        //   DP-1 connected primary 1920x1080+0+0 ...
+        //   HDMI-1 connected 1920x1080+1920+0 ...
+        if !line.contains(" connected ") {
+            continue;
+        }
+        let is_primary = line.contains(" connected primary ");
+        let after_conn = if is_primary {
+            line.split(" connected primary ").nth(1)
+        } else {
+            line.split(" connected ").nth(1)
+        };
+        let after_conn = match after_conn {
+            Some(s) => s,
+            None => continue,
+        };
+        // Find the geometry string "WxH+X+Y"
+        let end = after_conn.find(' ').unwrap_or(after_conn.len());
+        let geo = &after_conn[..end];
+
+        // Parse WxH+X+Y
+        let Some(x_idx) = geo.find('x') else { continue };
+        let Some(plus1) = geo.find('+') else { continue };
+        let Some(plus2) = geo.rfind('+') else {
+            continue;
+        };
+        if plus1 == plus2 {
+            continue; // only one '+'
+        }
+
+        let w = geo[..x_idx].parse::<i32>().unwrap_or(0);
+        let h = geo[x_idx + 1..plus1].parse::<i32>().unwrap_or(0);
+        let x = geo[plus1 + 1..plus2].parse::<i32>().unwrap_or(0);
+        let y = geo[plus2 + 1..].parse::<i32>().unwrap_or(0);
+
+        if w > 0 && h > 0 {
+            monitors.push((x, y, w, h, is_primary));
+        }
+    }
+    monitors
+}
+
+/// Position overlay on the **primary** monitor only.
+fn position_overlay_linux(
+    overlay: &tauri::WebviewWindow,
+    width: f64,
+    height: f64,
+) -> Result<(), String> {
+    let _ = overlay.set_size(LogicalSize::new(width, height));
+
+    let Some((mx, my, mw, mh)) = xrandr_primary_monitor() else {
+        return Err("xrandr returned no primary monitor".into());
+    };
+
+    let scale = overlay.scale_factor().map_err(|e| e.to_string())?;
+    let phys_w = (width * scale).round() as i32;
+    let phys_h = (height * scale).round() as i32;
+    let offset_phys = (OVERLAY_BOTTOM_OFFSET * scale).round() as i32;
+
+    let x = mx + (mw - phys_w) / 2;
+    let y = my + mh - phys_h - offset_phys;
+
+    tracing::debug!(
+        "linux overlay pos: primary=({},{},{},{}) pos=({},{}) scale={}",
+        mx,
+        my,
+        mw,
+        mh,
+        x,
+        y,
+        scale
+    );
+
+    overlay
+        .set_position(PhysicalPosition::new(x, y))
+        .map_err(|e| e.to_string())
 }
 
 fn position_overlay(overlay: &tauri::WebviewWindow, width: f64, height: f64) {
-    let _ = overlay.set_size(tauri::LogicalSize::new(width, height));
-
-    if let Some((screen_x, screen_y, screen_w, screen_h)) = get_focused_monitor_info() {
-        let x = screen_x + (screen_w - width) / 2.0;
-        let y = screen_y + screen_h - height - OVERLAY_BOTTOM_OFFSET;
-        let _ = overlay.set_position(tauri::LogicalPosition::new(x, y));
+    if let Err(e) = position_overlay_linux(overlay, width, height) {
+        tracing::warn!("overlay positioning failed: {}", e);
     }
 }
 
@@ -224,7 +217,6 @@ fn position_overlay(overlay: &tauri::WebviewWindow, width: f64, height: f64) {
 pub struct ConfigResponse {
     pub key_name: String,
     pub linux_evdev_code: Option<u16>,
-    pub windows_vk: Option<i32>,
     pub language: String,
     pub engine: String,
     pub model: String,
@@ -233,8 +225,8 @@ pub struct ConfigResponse {
     pub polish_model: String,
     pub polish_api_base_url: String,
     pub gui_language: String,
-    pub transcriber_api_key: String,
-    pub polisher_api_key: String,
+    pub has_transcriber_api_key: bool,
+    pub has_polisher_api_key: bool,
 }
 
 #[tauri::command]
@@ -243,7 +235,6 @@ pub async fn get_config(state: State<'_, AppState>) -> Result<ConfigResponse, St
     Ok(ConfigResponse {
         key_name: cfg.key_listener.key_name.clone(),
         linux_evdev_code: cfg.key_listener.linux_evdev_code,
-        windows_vk: cfg.key_listener.windows_vk,
         language: cfg.transcriber.language.clone(),
         engine: cfg.transcriber.engine.clone(),
         model: cfg.transcriber.model.clone(),
@@ -252,19 +243,18 @@ pub async fn get_config(state: State<'_, AppState>) -> Result<ConfigResponse, St
         polish_model: cfg.polisher.model.clone(),
         polish_api_base_url: cfg.polisher.api_base_url.clone(),
         gui_language: cfg.gui.language.clone(),
-        transcriber_api_key: cfg.transcriber.api_key.clone(),
-        polisher_api_key: cfg.polisher.api_key.clone(),
+        has_transcriber_api_key: !cfg.transcriber.api_key.trim().is_empty(),
+        has_polisher_api_key: !cfg.polisher.api_key.trim().is_empty(),
     })
 }
 
-#[derive(serde::Deserialize)]
+#[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SaveConfigRequest {
     pub key_name: Option<String>,
-    #[serde(default)]
-    pub linux_evdev_code: Option<serde_json::Value>,
-    #[serde(default)]
-    pub windows_vk: Option<serde_json::Value>,
+    /// `None` = 请求中未带此字段（不修改）；`Some(None)` = JSON `null`（清除）；`Some(Some)` = 设置键码。
+    #[serde(default, deserialize_with = "deserialize_opt_patch_u16")]
+    pub linux_evdev_code: Option<Option<u16>>,
     pub language: Option<String>,
     pub engine: Option<String>,
     pub model: Option<String>,
@@ -333,8 +323,7 @@ pub async fn save_config(
     if let Some(v) = req.key_name {
         cfg.key_listener.key_name = v;
     }
-    apply_json_opt_u16(&mut cfg.key_listener.linux_evdev_code, req.linux_evdev_code);
-    apply_json_opt_i32(&mut cfg.key_listener.windows_vk, req.windows_vk);
+    apply_nested_opt_u16(&mut cfg.key_listener.linux_evdev_code, req.linux_evdev_code);
     if let Some(v) = req.language {
         cfg.transcriber.language = v;
     }
@@ -466,22 +455,6 @@ pub async fn run_pipeline(
     mut stop_rx: tokio::sync::oneshot::Receiver<()>,
     pipeline_status: Arc<std::sync::RwLock<String>>,
 ) {
-    let vk_code = match resolve_vk_for_pipeline(&cfg.key_listener) {
-        Ok(vk) => vk,
-        Err(e) => {
-            tracing::error!(error = %e, "failed to resolve key code");
-            let _ = app.emit("pipeline-error", format!("key resolve: {}", e));
-            return;
-        }
-    };
-    tracing::info!(
-        "resolved key '{}' to VK code {}",
-        cfg.key_listener.key_name,
-        vk_code
-    );
-
-    let poll_interval_ms = cfg.key_listener.poll_interval_ms;
-
     // Validate recorder / transcriber / polisher before starting global key capture so errors
     // are visible immediately and we do not leave a key listener running without a main loop.
     let mut recorder =
@@ -558,27 +531,10 @@ pub async fn run_pipeline(
 
     let (raw_key_tx, raw_key_rx) = tokio::sync::mpsc::unbounded_channel();
     let poll_running = Arc::new(AtomicBool::new(true));
+    let poll_interval_ms = cfg.key_listener.poll_interval_ms;
 
-    #[cfg(target_os = "windows")]
-    {
-        let poll_running = poll_running.clone();
-        std::thread::spawn(move || {
-            let mut was_down = false;
-            while poll_running.load(Ordering::SeqCst) {
-                let is_down = is_key_pressed(vk_code);
-                if is_down && !was_down {
-                    let _ = raw_key_tx.send(key_listener::KeyEvent { pressed: true });
-                } else if !is_down && was_down {
-                    let _ = raw_key_tx.send(key_listener::KeyEvent { pressed: false });
-                }
-                was_down = is_down;
-                std::thread::sleep(std::time::Duration::from_millis(poll_interval_ms));
-            }
-        });
-    }
-
-    #[cfg(not(target_os = "windows"))]
-    {
+    // Must keep `PlatformListener` alive for the whole pipeline: its `Drop` stops xinput/evtest.
+    let _linux_key_listener = {
         let mut listener = match key_listener::PlatformListener::new(&cfg.key_listener) {
             Ok(l) => l,
             Err(e) => {
@@ -615,9 +571,9 @@ pub async fn run_pipeline(
                     }
                 }
             }
-            drop(listener);
         });
-    }
+        listener
+    };
 
     let (key_tx, key_rx) = tokio::sync::mpsc::unbounded_channel();
     let debounce_window = cfg.key_listener.debounce_window();
@@ -659,7 +615,7 @@ pub async fn run_pipeline(
                         }
                         emit_pipeline_status(&app, &pipeline_status, "processing");
                         if let Some(overlay) = app.get_webview_window("overlay") {
-                            position_overlay(&overlay, OVERLAY_RECORDING_W, OVERLAY_RECORDING_H);
+                            position_overlay(&overlay, OVERLAY_PROCESSING_W, OVERLAY_PROCESSING_H);
                             let _ = overlay.show();
                         }
                         let wav_data = match recorder.stop() {
@@ -681,18 +637,24 @@ pub async fn run_pipeline(
                         let pipeline_status = pipeline_status.clone();
 
                         tokio::spawn(async move {
+                            let app_progress = app.clone();
                             match pipeline::process_audio_core(
                                 &transcriber,
                                 &formatter,
                                 &wav_data,
                                 polish_level,
+                                |phase, fraction| {
+                                    emit_transcription_progress(&app_progress, phase, fraction);
+                                },
                             )
                             .await
                             {
                                 Ok(output) => {
-                                    if !output.text.is_empty() {
+                                    // 以原始转写为准：润色侧可能返回空字符串，此时仍应展示/剪贴/入库。
+                                    if !output.raw_text.is_empty() {
                                         let text_to_use = if cfg.output.prefer_polished
                                             && !output.polish_failed
+                                            && !output.text.trim().is_empty()
                                         {
                                             &output.text
                                         } else {
@@ -700,8 +662,34 @@ pub async fn run_pipeline(
                                         };
                                         let display_text = text_to_use.clone();
 
+                                        let hist_path =
+                                            app.state::<AppState>().history_path.clone();
+                                        let raw_hist = output.raw_text.clone();
+                                        let text_hist = display_text.clone();
+                                        match tokio::task::spawn_blocking(move || {
+                                            history::append_entry(&hist_path, raw_hist, text_hist)
+                                        })
+                                        .await
+                                        {
+                                            Ok(Ok(_)) => {
+                                                let _ = app.emit("history-updated", ());
+                                            }
+                                            Ok(Err(e)) => {
+                                                tracing::warn!(
+                                                    error = %e,
+                                                    "failed to append transcription history"
+                                                );
+                                            }
+                                            Err(e) => {
+                                                tracing::warn!(
+                                                    error = %e,
+                                                    "history append task failed"
+                                                );
+                                            }
+                                        }
+
                                         let _ =
-                                            output::write_clipboard(text_to_use).await;
+                                            output::write_clipboard(&display_text).await;
 
                                         emit_pipeline_status(&app, &pipeline_status, "done");
                                         if let Some(overlay) =
@@ -772,25 +760,75 @@ pub async fn list_models() -> Result<Vec<ModelEntry>, String> {
     Ok(entries)
 }
 
+/// 在后台下载模型并立即返回，避免 GUI 长时间占用 IPC（大模型可达数 GB）。
+/// 进度见 `model-download-progress`，结束见 `model-download-finished`（`success` / `error` / `path`）。
 #[tauri::command]
-pub async fn download_model(app: tauri::AppHandle, name: String) -> Result<String, String> {
-    crate::model::download_with_progress(&name, {
-        let app = app.clone();
-        let name_clone = name.clone();
-        move |downloaded, total| {
-            let _ = app.emit(
-                "model-download-progress",
-                serde_json::json!({
-                    "name": name_clone,
-                    "downloaded": downloaded,
-                    "total": total,
-                }),
-            );
+pub async fn download_model(app: tauri::AppHandle, name: String) -> Result<(), String> {
+    if crate::model::models_info()
+        .iter()
+        .all(|m| m.name != name.as_str())
+    {
+        return Err(format!("unknown model: {}", name));
+    }
+
+    if let Some(info) = crate::model::models_info()
+        .iter()
+        .find(|m| m.name == name.as_str())
+    {
+        let _ = app.emit(
+            "model-download-progress",
+            serde_json::json!({
+                "name": name,
+                "downloaded": 0_u64,
+                "total": info.size_bytes,
+            }),
+        );
+    }
+
+    let app_task = app.clone();
+    let name_task = name.clone();
+    tauri::async_runtime::spawn(async move {
+        let result = crate::model::download_with_progress(&name_task, {
+            let app = app_task.clone();
+            let name_clone = name_task.clone();
+            move |downloaded, total| {
+                let _ = app.emit(
+                    "model-download-progress",
+                    serde_json::json!({
+                        "name": name_clone,
+                        "downloaded": downloaded,
+                        "total": total,
+                    }),
+                );
+            }
+        })
+        .await;
+
+        match result {
+            Ok(path) => {
+                let _ = app_task.emit(
+                    "model-download-finished",
+                    serde_json::json!({
+                        "name": name_task,
+                        "success": true,
+                        "path": path.to_string_lossy(),
+                    }),
+                );
+            }
+            Err(e) => {
+                let _ = app_task.emit(
+                    "model-download-finished",
+                    serde_json::json!({
+                        "name": name_task,
+                        "success": false,
+                        "error": e.to_string(),
+                    }),
+                );
+            }
         }
-    })
-    .await
-    .map(|p| p.to_string_lossy().to_string())
-    .map_err(|e| e.to_string())
+    });
+
+    Ok(())
 }
 
 #[tauri::command]
@@ -809,4 +847,109 @@ pub async fn delete_model(name: String) -> Result<(), String> {
 #[tauri::command]
 pub async fn resolve_model(model: String) -> Result<Option<String>, String> {
     Ok(crate::model::resolve_model_path(&model).map(|p| p.to_string_lossy().to_string()))
+}
+
+#[tauri::command]
+pub async fn list_history(
+    state: State<'_, AppState>,
+) -> Result<Vec<history::HistoryEntry>, String> {
+    history::list_entries(&state.history_path).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn delete_history_entries(
+    state: State<'_, AppState>,
+    ids: Vec<String>,
+) -> Result<usize, String> {
+    history::delete_entries(&state.history_path, &ids).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn clear_history(state: State<'_, AppState>) -> Result<(), String> {
+    history::clear_all(&state.history_path).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn polish_history_entry(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<history::HistoryEntry, String> {
+    let history_path = state.history_path.clone();
+    let cfg = state.config.lock().await.clone();
+
+    let entry = tokio::task::spawn_blocking({
+        let p = history_path.clone();
+        let id = id.clone();
+        move || history::get_entry(&p, &id).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+
+    let entry = entry.ok_or_else(|| "history entry not found".to_string())?;
+
+    let polish_level = polisher::PolishLevel::from_str(&cfg.polisher.level).unwrap_or_else(|_| {
+        tracing::warn!("invalid polish level, using medium");
+        polisher::PolishLevel::Medium
+    });
+    let polisher_protocol =
+        polisher::ApiProtocol::from_str(&cfg.polisher.protocol).unwrap_or_else(|e| {
+            tracing::warn!(error = %e, "invalid polisher protocol, defaulting to openai");
+            polisher::ApiProtocol::OpenAi
+        });
+    let formatter = polisher::LLMFormatter::with_config(
+        cfg.polisher.api_key.clone(),
+        cfg.polisher.api_base_url.clone(),
+        cfg.polisher.model.clone(),
+        cfg.polisher.timeout(),
+        cfg.polisher.max_tokens,
+        polisher_protocol,
+        cfg.polisher.temperature,
+        cfg.transcriber.language.clone(),
+        cfg.polisher.system_prompt.clone(),
+    )
+    .map_err(|e| e.to_string())?;
+
+    let source = entry.raw_text.clone();
+    let polished = formatter
+        .polish(&source, polish_level)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let history_path_write = history_path;
+    let out = tokio::task::spawn_blocking(move || {
+        history::update_entry_text(&history_path_write, &id, polished)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string())?;
+
+    let _ = app.emit("history-updated", ());
+    Ok(out)
+}
+
+#[cfg(test)]
+mod save_config_request_tests {
+    use super::SaveConfigRequest;
+
+    #[test]
+    fn linux_evdev_json_null_clears_stored_code() {
+        let j = r#"{"linuxEvdevCode":null}"#;
+        let req: SaveConfigRequest = serde_json::from_str(j).unwrap();
+        assert_eq!(req.linux_evdev_code, Some(None));
+    }
+
+    #[test]
+    fn linux_evdev_missing_field_means_no_patch() {
+        let j = r#"{}"#;
+        let req: SaveConfigRequest = serde_json::from_str(j).unwrap();
+        assert!(req.linux_evdev_code.is_none());
+    }
+
+    #[test]
+    fn linux_evdev_number_sets() {
+        let j = r#"{"linuxEvdevCode":100}"#;
+        let req: SaveConfigRequest = serde_json::from_str(j).unwrap();
+        assert_eq!(req.linux_evdev_code, Some(Some(100)));
+    }
 }

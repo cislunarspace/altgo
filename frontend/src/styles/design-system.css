@@ -17,6 +17,8 @@ html {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
+  /* 与透明无边框窗口配合：四角由 #root/.layout 着色，此处透明才能看到圆角 */
+  background: transparent;
 }
 
 [data-theme="light"] {
@@ -32,7 +34,7 @@ body {
   font-size: var(--text-base);
   line-height: var(--leading-normal);
   color: var(--color-text);
-  background: var(--color-bg);
+  background: transparent;
   overflow: hidden;
   user-select: none;
 }
@@ -41,6 +43,12 @@ body {
   height: 100vh;
   display: flex;
   flex-direction: column;
+  border-radius: var(--radius-2xl);
+  overflow: hidden;
+}
+
+#root.maximized {
+  border-radius: 0;
 }
 
 /* ============================================

@@ -2,12 +2,12 @@
 # 复制到 ~/.config/altgo/altgo.toml 后修改
 
 [key_listener]
-# 触发键的 X11 keysym：默认 ISO_Level3_Shift = 键盘右侧 Alt（AltGr），不是左侧 Alt
+# 触发键的 X11 keysym：默认 Alt_R = 右侧 Alt（与 xmodmap 中 keysym 名一致）
 # 若要用左侧 Alt，改为：key_name = "Alt_L"
 # 以下为可选，通常由设置页「按下以设置」自动写入：
 # linux_evdev_code = 100   # Linux Wayland/evtest 使用的 evdev 键码（十进制）
 # windows_vk = 165         # Windows 虚拟键码（十进制，如 165 = 0xA5 右 Alt）
-key_name = "ISO_Level3_Shift"
+key_name = "Alt_R"
 long_press_threshold_ms = 200       # 长按/短按区分阈值（毫秒）
 double_click_interval_ms = 300      # 双击判定间隔（毫秒）
 min_press_duration_ms = 100         # 最短按下时长（毫秒），过滤 IME 抖动
@@ -37,7 +37,7 @@ level = "none"                      # 润色级别："none"（禁用）、"light
 max_tokens = 1024                   # LLM 响应的最大 token 数
 timeout_seconds = 60
 temperature = 0.3                   # LLM temperature（0.0-2.0）
-system_prompt = ""                  # 自定义 system prompt，为空则使用内置多语言 prompt
+system_prompt = ""                  # 自定义则完全替换内置；为空时按 [transcriber] language 生成（中文默认输出简体中文，勿繁体）
 
 [output]
 enable_notify = true

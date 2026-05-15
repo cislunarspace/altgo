@@ -1,21 +1,12 @@
-//! 短时捕获用户按下的物理键，用于设置激活录音键（Linux evdev / Windows VK）。
+//! 短时捕获用户按下的物理键，用于设置激活录音键（Linux evdev）。
 
 use serde::Serialize;
 
-#[cfg(target_os = "linux")]
 use std::io::BufRead;
-#[cfg(target_os = "linux")]
 use std::path::PathBuf;
-#[cfg(target_os = "linux")]
 use std::process::{Command, Stdio};
-#[cfg(target_os = "linux")]
 use std::sync::mpsc;
-#[cfg(target_os = "linux")]
 use std::thread;
-#[cfg(target_os = "linux")]
-use std::time::{Duration, Instant};
-
-#[cfg(target_os = "windows")]
 use std::time::{Duration, Instant};
 
 #[derive(Debug, Serialize)]
@@ -24,11 +15,8 @@ pub struct CaptureActivationResponse {
     pub key_name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub linux_evdev_code: Option<u16>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub windows_vk: Option<i32>,
 }
 
-#[cfg(target_os = "linux")]
 fn parse_ev_key_line(line: &str) -> Option<(u16, i32)> {
     if !line.contains("EV_KEY") {
         return None;
@@ -46,7 +34,6 @@ fn parse_ev_key_line(line: &str) -> Option<(u16, i32)> {
 }
 
 /// 将常见 evdev 码映射为 `xmodmap -pke` 中可能出现的 keysym 名称；未知则 `evdev_<code>`。
-#[cfg(target_os = "linux")]
 pub fn evdev_code_to_keysym_name(code: u16) -> String {
     match code {
         1 => "Escape".to_string(),
@@ -145,7 +132,6 @@ pub fn evdev_code_to_keysym_name(code: u16) -> String {
     }
 }
 
-#[cfg(target_os = "linux")]
 fn capture_evdev_press(timeout: Duration) -> Result<u16, String> {
     let devices = crate::key_listener::list_keyboard_devices()
         .map_err(|e| format!("keyboard devices: {}", e))?;
@@ -193,96 +179,11 @@ fn capture_evdev_press(timeout: Duration) -> Result<u16, String> {
     })
 }
 
-#[cfg(target_os = "linux")]
 pub fn capture_activation_key_blocking() -> Result<CaptureActivationResponse, String> {
     let code = capture_evdev_press(Duration::from_secs(12))?;
     let key_name = evdev_code_to_keysym_name(code);
     Ok(CaptureActivationResponse {
         key_name,
         linux_evdev_code: Some(code),
-        windows_vk: None,
     })
-}
-
-#[cfg(target_os = "windows")]
-fn vk_to_display_name(vk: i32) -> String {
-    match vk {
-        0xA5 => "ISO_Level3_Shift".to_string(),
-        0xA4 => "Alt_L".to_string(),
-        0x5B => "Super_L".to_string(),
-        0x5C => "Super_R".to_string(),
-        0xA3 => "Control_R".to_string(),
-        0xA1 => "Shift_R".to_string(),
-        0xA0 => "Shift_L".to_string(),
-        0xA2 => "Control_L".to_string(),
-        0x20 => "space".to_string(),
-        0x08 => "Back".to_string(),
-        0x09 => "Tab".to_string(),
-        0x0D => "Return".to_string(),
-        0x1B => "Escape".to_string(),
-        0x2D => "Insert".to_string(),
-        0x2E => "Delete".to_string(),
-        0x21 => "Prior".to_string(),
-        0x22 => "Next".to_string(),
-        0x23 => "End".to_string(),
-        0x24 => "Home".to_string(),
-        0x25 => "Left".to_string(),
-        0x26 => "Up".to_string(),
-        0x27 => "Right".to_string(),
-        0x28 => "Down".to_string(),
-        0x30..=0x39 => format!("{}", vk - 0x30),
-        0x41..=0x5A => {
-            let off = (vk - 0x41) as u8;
-            let c = (b'a' + off) as char;
-            c.to_string()
-        }
-        0x70..=0x7B => format!("F{}", vk - 0x70 + 1),
-        _ => format!("VK_0x{vk:02X}"),
-    }
-}
-
-#[cfg(target_os = "windows")]
-pub fn capture_activation_key_blocking() -> Result<CaptureActivationResponse, String> {
-    #[link(name = "user32")]
-    extern "system" {
-        fn GetAsyncKeyState(vKey: i32) -> i16;
-    }
-    fn down(vk: i32) -> bool {
-        unsafe { (GetAsyncKeyState(vk) as u16 & 0x8000) != 0 }
-    }
-
-    let timeout = Duration::from_secs(12);
-    let start = Instant::now();
-    let mut prev = vec![false; 256];
-    for vk in 0..256i32 {
-        if vk <= 0x06 {
-            continue;
-        }
-        prev[vk as usize] = down(vk);
-    }
-
-    while start.elapsed() < timeout {
-        for vk in 0..256i32 {
-            if vk <= 0x06 {
-                continue;
-            }
-            let now = down(vk);
-            if now && !prev[vk as usize] {
-                let name = vk_to_display_name(vk);
-                return Ok(CaptureActivationResponse {
-                    key_name: name,
-                    linux_evdev_code: None,
-                    windows_vk: Some(vk),
-                });
-            }
-            prev[vk as usize] = now;
-        }
-        std::thread::sleep(Duration::from_millis(15));
-    }
-    Err("超时：未检测到按键".into())
-}
-
-#[cfg(not(any(target_os = "linux", target_os = "windows")))]
-pub fn capture_activation_key_blocking() -> Result<CaptureActivationResponse, String> {
-    Err("不支持的平台".into())
 }

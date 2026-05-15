@@ -29,6 +29,9 @@ DEPS_DIR="${PROJECT_ROOT}/target/deps"
 BIN_DIR="${DEPS_DIR}/bin"
 BUILD_APPIMAGE_DIR="${PROJECT_ROOT}/target/appimage-build"
 
+# Source unified version constants
+source "${SCRIPT_DIR}/../scripts/versions.sh"
+
 echo "=== AppImage build for ${ARCH} ==="
 echo "VERSION=${VERSION}"
 echo "PROJECT_ROOT=${PROJECT_ROOT}"
@@ -44,7 +47,7 @@ fi
 mkdir -p "${BIN_DIR}" "${BUILD_APPIMAGE_DIR}"
 
 # ─── Step 1: Build whisper.cpp from source ────────────────────────────────────
-WHISPER_VERSION="1.7.5"
+WHISPER_VERSION="${WHISPER_CPP_VERSION}"
 WHISPER_TARGET="${BIN_DIR}/whisper-cli"
 
 if [[ -f "${WHISPER_TARGET}" ]]; then
@@ -84,7 +87,6 @@ if [[ -f "${FFMPEG_TARGET}" ]]; then
     echo "[OK] ffmpeg already exists"
 else
     echo "[INFO] Downloading ffmpeg..."
-    FFMPEG_VERSION="7.1.1"
     if [[ "${ARCH}" == "x86_64" ]]; then
         FFMPEG_URL="https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz"
     else
@@ -123,7 +125,8 @@ npm ci --prefix "${PROJECT_ROOT}/frontend"
 echo "[INFO] Building Tauri app..."
 cargo install tauri-cli --version "^2" --locked --quiet
 
-cargo tauri build --no-bundle --manifest-path="${PROJECT_ROOT}/src-tauri/Cargo.toml"
+cd "${PROJECT_ROOT}"
+cargo tauri build --no-bundle
 
 # Locate the built binary
 TAURI_BINARY=$(find "${PROJECT_ROOT}/src-tauri/target/release" -name "altgo" -type f | head -1)
@@ -138,7 +141,7 @@ echo "[INFO] Assembling AppImage..."
 
 # Write effective VERSION and ARCH to a temp file for appimage-builder
 TEMP_APPIMAGEBuilder_YML="${BUILD_APPIMAGE_DIR}/appimage-builder.yml"
-sed "s|@VERSION@|${VERSION}|g; s|@ARCH@|${ARCH}|g" \
+sed "s|@VERSION@|${VERSION}|g; s|@ARCH@|${ARCH}|g; s|@APPDIR@|${BUILD_APPIMAGE_DIR}/AppDir|g" \
     "${SCRIPT_DIR}/appimage-builder.yml" > "${TEMP_APPIMAGEBuilder_YML}"
 
 TEMP_APPRUN="${BUILD_APPIMAGE_DIR}/AppRun"
@@ -153,6 +156,6 @@ cd "${BUILD_APPIMAGE_DIR}"
 DEPS_DIR="${DEPS_DIR}" \
 CMAKE_SOURCE_DIR="${PROJECT_ROOT}" \
 CMAKE_CURRENT_BINARY_DIR="${PROJECT_ROOT}/src-tauri/target/release" \
-${APPIMAGE_BUILDER} build --recipe "${TEMP_APPIMAGEBuilder_YML}"
+${APPIMAGE_BUILDER} --recipe "${TEMP_APPIMAGEBuilder_YML}"
 
 echo "[OK] AppImage built"

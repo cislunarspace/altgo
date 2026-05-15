@@ -2,6 +2,43 @@
 
 ## Unreleased
 
+## v2.3.1 (2026-04-23)
+
+### Packaging / CI
+
+- Unified release pipeline: tag push now auto-builds **deb**, **rpm**, **AppImage**, **Flatpak**, and **AUR PKGBUILD**
+- Added **RPM** bundle target for Fedora/RHEL/openSUSE
+- Added **Flatpak** manifest (`.flatpak` artifact on GitHub Release)
+- Added **AUR** PKGBUILD template and generator script
+- Integrated AppImage build into `release.yml` (removed standalone `appimage.yml`)
+- Unified version constants in `packaging/scripts/versions.sh` (fixed whisper.cpp v1.7.5 → v1.8.4 skew)
+
+## v2.2.4 (2026-04-22)
+
+### Packaging / CI
+
+- Linux **deb** 在 **ubuntu-22.04** 上构建，链接 **glibc 2.35**，可在 **Ubuntu 22.04 (Jammy)** 等环境运行（避免在更新 runner 上出现 GLIBC_2.39+ 仅新系统可用的问题）
+- Tauri 可执行文件统一为 **`altgo`**（与文档、桌面项、`make install` 一致；不再使用 `altgo-tauri` 作为安装名）
+
+### Release
+
+- GitHub Release 正文本版本起从 **CHANGELOG** 自动生成，并附与上一 tag 的对比链接
+
+## v2.1.0 (2026-04-21)
+
+### Features
+
+- 转写历史：本地 `history.json` 持久化；History 页面列表、删除、清空、复制与单条再润色；管道成功后写入并广播 `history-updated`
+
+### Improvements
+
+- 更新应用图标与依赖；设置页与界面样式打磨
+
+### Fixes
+
+- 代码审查：并发、错误处理与资源管理等修复
+- 构建与综合稳定性改进
+
 ## v2.0.1 (2026-04-21)
 
 ### Bug Fixes

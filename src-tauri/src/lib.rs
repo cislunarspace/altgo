@@ -6,6 +6,7 @@
 pub mod audio;
 pub mod cmd;
 pub mod config;
+pub mod history;
 pub mod key_capture;
 pub mod key_listener;
 pub mod model;
@@ -27,6 +28,7 @@ use tokio::sync::Mutex;
 pub struct AppState {
     pub config: Mutex<config::Config>,
     pub config_path: std::path::PathBuf,
+    pub history_path: std::path::PathBuf,
     pub pipeline: Mutex<Option<PipelineHandle>>,
     pub pipeline_status: Arc<std::sync::RwLock<String>>,
 }
@@ -38,16 +40,30 @@ pub struct PipelineHandle {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             let config_path = config::Config::default_config_path();
-            let cfg = config::Config::load(&config_path).expect("failed to load config");
-            cfg.validate().expect("invalid config");
+            let history_path = config_path
+                .parent()
+                .map(|p| p.join("history.json"))
+                .unwrap_or_else(|| config_path.with_extension("history.json"));
+            let cfg = match config::Config::load(&config_path) {
+                Ok(cfg) => cfg,
+                Err(e) => {
+                    tracing::warn!(error = %e, "failed to load config, using defaults");
+                    config::Config::default()
+                }
+            };
+            if let Err(e) = cfg.validate() {
+                tracing::warn!(error = %e, "config validation failed");
+            }
 
             let pipeline_status = Arc::new(std::sync::RwLock::new(String::from("idle")));
             let state = AppState {
                 config: Mutex::new(cfg),
                 config_path,
+                history_path,
                 pipeline: Mutex::new(None),
                 pipeline_status: pipeline_status.clone(),
             };
@@ -55,11 +71,16 @@ pub fn run() {
 
             tray::create_tray(app)?;
 
-            #[cfg(target_os = "windows")]
-            {
-                std::thread::spawn(|| {
-                    recorder::warmup_device();
-                    tracing::info!("audio device warmup complete");
+            // Intercept close requests on the main window so the app stays in the tray.
+            if let Some(window) = app.get_webview_window("main") {
+                let app_handle = app.handle().clone();
+                window.on_window_event(move |event| {
+                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                        api.prevent_close();
+                        if let Some(win) = app_handle.get_webview_window("main") {
+                            let _ = win.hide();
+                        }
+                    }
                 });
             }
 
@@ -80,12 +101,22 @@ pub fn run() {
             cmd::delete_model,
             cmd::resolve_model,
             cmd::capture_activation_key,
+            cmd::list_history,
+            cmd::delete_history_entries,
+            cmd::clear_history,
+            cmd::polish_history_entry,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
-        .run(|_app_handle, event| {
+        .run(|app_handle, event| {
             if let tauri::RunEvent::ExitRequested { .. } = event {
-                // TODO: stop pipeline on exit
+                let state = app_handle.state::<AppState>();
+                // Use blocking_lock to ensure pipeline cleanup completes on exit.
+                // If the mutex is poisoned, recover and still send the stop signal.
+                let mut p = state.pipeline.blocking_lock();
+                if let Some(h) = p.take() {
+                    let _ = h.stop_tx.send(());
+                }
             }
         });
 }

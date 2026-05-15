@@ -9,6 +9,10 @@ set -euo pipefail
 ARCH="${1:-x86_64}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+
+# Source unified version constants
+source "${SCRIPT_DIR}/versions.sh"
+
 DEPS_DIR="${REPO_ROOT}/target/deps"
 BIN_DIR="${DEPS_DIR}/bin"
 
@@ -136,7 +140,7 @@ build_whisper_from_source() {
 # ─── whisper-cli (Linux) ─────────────────────────────────────────────────────
 # Upstream GitHub releases no longer ship Linux whisper-cli binaries; build from source
 # (archive download + cmake). Needs: cmake, C++ compiler, curl.
-WHISPER_VERSION="1.8.4"
+WHISPER_VERSION="${WHISPER_CPP_VERSION}"
 WHISPER_TARGET="${BIN_DIR}/whisper-cli"
 
 if [[ -f "${WHISPER_TARGET}" ]]; then

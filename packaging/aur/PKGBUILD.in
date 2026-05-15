@@ -1,0 +1,15 @@
+# Maintainer: altgo contributors
+pkgname=altgo
+pkgver=VERSION
+pkgrel=1
+pkgdesc="Linux voice-to-text tool with local Whisper and LLM polishing"
+arch=('x86_64')
+url="https://github.com/cislunarspace/altgo"
+license=('MIT')
+depends=('webkit2gtk-4.1' 'gtk3' 'libayatana-appindicator' 'xclip' 'pulseaudio-utils' 'libnotify')
+source=("${pkgname}_${pkgver}_amd64.deb::https://github.com/cislunarspace/altgo/releases/download/v${pkgver}/altgo_amd64.deb")
+sha256sums=('SHA256_PLACEHOLDER')
+
+package() {
+    bsdtar -xf "${srcdir}/data.tar.xz" -C "${pkgdir}"
+}

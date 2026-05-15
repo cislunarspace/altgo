@@ -120,6 +120,10 @@
   --overlay-btn-close-hover: rgba(255, 255, 255, 0.12);
   --overlay-processing-track: rgba(255, 255, 255, 0.14);
   --overlay-copied-fg: #6ee7b7;
+  --overlay-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.3),
+    0 4px 12px rgba(0, 0, 0, 0.25),
+    0 12px 40px rgba(0, 0, 0, 0.35);
 
   --readiness-warn-border: rgba(251, 191, 36, 0.4);
   --readiness-warn-bg: rgba(251, 191, 36, 0.09);
@@ -192,6 +196,10 @@
   --overlay-btn-close-hover: rgba(24, 24, 27, 0.1);
   --overlay-processing-track: rgba(24, 24, 27, 0.12);
   --overlay-copied-fg: #059669;
+  --overlay-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.06),
+    0 4px 12px rgba(0, 0, 0, 0.08),
+    0 12px 40px rgba(0, 0, 0, 0.1);
 
   --readiness-warn-border: rgba(217, 119, 6, 0.35);
   --readiness-warn-bg: rgba(217, 119, 6, 0.08);

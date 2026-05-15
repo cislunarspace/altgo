@@ -2,12 +2,23 @@ import type {SidebarsConfig} from '@docusaurus/plugin-content-docs';
 
 const sidebars: SidebarsConfig = {
   docsSidebar: [
-    'intro',
-    'quick-start',
-    'configuration',
-    'usage',
-    'architecture',
-    'faq',
+    {
+      type: 'doc',
+      id: 'intro',
+      label: '简介',
+    },
+    {
+      type: 'category',
+      label: '开始使用',
+      items: ['quick-start', 'configuration', 'usage'],
+      collapsed: false,
+    },
+    {
+      type: 'category',
+      label: '深入',
+      items: ['architecture', 'faq'],
+      collapsed: false,
+    },
   ],
 };
 

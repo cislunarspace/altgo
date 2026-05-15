@@ -11,10 +11,9 @@ permissions:
   contents: write
 
 jobs:
-  build-linux:
-    name: Build Linux
-    runs-on: ubuntu-latest
-
+  build-deb:
+    name: Build DEB
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
 
@@ -41,10 +40,10 @@ jobs:
         run: npm ci
         working-directory: frontend
 
-      - name: Download bundled binaries (ffmpeg, whisper-cli)
+      - name: Download bundled binaries
         run: bash packaging/scripts/download-deps.sh x86_64
 
-      - name: Build Tauri app
+      - name: Build deb
         run: cargo tauri build --bundles deb
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -56,19 +55,23 @@ jobs:
           path: src-tauri/target/release/bundle/deb/*.deb
           if-no-files-found: error
 
-  build-windows:
-    name: Build Windows
-    runs-on: windows-latest
-
+  build-rpm:
+    name: Build RPM
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev patchelf libasound2-dev build-essential cmake rpm
+
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: x86_64-pc-windows-msvc
+          targets: x86_64-unknown-linux-gnu
       - uses: Swatinem/rust-cache@v2
         with:
-          key: x86_64-pc-windows-msvc-release
+          key: x86_64-unknown-linux-gnu-release-rpm
 
       - name: Install Tauri CLI
         run: cargo install tauri-cli --version "^2" --locked
@@ -81,28 +84,131 @@ jobs:
         run: npm ci
         working-directory: frontend
 
-      - name: Download bundled binaries (ffmpeg, whisper-cli)
-        shell: pwsh
-        run: pwsh packaging/scripts/download-deps.ps1
+      - name: Download bundled binaries
+        run: bash packaging/scripts/download-deps.sh x86_64
 
-      - name: Build Tauri app
-        run: cargo tauri build --bundles msi
+      - name: Build rpm
+        run: cargo tauri build --bundles rpm
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Upload msi artifact
+      - name: Upload rpm artifact
         uses: actions/upload-artifact@v4
         with:
-          name: altgo-windows-msi
-          path: src-tauri/target/release/bundle/msi/*.msi
+          name: altgo-x86_64-rpm
+          path: src-tauri/target/release/bundle/rpm/*.rpm
           if-no-files-found: error
+
+  build-flatpak:
+    name: Build Flatpak
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev patchelf libasound2-dev build-essential cmake flatpak flatpak-builder
+
+      - name: Install Flatpak SDK
+        run: |
+          sudo flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+          sudo flatpak install -y --noninteractive flathub org.freedesktop.Platform//23.08 org.freedesktop.Sdk//23.08
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install frontend dependencies
+        run: npm ci
+        working-directory: frontend
+
+      - name: Download bundled binaries
+        run: bash packaging/scripts/download-deps.sh x86_64
+
+      - name: Build Tauri binary (no bundle)
+        run: |
+          cargo install tauri-cli --version "^2" --locked
+          cargo tauri build --no-bundle
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Stage sources for Flatpak
+        run: |
+          mkdir -p flatpak-src/bin flatpak-src/icons
+          cp src-tauri/target/release/altgo flatpak-src/altgo
+          cp -r target/deps/bin/* flatpak-src/bin/
+          cp src-tauri/icons/128x128.png flatpak-src/icons/
+          cp packaging/appimage/altgo.desktop.in flatpak-src/com.github.altgo.desktop
+
+      - name: Build Flatpak bundle
+        run: |
+          sudo flatpak-builder --force-clean --repo=repo build-dir packaging/flatpak/com.github.altgo.yml
+          sudo flatpak build-bundle repo altgo-x86_64.flatpak com.github.altgo
+
+      - name: Upload flatpak artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: altgo-x86_64-flatpak
+          path: altgo-x86_64.flatpak
+          if-no-files-found: error
+
+  gen-aur:
+    name: Generate AUR PKGBUILD
+    needs: [build-deb]
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download deb artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: altgo-amd64-deb
+          path: deb-artifact
+
+      - name: Get version from tag
+        id: version
+        run: echo "value=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
+
+      - name: Generate PKGBUILD
+        run: |
+          echo "Contents of deb-artifact:"
+          find deb-artifact -type f || true
+          DEB_FILE=$(find deb-artifact -name '*.deb' -type f | head -1)
+          echo "Found deb: ${DEB_FILE}"
+          if [[ -z "${DEB_FILE}" ]]; then
+            echo "ERROR: No deb file found in deb-artifact/"
+            exit 1
+          fi
+          mkdir -p aur-output
+          cd aur-output
+          bash ../packaging/aur/generate-pkgbuild.sh "${{ steps.version.outputs.value }}" "$(pwd)/../${DEB_FILE}"
+
+      - name: Upload AUR artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: altgo-aur-pkgbuild
+          path: |
+            aur-output/PKGBUILD
+            aur-output/.SRCINFO
+          if-no-files-found: warn
 
   release:
     name: Create Release
-    needs: [build-linux, build-windows]
+    needs: [build-deb, build-rpm, build-flatpak, gen-aur]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Write release notes from CHANGELOG
+        env:
+          GITHUB_REF_NAME: ${{ github.ref_name }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: bash packaging/scripts/extract-release-notes.sh release_notes.md
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
@@ -110,17 +216,20 @@ jobs:
           path: release-assets
           merge-multiple: true
 
+      - name: List release assets
+        run: find release-assets -type f | sort
+
       - name: Generate checksums
         run: |
           cd release-assets
-          find . -type f \( -name '*.deb' -o -name '*.msi' \) -exec sha256sum {} \; > ../checksums.txt
+          find . -type f \( -name '*.deb' -o -name '*.rpm' -o -name '*.flatpak' \) -exec sha256sum {} \; > ../checksums.txt
           cd ..
           cat checksums.txt
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          generate_release_notes: true
+          body_path: release_notes.md
           files: |
             release-assets/*
             checksums.txt

@@ -34,6 +34,13 @@ pub fn detect_clipboard_tool() -> Option<ClipboardTool> {
         if which("wl-copy") {
             return Some(ClipboardTool::WlCopy);
         }
+        // Wayland 下没有 wl-copy 时，回退到 xclip/xsel（可能通过 XWayland 工作）
+        if which("xclip") {
+            return Some(ClipboardTool::XClip);
+        }
+        if which("xsel") {
+            return Some(ClipboardTool::XSel);
+        }
         return None;
     }
 
@@ -129,14 +136,17 @@ pub fn notify_result(text: &str, timeout_ms: u64) -> anyhow::Result<()> {
     notify("altgo", &truncated, timeout_ms)
 }
 
+#[allow(dead_code)]
 pub fn show_recording_window() -> anyhow::Result<()> {
     Ok(())
 }
 
+#[allow(dead_code)]
 pub fn close_recording_window() -> anyhow::Result<()> {
     Ok(())
 }
 
+#[allow(dead_code)]
 pub async fn output_text(
     raw_text: &str,
     polished_text: &str,
