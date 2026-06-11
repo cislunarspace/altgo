@@ -1,7 +1,33 @@
-/* Overlay island UI — uses design-tokens via overlay-base.css */
+/* Overlay island UI — composite-layer-only animations for 60fps */
 
 /* ============================================
-   Island Container
+   Container — handles entry/exit transitions
+   ============================================ */
+
+.island-container {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding-bottom: 80px;
+  transition:
+    opacity var(--duration-normal) var(--ease-out),
+    transform var(--duration-normal) var(--ease-out);
+  will-change: transform, opacity;
+}
+
+.island-enter {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.island-exit {
+  opacity: 0;
+  transform: translateY(8px);
+  pointer-events: none;
+}
+
+/* ============================================
+   Island (recording / processing)
    ============================================ */
 
 .island {
@@ -10,16 +36,15 @@
   justify-content: center;
   gap: 10px;
   padding: 12px 20px;
-  background: var(--overlay-surface);
-  backdrop-filter: blur(24px) saturate(160%);
-  -webkit-backdrop-filter: blur(24px) saturate(160%);
+  /* Replaced backdrop-filter with solid translucent background for GPU composite performance */
+  background: var(--overlay-surface-solid);
   border-radius: var(--radius-full);
   border: 1px solid var(--overlay-border);
   color: var(--overlay-text);
   font-size: var(--text-sm);
   font-weight: 500;
   letter-spacing: 0.2px;
-  animation: island-in var(--duration-normal) var(--ease-out) 0.12s both;
+  box-shadow: var(--overlay-shadow);
 }
 
 .island-result {
@@ -27,9 +52,7 @@
   align-items: center;
   gap: 14px;
   padding: 14px 18px;
-  background: var(--overlay-surface);
-  backdrop-filter: blur(28px) saturate(180%);
-  -webkit-backdrop-filter: blur(28px) saturate(180%);
+  background: var(--overlay-surface-solid);
   border-radius: 20px;
   border: 1px solid var(--overlay-border);
   box-shadow: var(--overlay-shadow);
@@ -40,16 +63,7 @@
   max-width: 500px;
   min-width: 200px;
   width: fit-content;
-  animation: island-result-in var(--duration-normal) var(--ease-out) 0.12s both;
   position: relative;
-}
-
-/* ============================================
-   Animations (see motion.css for @keyframes)
-   ============================================ */
-
-.island-exit {
-  animation: island-exit var(--duration-fast) linear forwards;
 }
 
 /* ============================================
@@ -63,6 +77,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
+  will-change: transform;
 }
 
 .recording-core {
@@ -71,6 +86,7 @@
   border-radius: 50%;
   background: var(--color-red);
   animation: overlay-pulse-recording 0.8s var(--ease-in-out) infinite;
+  will-change: transform, box-shadow;
 }
 
 .recording-glow {
@@ -83,6 +99,7 @@
   border: 2px solid var(--color-red);
   transform: translate(-50%, -50%);
   animation: overlay-pulse-ring 0.8s var(--ease-out) infinite;
+  will-change: transform, opacity;
 }
 
 /* ============================================
@@ -105,9 +122,10 @@
   border-top-color: var(--color-amber);
   border-radius: 50%;
   animation: overlay-spin 0.9s linear infinite;
+  will-change: transform;
 }
 
-/* Transcription progress (under processing indicator) */
+/* Transcription progress — uses scaleX (composite layer only) */
 .island-processing-inner {
   display: flex;
   flex-direction: column;
@@ -140,9 +158,10 @@
   );
   background-size: 200% 100%;
   box-shadow: 0 0 10px 1px var(--color-amber-glow);
-  transition: width 0.35s var(--ease-out, ease-out);
-  position: relative;
-  overflow: hidden;
+  /* scaleX instead of width — no layout recalc, pure GPU composite */
+  transform-origin: left center;
+  transition: transform 0.35s var(--ease-out);
+  will-change: transform;
   animation: shimmer 1.8s linear infinite;
 }
 
@@ -162,7 +181,6 @@
 }
 
 .overlay-tx-progress-fill.indeterminate {
-  width: 40% !important;
   animation:
     overlay-tx-progress-slide 1.4s cubic-bezier(0.4, 0, 0.2, 1) infinite alternate,
     shimmer 1.8s linear infinite,
@@ -171,10 +189,10 @@
 
 @keyframes overlay-tx-progress-slide {
   0% {
-    transform: translateX(-100%);
+    transform: scaleX(0.4) translateX(-150%);
   }
   100% {
-    transform: translateX(150%);
+    transform: scaleX(0.4) translateX(350%);
   }
 }
 

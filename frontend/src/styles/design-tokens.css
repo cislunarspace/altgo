@@ -112,6 +112,8 @@
   --shadow-glow-amber: 0 0 20px var(--color-amber-glow);
 
   --overlay-surface: rgba(18, 18, 22, 0.92);
+  /* Solid variant for GPU-composite performance (no backdrop-filter) */
+  --overlay-surface-solid: rgba(22, 22, 28, 0.95);
   --overlay-border: rgba(255, 255, 255, 0.12);
   --overlay-text: rgba(244, 244, 245, 0.94);
   --overlay-result-text: #e4e4e7;
@@ -188,6 +190,7 @@
   --shadow-glow-amber: 0 0 18px var(--color-amber-glow);
 
   --overlay-surface: rgba(255, 255, 255, 0.94);
+  --overlay-surface-solid: rgba(248, 248, 250, 0.98);
   --overlay-border: rgba(24, 24, 27, 0.12);
   --overlay-text: rgba(24, 24, 27, 0.92);
   --overlay-result-text: #27272a;

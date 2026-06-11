@@ -9,29 +9,32 @@ import "./styles/overlay-base.css";
 import "./styles/motion.css";
 import "./overlay.css";
 
+/** Overlay state emitted from Rust OverlayManager. */
+interface OverlayState {
+  phase: "recording" | "processing" | "done" | "hidden";
+}
+
 function Overlay() {
   const { t } = useOverlayTranslation();
-  const [status, setStatus] = useState("idle");
+
+  // Current visual phase — driven entirely by overlay-state event from Rust.
+  const [phase, setPhase] = useState<string | null>(null);
+
+  // Transcription result text (shown in done phase).
   const [result, setResult] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
-  const [isExiting, setIsExiting] = useState(false);
-  const [displayedStatus, setDisplayedStatus] = useState<string | null>(null);
+
+  // Progress info during processing.
   const [txProgress, setTxProgress] = useState<{
     phase: string;
     fraction: number | null;
   } | null>(null);
-  const prevStatusRef = useRef("idle");
-  const exitTimerRef = useRef<number | null>(null);
-  const statusRef = useRef(status);
-  const displayedStatusRef = useRef(displayedStatus);
 
-  useEffect(() => {
-    statusRef.current = status;
-  }, [status]);
+  // Whether we are in an exit transition (CSS class toggle).
+  const [isExiting, setIsExiting] = useState(false);
 
-  useEffect(() => {
-    displayedStatusRef.current = displayedStatus;
-  }, [displayedStatus]);
+  // Track previous phase for transition direction.
+  const prevPhaseRef = useRef<string | null>(null);
 
   useEffect(() => {
     applyThemeToDocument(getThemePref());
@@ -41,54 +44,52 @@ function Overlay() {
   useEffect(() => {
     let active = true;
 
-    const unlistenStatus = listen<string>("pipeline-status", (event) => {
+    const unlistenState = listen<OverlayState>("overlay-state", (event) => {
       if (!active) return;
-      const newStatus = event.payload;
-      const currentDisplayed = displayedStatusRef.current;
+      const newPhase = event.payload.phase;
+      const prev = prevPhaseRef.current;
 
-      if (newStatus === "idle" || newStatus === "stopped") {
-        setTxProgress(null);
-        // Transitioning to hidden state
-        if (prevStatusRef.current === "idle" || prevStatusRef.current === "stopped") {
-          // Already hidden, just update
-          setStatus(newStatus);
-          setDisplayedStatus(null);
-        } else {
-          // Was showing content, play exit animation
+      if (newPhase === "hidden") {
+        // Play exit animation, then clear.
+        if (prev !== null && prev !== "hidden") {
           setIsExiting(true);
-          exitTimerRef.current = window.setTimeout(() => {
-            if (!active) return;
-            setDisplayedStatus(null);
-            setStatus(newStatus);
-            setIsExiting(false);
-          }, 150);
+        } else {
+          setPhase(null);
+          setIsExiting(false);
         }
       } else {
-        if (newStatus !== "processing") {
-          setTxProgress(null);
-        }
-        // Transitioning to a visible state
-        if (currentDisplayed === null || currentDisplayed === "idle" || currentDisplayed === "stopped") {
-          // From hidden, just show directly
-          setDisplayedStatus(newStatus);
-          setStatus(newStatus);
-        } else if (currentDisplayed !== newStatus) {
-          // Different visible state, crossfade
+        // Entering a visible phase.
+        setTxProgress(null);
+        if (prev === null || prev === "hidden") {
+          // From hidden — direct show.
+          setIsExiting(false);
+          setPhase(newPhase);
+        } else if (prev !== newPhase) {
+          // Crossfade between visible phases.
           setIsExiting(true);
-          exitTimerRef.current = window.setTimeout(() => {
-            if (!active) return;
-            setDisplayedStatus(newStatus);
-            setIsExiting(false);
-          }, 150);
+          // Wait for CSS exit transition, then show new phase.
+          // The 150ms matches CSS transition-duration.
+          requestAnimationFrame(() => {
+            const timer = window.setTimeout(() => {
+              if (!active) return;
+              setIsExiting(false);
+              setPhase(newPhase);
+            }, 150);
+            // Store timer for cleanup.
+            (unlistenState as any).__timer = timer;
+          });
+          return; // Don't update prevPhaseRef yet.
         }
       }
-      prevStatusRef.current = newStatus;
+      prevPhaseRef.current = newPhase;
     });
+
     const unlistenResult = listen<string>("transcription-result", (event) => {
       if (!active) return;
       setResult(event.payload);
       setCopied(false);
     });
+
     const unlistenTxProgress = listen<{
       phase: string;
       fraction: number | null;
@@ -96,19 +97,26 @@ function Overlay() {
       if (!active) return;
       setTxProgress(event.payload);
     });
+
     return () => {
       active = false;
-      unlistenStatus.then((fn) => fn());
+      unlistenState.then((fn) => fn());
       unlistenResult.then((fn) => fn());
       unlistenTxProgress.then((fn) => fn());
-      if (exitTimerRef.current !== null) {
-        clearTimeout(exitTimerRef.current);
-        exitTimerRef.current = null;
-      }
     };
   }, []);
 
-  if (displayedStatus === null && !isExiting) return null;
+  // Listen for CSS transition end to fully clear hidden state.
+  const handleTransitionEnd = () => {
+    if (isExiting) {
+      setIsExiting(false);
+      if (prevPhaseRef.current === "hidden") {
+        setPhase(null);
+      }
+    }
+  };
+
+  if (phase === null && !isExiting) return null;
 
   const handleCopy = async () => {
     if (result) {
@@ -130,89 +138,95 @@ function Overlay() {
     }
   };
 
-  if ((displayedStatus === "done" || status === "done") && result) {
+  const containerClass = `island-container ${isExiting ? "island-exit" : "island-enter"}`;
+
+  if (phase === "done" && result) {
     return (
-      <div className={`island-result ${isExiting ? "island-exit" : ""}`}>
-        <div className="done-indicator">
-          <Check size={14} className="done-icon" strokeWidth={2.5} />
-        </div>
-        <div className="result-content">
-          <span className="result-text">{result}</span>
-        </div>
-        <div className="result-actions">
-          <button
-            type="button"
-            className={`btn-copy ${copied ? "copied" : ""}`}
-            onClick={handleCopy}
-            aria-label={copied ? t("overlay.copied") : t("overlay.copy")}
-          >
-            {copied ? (
-              <>
-                <Check size={14} strokeWidth={2.5} />
-                <span>{t("overlay.copied")}</span>
-              </>
-            ) : (
-              <>
-                <Copy size={14} strokeWidth={2} />
-                <span>{t("overlay.copy")}</span>
-              </>
-            )}
-          </button>
-          <button
-            type="button"
-            className="btn-close"
-            onClick={handleClose}
-            aria-label={t("overlay.close")}
-          >
-            <X size={14} strokeWidth={2.5} aria-hidden />
-          </button>
+      <div className={containerClass} onTransitionEnd={handleTransitionEnd}>
+        <div className="island-result">
+          <div className="done-indicator">
+            <Check size={14} className="done-icon" strokeWidth={2.5} />
+          </div>
+          <div className="result-content">
+            <span className="result-text">{result}</span>
+          </div>
+          <div className="result-actions">
+            <button
+              type="button"
+              className={`btn-copy ${copied ? "copied" : ""}`}
+              onClick={handleCopy}
+              aria-label={copied ? t("overlay.copied") : t("overlay.copy")}
+            >
+              {copied ? (
+                <>
+                  <Check size={14} strokeWidth={2.5} />
+                  <span>{t("overlay.copied")}</span>
+                </>
+              ) : (
+                <>
+                  <Copy size={14} strokeWidth={2} />
+                  <span>{t("overlay.copy")}</span>
+                </>
+              )}
+            </button>
+            <button
+              type="button"
+              className="btn-close"
+              onClick={handleClose}
+              aria-label={t("overlay.close")}
+            >
+              <X size={14} strokeWidth={2.5} aria-hidden />
+            </button>
+          </div>
         </div>
       </div>
     );
   }
 
   return (
-    <div className={`island ${isExiting ? "island-exit" : ""}`}>
-      {displayedStatus === "recording" && (
-        <>
-          <div className="recording-indicator">
-            <div className="recording-glow" />
-            <div className="recording-core" />
-          </div>
-          <span className="label">{t("overlay.recording")}</span>
-        </>
-      )}
-      {displayedStatus === "processing" && (
-        <div className="island-processing-inner">
-          <div className="island-processing-row">
-            <div className="processing-indicator">
-              <div className="processing-ring" />
+    <div className={containerClass} onTransitionEnd={handleTransitionEnd}>
+      <div className="island">
+        {phase === "recording" && (
+          <>
+            <div className="recording-indicator">
+              <div className="recording-glow" />
+              <div className="recording-core" />
             </div>
-            <span className="label">
-              {txProgress?.phase === "polish"
-                ? t("overlay.polishing")
-                : t("overlay.transcribing")}
-            </span>
+            <span className="label">{t("overlay.recording")}</span>
+          </>
+        )}
+        {phase === "processing" && (
+          <div className="island-processing-inner">
+            <div className="island-processing-row">
+              <div className="processing-indicator">
+                <div className="processing-ring" />
+              </div>
+              <span className="label">
+                {txProgress?.phase === "polish"
+                  ? t("overlay.polishing")
+                  : t("overlay.transcribing")}
+              </span>
+            </div>
+            <div className="overlay-tx-progress-track">
+              <div
+                className={`overlay-tx-progress-fill ${
+                  txProgress?.fraction == null ? "indeterminate" : ""
+                }`}
+                style={
+                  txProgress?.fraction != null
+                    ? {
+                        transform: `scaleX(${Math.min(
+                          1,
+                          Math.max(0, txProgress.fraction)
+                        )})`,
+                      }
+                    : undefined
+                }
+              />
+            </div>
           </div>
-          <div className="overlay-tx-progress-track">
-            <div
-              className={`overlay-tx-progress-fill ${
-                txProgress?.fraction == null ? "indeterminate" : ""
-              }`}
-              style={
-                txProgress?.fraction != null
-                  ? {
-                      width: `${Math.min(
-                        100,
-                        Math.max(0, txProgress.fraction * 100)
-                      )}%`,
-                    }
-                  : undefined
-              }
-            />
-          </div>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 }
