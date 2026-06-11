@@ -12,6 +12,7 @@ use crate::{
     config, history::HistoryStore, overlay_manager::OverlayManager, overlay_manager::OverlayState,
     pipeline::PipelineOutput, pipeline_controller::PipelineStatus,
     pipeline_event_handler::PipelineEventHandler, pipeline_sink::PipelineSink,
+    tauri_overlay_window::TauriOverlayWindow,
 };
 
 fn emit_pipeline_status(
@@ -30,7 +31,7 @@ pub struct TauriPipelineSink {
     app: tauri::AppHandle,
     pipeline_status: Arc<std::sync::RwLock<PipelineStatus>>,
     event_handler: PipelineEventHandler,
-    overlay_manager: OverlayManager,
+    overlay_manager: OverlayManager<TauriOverlayWindow>,
 }
 
 impl TauriPipelineSink {
@@ -40,7 +41,7 @@ impl TauriPipelineSink {
         cfg: Arc<config::Config>,
     ) -> Self {
         let event_handler = PipelineEventHandler::new(cfg.output.prefer_polished);
-        let overlay_manager = OverlayManager::new(app.clone());
+        let overlay_manager = OverlayManager::new(TauriOverlayWindow::new(app.clone()));
         Self {
             app,
             pipeline_status,
@@ -84,6 +85,7 @@ impl PipelineSink for TauriPipelineSink {
         let status = self.pipeline_status.clone();
         let output_clone = output.clone();
         let event_handler = self.event_handler.clone();
+        let overlay_manager = self.overlay_manager.clone();
 
         tauri::async_runtime::spawn(async move {
             let history_store = app.state::<HistoryStore>().inner().clone();
@@ -100,7 +102,6 @@ impl PipelineSink for TauriPipelineSink {
                     emit_pipeline_status(&app, &status, PipelineStatus::Done);
 
                     // 通过 OverlayManager 切换到 done 状态
-                    let overlay_manager = OverlayManager::new(app.clone());
                     overlay_manager.set_state(OverlayState::done());
 
                     let _ = app.emit("transcription-result", &res.clipboard_text);

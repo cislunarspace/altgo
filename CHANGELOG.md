@@ -1,5 +1,13 @@
 # Changelog
 
+## v2.4.1 (2026-06-11)
+
+### Fixes
+
+- **悬浮窗黑影修复**：引入 `OverlayWindow` seam，把 Tauri 窗口操作封装到 adapter，显示前先完成尺寸、位置与原生窗口标志准备，减少 Linux 透明窗口首帧黑影。
+- **Overlay 动画合成优化**：降低 overlay 阴影半径/透明度，改用不透明 solid surface，并把 opacity 动画从透明顶层窗口移动到内部 island，避免 alpha 叠加产生黑色晕影。
+- **状态切换竞态修复**：取消未完成的 crossfade timer，避免 hidden 事件被旧 timer 覆盖后悬浮窗卡住显示。
+
 ## v2.4.0 (2026-06-11)
 
 ### Features

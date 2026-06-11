@@ -14,6 +14,8 @@ interface OverlayState {
   phase: "recording" | "processing" | "done" | "hidden";
 }
 
+const CROSSFADE_DURATION_MS = 180;
+
 function Overlay() {
   const { t } = useOverlayTranslation();
 
@@ -35,6 +37,7 @@ function Overlay() {
 
   // Track previous phase for transition direction.
   const prevPhaseRef = useRef<string | null>(null);
+  const crossfadeTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     applyThemeToDocument(getThemePref());
@@ -44,8 +47,16 @@ function Overlay() {
   useEffect(() => {
     let active = true;
 
+    const clearCrossfadeTimer = () => {
+      if (crossfadeTimerRef.current !== null) {
+        window.clearTimeout(crossfadeTimerRef.current);
+        crossfadeTimerRef.current = null;
+      }
+    };
+
     const unlistenState = listen<OverlayState>("overlay-state", (event) => {
       if (!active) return;
+      clearCrossfadeTimer();
       const newPhase = event.payload.phase;
       const prev = prevPhaseRef.current;
 
@@ -67,18 +78,16 @@ function Overlay() {
         } else if (prev !== newPhase) {
           // Crossfade between visible phases.
           setIsExiting(true);
-          // Wait for CSS exit transition, then show new phase.
-          // The 150ms matches CSS transition-duration.
+          prevPhaseRef.current = newPhase;
           requestAnimationFrame(() => {
-            const timer = window.setTimeout(() => {
+            crossfadeTimerRef.current = window.setTimeout(() => {
               if (!active) return;
+              crossfadeTimerRef.current = null;
               setIsExiting(false);
               setPhase(newPhase);
-            }, 150);
-            // Store timer for cleanup.
-            (unlistenState as any).__timer = timer;
+            }, CROSSFADE_DURATION_MS);
           });
-          return; // Don't update prevPhaseRef yet.
+          return;
         }
       }
       prevPhaseRef.current = newPhase;
@@ -100,6 +109,7 @@ function Overlay() {
 
     return () => {
       active = false;
+      clearCrossfadeTimer();
       unlistenState.then((fn) => fn());
       unlistenResult.then((fn) => fn());
       unlistenTxProgress.then((fn) => fn());

@@ -112,8 +112,9 @@
   --shadow-glow-amber: 0 0 20px var(--color-amber-glow);
 
   --overlay-surface: rgba(18, 18, 22, 0.92);
-  /* Solid variant for GPU-composite performance (no backdrop-filter) */
-  --overlay-surface-solid: rgba(22, 22, 28, 0.95);
+  /* Solid (fully opaque) variant — avoids alpha-over-alpha compositing with the
+     window shadow, which produced black fringes on some Linux compositors. */
+  --overlay-surface-solid: rgb(22, 22, 28);
   --overlay-border: rgba(255, 255, 255, 0.12);
   --overlay-text: rgba(244, 244, 245, 0.94);
   --overlay-result-text: #e4e4e7;
@@ -122,10 +123,11 @@
   --overlay-btn-close-hover: rgba(255, 255, 255, 0.12);
   --overlay-processing-track: rgba(255, 255, 255, 0.14);
   --overlay-copied-fg: #6ee7b7;
+  /* Smaller blur radius keeps depth without the 40px transparent shadow that
+     compositors premultiply into a dark halo during opacity changes. */
   --overlay-shadow:
-    0 1px 2px rgba(0, 0, 0, 0.3),
-    0 4px 12px rgba(0, 0, 0, 0.25),
-    0 12px 40px rgba(0, 0, 0, 0.35);
+    0 1px 2px rgba(0, 0, 0, 0.2),
+    0 6px 18px rgba(0, 0, 0, 0.22);
 
   --readiness-warn-border: rgba(251, 191, 36, 0.4);
   --readiness-warn-bg: rgba(251, 191, 36, 0.09);
@@ -190,7 +192,7 @@
   --shadow-glow-amber: 0 0 18px var(--color-amber-glow);
 
   --overlay-surface: rgba(255, 255, 255, 0.94);
-  --overlay-surface-solid: rgba(248, 248, 250, 0.98);
+  --overlay-surface-solid: rgb(248, 248, 250);
   --overlay-border: rgba(24, 24, 27, 0.12);
   --overlay-text: rgba(24, 24, 27, 0.92);
   --overlay-result-text: #27272a;
@@ -200,9 +202,8 @@
   --overlay-processing-track: rgba(24, 24, 27, 0.12);
   --overlay-copied-fg: #059669;
   --overlay-shadow:
-    0 1px 2px rgba(0, 0, 0, 0.06),
-    0 4px 12px rgba(0, 0, 0, 0.08),
-    0 12px 40px rgba(0, 0, 0, 0.1);
+    0 1px 2px rgba(0, 0, 0, 0.05),
+    0 6px 18px rgba(0, 0, 0, 0.08);
 
   --readiness-warn-border: rgba(217, 119, 6, 0.35);
   --readiness-warn-bg: rgba(217, 119, 6, 0.08);
