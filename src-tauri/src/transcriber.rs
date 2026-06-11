@@ -29,6 +29,8 @@ pub struct TranscriberConfig {
     pub temperature: f32,
     pub prompt: String,
     pub timeout: Duration,
+    pub threads: u32,
+    pub beam_size: u32,
 }
 
 impl From<&crate::config::Config> for TranscriberConfig {
@@ -43,6 +45,8 @@ impl From<&crate::config::Config> for TranscriberConfig {
             temperature: cfg.transcriber.temperature,
             prompt: cfg.transcriber.prompt.clone(),
             timeout: cfg.transcriber.timeout(),
+            threads: cfg.transcriber.threads,
+            beam_size: cfg.transcriber.beam_size,
         }
     }
 }
@@ -191,6 +195,10 @@ pub struct LocalWhisper {
     model_path: String,
     language: String,
     whisper_path: String,
+    /// 线程数；`0` 表示按 CPU 并行度自动取满（whisper 默认仅 min(4, hw)）。
+    threads: u32,
+    /// beam search 宽度；`<= 1` 时走贪心（最快）。
+    beam_size: u32,
 }
 
 impl LocalWhisper {
@@ -199,11 +207,21 @@ impl LocalWhisper {
     /// `model_path`：whisper 模型文件路径
     /// `language`：语言代码
     /// `whisper_path`：whisper-cli 二进制文件路径（为空时自动查找）
-    pub fn new(model_path: String, language: String, whisper_path: String) -> Self {
+    /// `threads`：线程数（`0` = 自动取满 CPU 核数）
+    /// `beam_size`：beam search 宽度（`<= 1` = 贪心，最快）
+    pub fn new(
+        model_path: String,
+        language: String,
+        whisper_path: String,
+        threads: u32,
+        beam_size: u32,
+    ) -> Self {
         Self {
             model_path,
             language,
             whisper_path,
+            threads,
+            beam_size,
         }
     }
 
@@ -242,11 +260,18 @@ impl LocalWhisper {
             .arg(model_path)
             .arg("-l")
             .arg(&self.language)
+            .arg("-t")
+            .arg(crate::whisper_server::effective_threads(self.threads).to_string())
             .arg("-f")
             .arg(&wav_path)
             .arg("--no-timestamps")
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped());
+
+        // beam_size <= 1 时使用 whisper 默认贪心；> 1 才显式开 beam search。
+        if self.beam_size > 1 {
+            cmd.arg("-bs").arg(self.beam_size.to_string());
+        }
 
         let mut child = cmd
             .spawn()
@@ -395,11 +420,12 @@ fn which_binary(name: &str) -> Result<std::path::PathBuf, TranscriberError> {
     })
 }
 
-/// Unified transcription backend — dispatches between API and local engines.
+/// Unified transcription backend — dispatches between API, resident server, and one-shot local engines.
 #[derive(Clone, Debug)]
 pub enum Transcriber {
     Api(WhisperApi),
     Local(LocalWhisper),
+    Resident(crate::whisper_server::ResidentWhisper),
 }
 
 impl Transcriber {
@@ -415,6 +441,7 @@ impl Transcriber {
                 api.transcribe(wav_data).await
             }
             Transcriber::Local(lw) => lw.transcribe(wav_data, progress).await,
+            Transcriber::Resident(rw) => rw.transcribe(wav_data, progress).await,
         }
     }
 }
@@ -532,6 +559,8 @@ mod tests {
             "/path/to/model".to_string(),
             "zh".to_string(),
             String::new(),
+            0,
+            0,
         );
         let result = lw.transcribe(&[], None).await;
         assert!(result.is_err());

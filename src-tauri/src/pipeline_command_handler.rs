@@ -180,6 +180,8 @@ mod tests {
                 "/nonexistent/model".to_string(),
                 "zh".to_string(),
                 "whisper-cli".to_string(),
+                0,
+                0,
             ));
         let formatter = crate::polisher::LLMFormatter::new(
             "test-key".to_string(),

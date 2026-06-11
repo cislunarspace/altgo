@@ -131,6 +131,10 @@ pub struct TranscriberConfig {
     pub temperature: f32,
     /// Whisper API prompt，提供上下文/词汇提示以提升识别准确率
     pub prompt: String,
+    /// 本地引擎线程数；`0` 表示按 CPU 并行度自动取满（whisper 默认仅 min(4, hw)）
+    pub threads: u32,
+    /// 本地引擎 beam search 宽度；`<= 1` 时走贪心解码（最快），默认 0
+    pub beam_size: u32,
 }
 
 impl TranscriberConfig {
@@ -152,6 +156,8 @@ impl Default for TranscriberConfig {
             timeout_seconds: 30,
             temperature: 0.0,
             prompt: String::new(),
+            threads: 0,
+            beam_size: 0,
         }
     }
 }

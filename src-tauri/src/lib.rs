@@ -29,6 +29,7 @@ pub mod state_machine;
 pub mod tauri_sink;
 pub mod transcriber;
 pub mod tray;
+pub mod whisper_server;
 
 pub use pipeline::PipelineOutput;
 

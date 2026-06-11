@@ -46,11 +46,19 @@ impl PipelineBuilder {
 
         let transcriber = match transcriber_cfg.engine.as_str() {
             "local" => {
-                crate::transcriber::Transcriber::Local(crate::transcriber::LocalWhisper::new(
-                    model_path,
-                    transcriber_cfg.language.clone(),
-                    transcriber_cfg.whisper_path.clone(),
-                ))
+                // 常驻 whisper-server：模型一次性载入内存，之后每句话只发本地 HTTP，
+                // 省掉「每次重载模型」的成本。spawn 失败时内部自动回退到一次性 whisper-cli。
+                crate::transcriber::Transcriber::Resident(
+                    crate::whisper_server::ResidentWhisper::new(
+                        model_path,
+                        transcriber_cfg.language.clone(),
+                        transcriber_cfg.whisper_path.clone(),
+                        transcriber_cfg.temperature,
+                        transcriber_cfg.threads,
+                        transcriber_cfg.beam_size,
+                        transcriber_cfg.timeout,
+                    ),
+                )
             }
             _ => {
                 let api = crate::transcriber::WhisperApi::new(
