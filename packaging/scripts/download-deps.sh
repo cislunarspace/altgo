@@ -30,12 +30,22 @@ else
 
     if [[ "${ARCH}" == "x86_64" ]]; then
         FFMPEG_URL="https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz"
+        # GitHub-hosted fallback (BtbN builds) — more CI-friendly when johnvansickle blocks runners.
+        FFMPEG_FALLBACK_URL="https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-gpl.tar.xz"
     else
         FFMPEG_URL="https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-arm64-static.tar.xz"
+        FFMPEG_FALLBACK_URL="https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linuxarm64-gpl.tar.xz"
     fi
 
     TMP_DIR=$(mktemp -d)
-    curl --fail --progress-bar -L -o "${TMP_DIR}/ffmpeg.tar.xz" "${FFMPEG_URL}"
+    if ! curl --fail --progress-bar --retry 3 --retry-delay 2 -L -o "${TMP_DIR}/ffmpeg.tar.xz" "${FFMPEG_URL}"; then
+        echo "[WARN] Primary ffmpeg source failed, trying fallback..."
+        if ! curl --fail --progress-bar --retry 3 --retry-delay 2 -L -o "${TMP_DIR}/ffmpeg.tar.xz" "${FFMPEG_FALLBACK_URL}"; then
+            echo "[ERROR] ffmpeg download failed from both primary and fallback sources"
+            rm -rf "${TMP_DIR}"
+            exit 1
+        fi
+    fi
     tar xf "${TMP_DIR}/ffmpeg.tar.xz" -C "${TMP_DIR}"
 
     # Find the ffmpeg binary inside the extracted directory.
