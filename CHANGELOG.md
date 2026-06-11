@@ -1,6 +1,6 @@
 # Changelog
 
-## v2.3.3 (2026-06-11)
+## v2.4.0 (2026-06-11)
 
 ### Features
 
@@ -8,15 +8,21 @@
 - **自动降级**：server 启动失败、端口冲突、运行期崩溃时自动回退到一次性 `whisper-cli`，旧安装也能工作。
 - **调优旋钮**：新增 `transcriber.threads`（`0` = 自动取满 CPU 核数，whisper 默认仅 4）和 `transcriber.beam_size`（`<=1` = 贪心解码，最快）。
 
+### Performance
+
+- **~10× 转写提速**：medium 模型（1.5 GB）4 秒音频，每句从 ~2.8 s 降到 ~0.24 s（常驻后端 + GPU 加速叠加）。
+- **CUDA 自动探测**：构建端检测到 `nvcc` 时自动启用 GPU 后端，捆绑 CUDA runtime 库。无 nvcc 时纯 CPU。
+- **悬浮窗动画优化**：提取 `OverlayManager` 模块，单次 IPC 事件替代多次窗口操作；移除 `backdrop-filter` 实时模糊，改用纯色背景；进度条改用 `scaleX` 合成层动画，消除布局重排。
+
 ### Build
 
-- **CUDA 自动探测**：构建端检测到 `nvcc` 时自动启用 GPU 后端（`-DGGML_CUDA=ON`），并捆绑 `libcudart`/`libcublas`/`libcublasLt` 供分发。
 - **可移植 CPU 基线**：始终关闭 `-march=native`，避免旧机器 `SIGILL`。
 - **whisper-server 捆绑**：`download-deps.sh` 现在同时捆绑 `whisper-server` 与 `whisper-cli`。
 
-### Performance
+### Refactor
 
-- medium 模型（1.5 GB）4 秒音频：每句从 ~2.8 s 降到 ~0.24 s（约 **10×**）。
+- **OverlayManager**：悬浮窗物理管理（尺寸/位置/显隐）从 `TauriPipelineSink` 中剥离为独立模块，接口从 3 个窗口方法缩减为 `set_state(OverlayState)` 单一意图调用。
+- **CI 修复**：ffmpeg 下载源 `johnvansickle.com` 对 GitHub Actions 返回 415，新增 BtbN GitHub 镜像回退。
 
 ## Unreleased
 
