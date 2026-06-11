@@ -13,6 +13,7 @@ pub mod key_capture;
 pub mod key_listener;
 pub mod model;
 pub mod output;
+pub mod overlay_manager;
 pub mod pipeline;
 pub mod pipeline_builder;
 pub mod pipeline_command_handler;
