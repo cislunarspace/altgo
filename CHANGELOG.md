@@ -1,5 +1,23 @@
 # Changelog
 
+## v2.3.3 (2026-06-11)
+
+### Features
+
+- **常驻 whisper-server 后端**：`engine="local"` 现在自动拉起常驻 whisper-server 进程，模型只载入一次内存，之后每句通过本地 HTTP 转写。告别每句重载 ~1.5–2.9 GB 模型的冷启动成本。
+- **自动降级**：server 启动失败、端口冲突、运行期崩溃时自动回退到一次性 `whisper-cli`，旧安装也能工作。
+- **调优旋钮**：新增 `transcriber.threads`（`0` = 自动取满 CPU 核数，whisper 默认仅 4）和 `transcriber.beam_size`（`<=1` = 贪心解码，最快）。
+
+### Build
+
+- **CUDA 自动探测**：构建端检测到 `nvcc` 时自动启用 GPU 后端（`-DGGML_CUDA=ON`），并捆绑 `libcudart`/`libcublas`/`libcublasLt` 供分发。
+- **可移植 CPU 基线**：始终关闭 `-march=native`，避免旧机器 `SIGILL`。
+- **whisper-server 捆绑**：`download-deps.sh` 现在同时捆绑 `whisper-server` 与 `whisper-cli`。
+
+### Performance
+
+- medium 模型（1.5 GB）4 秒音频：每句从 ~2.8 s 降到 ~0.24 s（约 **10×**）。
+
 ## Unreleased
 
 ## v2.3.1 (2026-04-23)
