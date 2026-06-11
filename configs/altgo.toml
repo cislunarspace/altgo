@@ -27,6 +27,10 @@ language = "zh"                     # 语言提示，如 "zh"（中文）、"en"
 timeout_seconds = 30
 temperature = 0.0                   # Whisper API temperature（0.0-1.0），越低越确定性
 prompt = ""                         # Whisper API 提示词，提供领域词汇以提升识别率
+threads = 0                         # 本地引擎线程数；0 = 自动取满 CPU 核数（whisper 默认仅 4，给满核可提速）
+beam_size = 0                       # 本地引擎 beam search 宽度；<=1 走贪心解码（最快），调高更准但更慢
+# 本地模式（engine="local"）会自动拉起常驻 whisper-server：模型只载入一次内存，
+# 之后每句话走本地 HTTP，省掉重复冷载入。whisper-server 缺失时自动回退到一次性 whisper-cli。
 
 [polisher]
 protocol = "openai"                 # "openai"（OpenAI 兼容 API）或 "anthropic"（Anthropic Messages API）
