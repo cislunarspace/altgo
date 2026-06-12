@@ -63,16 +63,16 @@ impl<W: OverlayWindow> OverlayManager<W> {
             }
         }
 
+        if let Err(error) = self.window.emit_state(&state) {
+            tracing::warn!(%error, "overlay state emit failed");
+        }
+
         if let Err(error) = self.window.prepare_for_show() {
             tracing::warn!(%error, "overlay prepare_for_show failed");
         }
 
         if let Err(error) = self.window.show() {
             tracing::warn!(%error, "overlay show failed");
-        }
-
-        if let Err(error) = self.window.emit_state(&state) {
-            tracing::warn!(%error, "overlay state emit failed");
         }
     }
 }
@@ -234,9 +234,9 @@ mod tests {
                 "primary_monitor_geometry",
                 "scale_factor",
                 "position:860,952",
+                "emit:recording",
                 "prepare_for_show",
                 "show",
-                "emit:recording",
             ]
         );
     }
@@ -263,9 +263,9 @@ mod tests {
             vec![
                 "size:200x48",
                 "primary_monitor_geometry",
+                "emit:recording",
                 "prepare_for_show",
                 "show",
-                "emit:recording",
             ]
         );
     }
@@ -283,7 +283,7 @@ mod tests {
         assert!(calls.contains(&"emit:recording".to_string()));
         let show_idx = calls.iter().position(|c| c == "show").unwrap();
         let emit_idx = calls.iter().position(|c| c == "emit:recording").unwrap();
-        assert!(show_idx < emit_idx);
+        assert!(emit_idx < show_idx);
     }
 
     #[test]

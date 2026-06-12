@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use serde::Serialize;
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{AppHandle, Emitter, State};
 
 use crate::{
     config,
@@ -11,8 +11,10 @@ use crate::{
     history,
     history::HistoryStore,
     output,
+    overlay_manager::{OverlayManager, OverlayState},
     pipeline_controller::{PipelineController, PipelineStatus},
     polisher,
+    tauri_overlay_window::TauriOverlayWindow,
     tauri_sink::TauriPipelineSink,
 };
 
@@ -146,9 +148,7 @@ pub async fn copy_text(text: String) -> Result<(), String> {
 
 #[tauri::command]
 pub async fn hide_overlay(app: tauri::AppHandle) -> Result<(), String> {
-    if let Some(overlay) = app.get_webview_window("overlay") {
-        let _ = overlay.hide();
-    }
+    OverlayManager::new(TauriOverlayWindow::new(app)).set_state(OverlayState::hidden());
     Ok(())
 }
 

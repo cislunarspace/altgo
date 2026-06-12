@@ -71,6 +71,10 @@ function Overlay() {
       } else {
         // Entering a visible phase.
         setTxProgress(null);
+        if (newPhase !== "done") {
+          setResult(null);
+          setCopied(false);
+        }
         if (prev === null || prev === "hidden") {
           // From hidden — direct show.
           setIsExiting(false);
