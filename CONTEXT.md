@@ -52,7 +52,16 @@ The complete prompt text sent to the LLM for polishing, composed at runtime from
 ## Key Input
 
 **Activation Key**
-The physical key held to start recording. Configured per-device as either an X11 keysym name (`key_name`) or an evdev scancode (`linux_evdev_code`). The evdev path is preferred on Wayland.
+The physical key held to start recording. Configured per-device as either an X11 keysym name (`key_name`) or an evdev scancode (`linux_evdev_code`). The evdev path is preferred on Wayland. On Windows, configured via Windows virtual key code (`windows_vk`); falls back to `key_name` if absent. If the user edits `key_name` through Settings after a Windows capture, `windows_vk` is cleared so the new `key_name` takes effect.
+
+**Windows VK**
+Windows virtual key code (`i32`) identifying the activation key on the Windows platform. Stored in config as `windows_vk`. Captured at runtime via a low-level keyboard hook (`WH_KEYBOARD_LL`) in capture mode. Preferred over `key_name` when running on Windows, unless it has just been cleared by a manual `key_name` edit.
+
+**Windows VK Name Map**
+A small mapping from X11-style keysym names to Windows virtual-key codes, used as a fallback when `windows_vk` is absent. Supports the keys most commonly chosen as the activation key: `Alt_L`, `Alt_R`, `Control_L`, `Control_R`, `Shift_L`, `Shift_R`, `space`, `Return`, `Tab`, `Escape`, and `F1`–`F12`. Unknown names cause `WindowsListener::new` to fail fast with a clear error, so users know immediately instead of wondering why the key does not trigger recording.
+
+**Windows Capture Mode**
+When the user presses a key during Windows activation-key capture, the low-level hook returns the Windows virtual-key code. The response stores it as `windows_vk` and presents an X11-style `key_name` (e.g. `Alt_R`) so the displayed activation key remains consistent across platforms. The capture implementation lives in `key_listener::windows` and is re-exported through `key_capture` as `CaptureActivationResponse`.
 
 **State Machine**
 The 5-state FSM (`Idle → PotentialPress → Recording → WaitSecondClick → ContinuousRecording`) that translates raw key events into `StartRecord` / `StopRecord` commands for the pipeline.
