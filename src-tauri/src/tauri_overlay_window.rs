@@ -84,13 +84,26 @@ impl OverlayWindow for TauriOverlayWindow {
     }
 
     fn primary_monitor_geometry(&self) -> Result<(i32, i32, i32, i32), OverlayError> {
-        xrandr_primary_monitor().ok_or_else(|| {
-            OverlayError::PrimaryMonitorFailed("xrandr returned no primary monitor".into())
+        platform_primary_monitor_geometry().ok_or_else(|| {
+            OverlayError::PrimaryMonitorFailed("no primary monitor available".into())
         })
     }
 }
 
+#[cfg(target_os = "linux")]
+fn platform_primary_monitor_geometry() -> Option<(i32, i32, i32, i32)> {
+    xrandr_primary_monitor()
+}
+
+#[cfg(target_os = "windows")]
+fn platform_primary_monitor_geometry() -> Option<(i32, i32, i32, i32)> {
+    // Windows monitor enumeration will live here. Returning None lets callers
+    // fall back to a sensible default position until implemented.
+    None
+}
+
 /// Uses `xrandr` to get primary monitor geometry in physical pixels.
+#[cfg(target_os = "linux")]
 fn xrandr_primary_monitor() -> Option<(i32, i32, i32, i32)> {
     let output = std::process::Command::new("xrandr").output().ok()?;
     if !output.status.success() {
@@ -110,6 +123,7 @@ fn xrandr_primary_monitor() -> Option<(i32, i32, i32, i32)> {
         })
 }
 
+#[cfg(target_os = "linux")]
 fn parse_xrandr_geometry(output: &str) -> Vec<(i32, i32, i32, i32, bool)> {
     let mut monitors = Vec::new();
     for line in output.lines() {
@@ -159,6 +173,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[cfg(target_os = "linux")]
     fn test_parse_xrandr_geometry() {
         let sample = r#"
 DP-1 connected primary 3840x2160+0+0 (normal left inverted right x axis y axis) 597mm x 336mm
@@ -171,8 +186,20 @@ DP-2 connected 1920x1080+3840+0 (normal left inverted right x axis y axis) 527mm
     }
 
     #[test]
+    #[cfg(target_os = "linux")]
     fn test_parse_xrandr_skips_disconnected() {
         let sample = "DP-1 disconnected (normal left inverted right x axis y axis)";
         assert!(parse_xrandr_geometry(sample).is_empty());
+    }
+
+    #[test]
+    fn test_platform_primary_monitor_geometry_returns_none_on_windows_stub() {
+        // On Linux this exercise the xrandr path and may return Some; on Windows
+        // it returns None. The assertion only checks the Windows contract.
+        #[cfg(target_os = "windows")]
+        assert!(platform_primary_monitor_geometry().is_none());
+        // On Linux just ensure the function is callable without panicking.
+        #[cfg(target_os = "linux")]
+        let _ = platform_primary_monitor_geometry();
     }
 }

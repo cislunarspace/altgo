@@ -5,16 +5,16 @@
 
 use crate::pipeline_sink::PipelineSink;
 use crate::polisher::{LLMFormatter, PolishLevel};
-use crate::recorder::PulseRecorder;
+use crate::recorder::{PlatformRecorder, Recorder};
 use crate::transcriber::Transcriber;
 
 /// Handle StartRecord command: start recording and notify sink.
 pub fn handle_start_record(
-    recorder: &mut PulseRecorder,
+    recorder: &mut PlatformRecorder,
     sink: &impl PipelineSink,
 ) -> Result<(), String> {
     tracing::info!("recording started");
-    recorder.start().map_err(|e| {
+    recorder.start_recording().map_err(|e: anyhow::Error| {
         tracing::error!(error = %e, "failed to start recording");
         e.to_string()
     })?;
@@ -24,7 +24,7 @@ pub fn handle_start_record(
 
 /// Handle StopRecord command: stop recording, process audio, notify sink.
 pub async fn handle_stop_record(
-    recorder: &mut PulseRecorder,
+    recorder: &mut PlatformRecorder,
     transcriber: &Transcriber,
     formatter: &LLMFormatter,
     polish_level: PolishLevel,
@@ -33,7 +33,7 @@ pub async fn handle_stop_record(
     tracing::info!("recording stopped, processing...");
     sink.on_status_change("processing");
 
-    let wav_data = match recorder.stop() {
+    let wav_data: Vec<u8> = match recorder.stop_recording() {
         Ok(data) => data,
         Err(e) => {
             tracing::error!(error = %e, "failed to stop recording");
@@ -157,8 +157,9 @@ mod tests {
     }
 
     #[test]
+    #[cfg(target_os = "linux")]
     fn test_handle_start_record_success() {
-        let mut recorder = PulseRecorder::new(16000, 1);
+        let mut recorder = PlatformRecorder::new(16000, 1);
         let sink = MockSink::new();
 
         let result = handle_start_record(&mut recorder, &sink);
@@ -166,13 +167,25 @@ mod tests {
         assert_eq!(sink.status_changes(), vec!["recording"]);
     }
 
+    #[test]
+    #[cfg(target_os = "windows")]
+    fn test_handle_start_record_returns_error_on_windows_stub() {
+        let mut recorder = PlatformRecorder::new(16000, 1);
+        let sink = MockSink::new();
+
+        let result = handle_start_record(&mut recorder, &sink);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not implemented yet"));
+    }
+
     #[tokio::test]
+    #[cfg(target_os = "linux")]
     async fn test_handle_stop_record_empty_audio() {
-        let mut recorder = PulseRecorder::new(16000, 1);
+        let mut recorder = PlatformRecorder::new(16000, 1);
         let sink = MockSink::new();
 
         // Start and immediately stop to get empty audio
-        let _ = recorder.start();
+        let _ = recorder.start_recording();
         std::thread::sleep(std::time::Duration::from_millis(10));
 
         let transcriber =

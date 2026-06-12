@@ -2,9 +2,26 @@
 //!
 //! 使用 `parecord`（PulseAudio）录制音频。
 
+#[cfg(target_os = "linux")]
 mod linux;
+#[cfg(target_os = "windows")]
+mod windows;
 
+#[cfg(target_os = "linux")]
 pub use linux::PulseRecorder;
+#[cfg(target_os = "windows")]
+pub use windows::WindowsRecorder;
+
+#[cfg(target_os = "linux")]
+pub type PlatformRecorder = PulseRecorder;
+#[cfg(target_os = "windows")]
+pub type PlatformRecorder = WindowsRecorder;
+
+pub trait Recorder {
+    fn start_recording(&mut self) -> anyhow::Result<()>;
+    fn stop_recording(&self) -> anyhow::Result<Vec<u8>>;
+    fn is_recording(&self) -> bool;
+}
 
 /// Recorder configuration subset.
 #[derive(Debug, Clone)]

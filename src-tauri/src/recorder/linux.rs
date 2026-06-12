@@ -4,6 +4,7 @@
 //! 在独立线程中运行，通过共享的 `Buffer` 累积音频数据。
 
 use crate::audio::{self, Buffer};
+use crate::recorder::Recorder;
 use anyhow::Result;
 use std::io::Read;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -136,6 +137,20 @@ impl PulseRecorder {
 
         let wav_data = audio::encode_wav(&pcm_data, self.sample_rate, self.channels as u16, 16)?;
         Ok(wav_data)
+    }
+}
+
+impl Recorder for PulseRecorder {
+    fn start_recording(&mut self) -> Result<()> {
+        self.start()
+    }
+
+    fn stop_recording(&self) -> Result<Vec<u8>> {
+        self.stop()
+    }
+
+    fn is_recording(&self) -> bool {
+        self.recording.load(Ordering::SeqCst)
     }
 }
 

@@ -42,6 +42,8 @@ pub struct KeyListenerConfig {
     pub key_name: String,
     /// Linux evtest 回退路径使用的 evdev 键码（由「按下以设置」捕获）；`None` 时沿用 Alt 预设的启发式映射
     pub linux_evdev_code: Option<u16>,
+    /// Windows low-level keyboard hook virtual-key code captured from Settings.
+    pub windows_vk: Option<i32>,
     /// 长按阈值（毫秒），超过此时间视为长按录音
     pub long_press_threshold_ms: u64,
     /// 双击间隔（毫秒），两次点击在此时间窗口内视为双击
@@ -81,6 +83,7 @@ impl Default for KeyListenerConfig {
         Self {
             key_name: "Alt_R".to_string(),
             linux_evdev_code: None,
+            windows_vk: None,
             long_press_threshold_ms: 200,
             double_click_interval_ms: 300,
             debounce_window_ms: 100,
@@ -375,6 +378,7 @@ mod tests {
         let cfg = Config::default();
         assert_eq!(cfg.key_listener.key_name, "Alt_R");
         assert!(cfg.key_listener.linux_evdev_code.is_none());
+        assert!(cfg.key_listener.windows_vk.is_none());
         assert_eq!(cfg.key_listener.long_press_threshold_ms, 200);
         assert_eq!(cfg.key_listener.debounce_window_ms, 100);
         assert_eq!(cfg.key_listener.poll_interval_ms, 30);
@@ -440,6 +444,21 @@ level = "debug"
         let path = dir.path().join("altgo.toml");
         std::fs::write(&path, "this is not valid [[[").unwrap();
         assert!(Config::load(&path).is_err());
+    }
+
+    #[test]
+    fn test_windows_vk_round_trips_through_toml() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("altgo.toml");
+        let mut cfg = Config::default();
+        cfg.key_listener.key_name = "Right Alt".to_string();
+        cfg.key_listener.windows_vk = Some(0xA5);
+
+        cfg.save(&path).unwrap();
+        let loaded = Config::load(&path).unwrap();
+
+        assert_eq!(loaded.key_listener.key_name, "Right Alt");
+        assert_eq!(loaded.key_listener.windows_vk, Some(0xA5));
     }
 
     #[test]

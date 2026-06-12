@@ -2,15 +2,27 @@
 //!
 //! 使用 `xinput test-xi2`（XInput2 扩展）监听按键事件。
 
+#[cfg(target_os = "linux")]
 mod linux;
+#[cfg(target_os = "windows")]
+mod windows;
 
+#[cfg(target_os = "linux")]
 pub use linux::{list_keyboard_devices, X11Listener};
+#[cfg(target_os = "windows")]
+pub use windows::{vk_from_key_name, WindowsListener};
+
+#[cfg(target_os = "linux")]
+pub type PlatformListener = X11Listener;
+#[cfg(target_os = "windows")]
+pub type PlatformListener = WindowsListener;
 
 /// KeyListener configuration subset.
 #[derive(Debug, Clone)]
 pub struct KeyListenerConfig {
     pub key_name: String,
     pub linux_evdev_code: Option<u16>,
+    pub windows_vk: Option<i32>,
     pub long_press_threshold: std::time::Duration,
     pub double_click_interval: std::time::Duration,
     pub debounce_window: std::time::Duration,
@@ -23,6 +35,7 @@ impl From<&crate::config::Config> for KeyListenerConfig {
         Self {
             key_name: cfg.key_listener.key_name.clone(),
             linux_evdev_code: cfg.key_listener.linux_evdev_code,
+            windows_vk: cfg.key_listener.windows_vk,
             long_press_threshold: cfg.key_listener.long_press_threshold(),
             double_click_interval: cfg.key_listener.double_click_interval(),
             debounce_window: cfg.key_listener.debounce_window(),

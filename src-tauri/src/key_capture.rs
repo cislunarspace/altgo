@@ -2,11 +2,17 @@
 
 use serde::Serialize;
 
+#[cfg(target_os = "linux")]
 use std::io::BufRead;
+#[cfg(target_os = "linux")]
 use std::path::PathBuf;
+#[cfg(target_os = "linux")]
 use std::process::{Command, Stdio};
+#[cfg(target_os = "linux")]
 use std::sync::mpsc;
+#[cfg(target_os = "linux")]
 use std::thread;
+#[cfg(target_os = "linux")]
 use std::time::{Duration, Instant};
 
 #[derive(Debug, Serialize)]
@@ -15,8 +21,11 @@ pub struct CaptureActivationResponse {
     pub key_name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub linux_evdev_code: Option<u16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub windows_vk: Option<i32>,
 }
 
+#[cfg(target_os = "linux")]
 fn parse_ev_key_line(line: &str) -> Option<(u16, i32)> {
     if !line.contains("EV_KEY") {
         return None;
@@ -132,6 +141,7 @@ pub fn evdev_code_to_keysym_name(code: u16) -> String {
     }
 }
 
+#[cfg(target_os = "linux")]
 fn capture_evdev_press(timeout: Duration) -> Result<u16, String> {
     let devices = crate::key_listener::list_keyboard_devices()
         .map_err(|e| format!("keyboard devices: {}", e))?;
@@ -179,11 +189,18 @@ fn capture_evdev_press(timeout: Duration) -> Result<u16, String> {
     })
 }
 
+#[cfg(target_os = "linux")]
 pub fn capture_activation_key_blocking() -> Result<CaptureActivationResponse, String> {
     let code = capture_evdev_press(Duration::from_secs(12))?;
     let key_name = evdev_code_to_keysym_name(code);
     Ok(CaptureActivationResponse {
         key_name,
         linux_evdev_code: Some(code),
+        windows_vk: None,
     })
+}
+
+#[cfg(target_os = "windows")]
+pub fn capture_activation_key_blocking() -> Result<CaptureActivationResponse, String> {
+    Err("Windows activation key capture is not implemented yet".to_string())
 }

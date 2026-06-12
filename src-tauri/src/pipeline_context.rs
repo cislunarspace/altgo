@@ -6,24 +6,24 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-use crate::key_listener::{KeyListenerConfig, X11Listener};
+use crate::key_listener::{KeyListenerConfig, PlatformListener};
 use crate::pipeline_command_handler::{handle_start_record, handle_stop_record};
 use crate::pipeline_sink::PipelineSink;
 use crate::polisher::{LLMFormatter, PolishLevel};
-use crate::recorder::PulseRecorder;
+use crate::recorder::PlatformRecorder;
 use crate::state_machine::{Command, Machine};
 use crate::transcriber::Transcriber;
 
 /// 管道上下文 — 拥有管道运行期间所需的全部组件。
 pub struct PipelineContext {
-    pub recorder: PulseRecorder,
+    pub recorder: PlatformRecorder,
     pub transcriber: Transcriber,
     pub formatter: LLMFormatter,
     pub polish_level: PolishLevel,
     pub poll_running: Arc<AtomicBool>,
     pub key_listener_config: KeyListenerConfig,
     pub poll_interval_ms: u64,
-    pub(crate) listener: Mutex<Option<X11Listener>>,
+    pub(crate) listener: Mutex<Option<PlatformListener>>,
 }
 
 impl PipelineContext {
@@ -41,7 +41,7 @@ impl PipelineContext {
         let poll_interval_ms = self.poll_interval_ms;
         let key_listener_config = self.key_listener_config.clone();
 
-        let mut listener = match self.listener.lock().unwrap().take() {
+        let mut listener: PlatformListener = match self.listener.lock().unwrap().take() {
             Some(l) => l,
             None => {
                 sink.on_error("pipeline context already used");
@@ -49,14 +49,17 @@ impl PipelineContext {
             }
         };
 
-        let (mut key_events, key_backend) = match listener.start() {
+        let (mut key_events, key_backend): (
+            tokio::sync::mpsc::UnboundedReceiver<crate::key_listener::KeyEvent>,
+            &'static str,
+        ) = match listener.start() {
             Ok(pair) => pair,
             Err(e) => {
                 sink.on_error(&format!("key listener start: {}", e));
                 return;
             }
         };
-        tracing::info!(backend = key_backend, "Linux key listener active");
+        tracing::info!(backend = key_backend, "key listener active");
         sink.on_key_listener_backend(key_backend);
 
         let (raw_key_tx, raw_key_rx) = tokio::sync::mpsc::unbounded_channel();

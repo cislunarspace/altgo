@@ -19,9 +19,9 @@ impl PipelineBuilder {
     }
 
     /// Build recorder from config.
-    pub fn build_recorder(&self) -> crate::recorder::PulseRecorder {
+    pub fn build_recorder(&self) -> crate::recorder::PlatformRecorder {
         let recorder_cfg = crate::recorder::RecorderConfig::from(&*self.cfg);
-        crate::recorder::PulseRecorder::new(recorder_cfg.sample_rate, recorder_cfg.channels)
+        crate::recorder::PlatformRecorder::new(recorder_cfg.sample_rate, recorder_cfg.channels)
     }
 
     /// Build transcriber from config.
@@ -120,21 +120,24 @@ impl PipelineBuilder {
         &self,
     ) -> Result<
         (
-            crate::key_listener::X11Listener,
+            crate::key_listener::PlatformListener,
             tokio::sync::mpsc::UnboundedReceiver<crate::key_listener::KeyEvent>,
             String,
         ),
         PipelineError,
     > {
-        let mut listener =
-            crate::key_listener::X11Listener::new(&self.cfg.key_listener).map_err(|e| {
+        let mut listener = crate::key_listener::PlatformListener::new(&self.cfg.key_listener)
+            .map_err(|e| {
                 PipelineError::Fatal(FatalError::KeyListenerFailed {
                     backend: "unknown".to_string(),
                     reason: e.to_string(),
                 })
             })?;
 
-        let (key_events, key_backend) = listener.start().map_err(|e| {
+        let (key_events, key_backend): (
+            tokio::sync::mpsc::UnboundedReceiver<crate::key_listener::KeyEvent>,
+            &'static str,
+        ) = listener.start().map_err(|e| {
             PipelineError::Fatal(FatalError::KeyListenerFailed {
                 backend: "unknown".to_string(),
                 reason: format!("failed to start: {}", e),
@@ -166,9 +169,9 @@ impl PipelineBuilder {
         let poll_interval_ms = key_listener_config.poll_interval_ms;
 
         let listener =
-            crate::key_listener::X11Listener::new(&self.cfg.key_listener).map_err(|e| {
+            crate::key_listener::PlatformListener::new(&self.cfg.key_listener).map_err(|e| {
                 PipelineError::Fatal(FatalError::KeyListenerFailed {
-                    backend: "x11".to_string(),
+                    backend: "platform".to_string(),
                     reason: e.to_string(),
                 })
             })?;
