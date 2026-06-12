@@ -54,6 +54,10 @@ interface ModelEntry {
   downloaded: boolean;
 }
 
+interface SaveConfigArgs extends Record<string, unknown> {
+  patch: ReturnType<typeof saveRequestBody>;
+}
+
 const KEY_PRESETS: { value: string; labelKey: string }[] = [
   { value: "Alt_R", labelKey: "settings.key_preset_right_alt" },
 ];
@@ -94,6 +98,10 @@ function saveRequestBody(c: AppConfig) {
     polishApiBaseUrl: c.polishApiBaseUrl,
     guiLanguage: c.guiLanguage,
   };
+}
+
+function saveConfigArgs(c: AppConfig): SaveConfigArgs {
+  return { patch: saveRequestBody(c) };
 }
 
 function normalizeConfig(c: AppConfig): AppConfig {
@@ -178,9 +186,7 @@ export default function Settings() {
     setSaving(true);
     setMessage("");
     try {
-      await invoke("save_config", {
-        req: saveRequestBody(config),
-      });
+      await invoke("save_config", saveConfigArgs(config));
       setLang(config.guiLanguage);
       setMessage("saved");
       refreshResolved(config.model, config.engine);
@@ -237,9 +243,7 @@ export default function Settings() {
       if (!config) return;
       const next = { ...config, engine: "local", model: name };
       setConfig(next);
-      await invoke("save_config", {
-        req: saveRequestBody({ ...next, model: name }),
-      });
+      await invoke("save_config", saveConfigArgs(next));
       setLang(next.guiLanguage);
       setMessage("saved");
       refreshResolved(name, "local");
@@ -270,9 +274,7 @@ export default function Settings() {
     setSaving(true);
     setMessage("");
     try {
-      await invoke("save_config", {
-        req: saveRequestBody({ ...next, model: name }),
-      });
+      await invoke("save_config", saveConfigArgs(next));
       setLang(next.guiLanguage);
       setMessage("saved");
       refreshResolved(name, "local");
@@ -301,7 +303,7 @@ export default function Settings() {
         windowsVk: r.windowsVk ?? null,
       };
       setConfig(next);
-      await invoke("save_config", { req: saveRequestBody(next) });
+      await invoke("save_config", saveConfigArgs(next));
       setLang(next.guiLanguage);
       setMessage("saved");
       refreshResolved(next.model, next.engine);
