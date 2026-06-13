@@ -1,38 +1,50 @@
-//! Windows key listener stub.
+//! Windows key listener.
 //!
-//! Low-level keyboard hook integration will live here. For now the pipeline uses
-//! the platform alias and fails gracefully at runtime on Windows.
+//! Uses a `WH_KEYBOARD_LL` low-level keyboard hook running in a dedicated
+//! message-pump thread. The hook callback filters by the configured virtual-key
+//! code and forwards `KeyEvent`s to the async pipeline through a tokio channel.
 
 use super::KeyEvent;
 use crate::config::KeyListenerConfig;
 use anyhow::Result;
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
+use windows::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
+use windows::Win32::System::Threading::GetCurrentThreadId;
+use windows::Win32::UI::WindowsAndMessaging::{
+    CallNextHookEx, DispatchMessageW, GetMessageW, PostThreadMessageW, SetWindowsHookExW,
+    TranslateMessage, UnhookWindowsHookEx, KBDLLHOOKSTRUCT, MSG, WH_KEYBOARD_LL, WM_KEYDOWN,
+    WM_KEYUP, WM_QUIT,
+};
 
 const BACKEND_NAME: &str = "wh_keyboard_ll";
+const HOOK_START_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
 
-#[allow(dead_code)]
-pub fn key_name_from_vk(vk: i32) -> Option<String> {
-    match vk {
-        0xA4 => Some("Alt_L".to_string()),
-        0xA5 => Some("Alt_R".to_string()),
-        0xA2 => Some("Control_L".to_string()),
-        0xA3 => Some("Control_R".to_string()),
-        0xA0 => Some("Shift_L".to_string()),
-        0xA1 => Some("Shift_R".to_string()),
-        0x20 => Some("space".to_string()),
-        0x0D => Some("Return".to_string()),
-        0x09 => Some("Tab".to_string()),
-        0x1B => Some("Escape".to_string()),
-        vk if (0x70..=0x7B).contains(&vk) => Some(format!("F{}", vk - 0x6F)),
-        _ => None,
+struct HookState {
+    target_vk: i32,
+    tx: mpsc::UnboundedSender<KeyEvent>,
+    stopping: AtomicBool,
+}
+
+impl HookState {
+    fn send(&self, pressed: bool) {
+        let _ = self.tx.send(KeyEvent { pressed });
+    }
+
+    fn should_forward(&self, vk: i32) -> bool {
+        vk == self.target_vk
     }
 }
 
-#[derive(Debug)]
-pub struct WindowsListener {
-    #[allow(dead_code)]
-    target_vk: i32,
+struct CaptureState {
+    tx: std::sync::mpsc::SyncSender<i32>,
+    stopping: AtomicBool,
+    thread_id: AtomicU32,
 }
+
+static HOOK_STATE: Mutex<Option<Arc<HookState>>> = Mutex::new(None);
+static CAPTURE_STATE: Mutex<Option<Arc<CaptureState>>> = Mutex::new(None);
 
 pub fn vk_from_key_name(key_name: &str) -> Option<i32> {
     match key_name {
@@ -61,6 +73,40 @@ fn vk_from_function_key(key_name: &str) -> Option<i32> {
     None
 }
 
+pub fn key_name_from_vk(vk: i32) -> Option<String> {
+    match vk {
+        0xA4 => Some("Alt_L".to_string()),
+        0xA5 => Some("Alt_R".to_string()),
+        0xA2 => Some("Control_L".to_string()),
+        0xA3 => Some("Control_R".to_string()),
+        0xA0 => Some("Shift_L".to_string()),
+        0xA1 => Some("Shift_R".to_string()),
+        0x20 => Some("space".to_string()),
+        0x0D => Some("Return".to_string()),
+        0x09 => Some("Tab".to_string()),
+        0x1B => Some("Escape".to_string()),
+        vk if (0x70..=0x7B).contains(&vk) => Some(format!("F{}", vk - 0x6F)),
+        _ => None,
+    }
+}
+
+pub fn format_capture_result(vk: i32) -> Result<(i32, String), String> {
+    let key_name = key_name_from_vk(vk).ok_or_else(|| {
+        format!(
+            "captured unsupported virtual-key code 0x{:X} on Windows",
+            vk
+        )
+    })?;
+    Ok((vk, key_name))
+}
+
+#[derive(Debug)]
+pub struct WindowsListener {
+    target_vk: i32,
+    hook_thread: Option<std::thread::JoinHandle<()>>,
+    thread_id: Arc<AtomicU32>,
+}
+
 impl WindowsListener {
     pub fn new(cfg: &KeyListenerConfig) -> Result<Self> {
         let target_vk = cfg
@@ -73,23 +119,261 @@ impl WindowsListener {
                 )
             })?;
 
-        Ok(Self { target_vk })
+        Ok(Self {
+            target_vk,
+            hook_thread: None,
+            thread_id: Arc::new(AtomicU32::new(0)),
+        })
     }
 
     pub fn start(&mut self) -> Result<(mpsc::UnboundedReceiver<KeyEvent>, &'static str)> {
         let (tx, rx) = mpsc::unbounded_channel();
-        let _ = tx;
-        Ok((rx, BACKEND_NAME))
+        let (ready_tx, ready_rx) = std::sync::mpsc::sync_channel::<Result<(), String>>(1);
+        let target_vk = self.target_vk;
+        let thread_id = Arc::clone(&self.thread_id);
+
+        let handle = std::thread::spawn(move || {
+            let state = Arc::new(HookState {
+                target_vk,
+                tx,
+                stopping: AtomicBool::new(false),
+            });
+
+            // SAFETY: WH_KEYBOARD_LL allows a null module handle when the callback is in the
+            // current process and the hook is installed for all threads (dwThreadId = 0). The
+            // callback has 'static lifetime and follows the required system ABI.
+            let hook = unsafe {
+                SetWindowsHookExW(WH_KEYBOARD_LL, Some(low_level_keyboard_proc), None, 0)
+            };
+            let hook = match hook {
+                Ok(hook) => {
+                    *HOOK_STATE.lock().unwrap() = Some(Arc::clone(&state));
+                    // SAFETY: GetCurrentThreadId has no preconditions and returns the ID of this
+                    // hook/message-pump thread, which Drop later uses with PostThreadMessageW.
+                    thread_id.store(unsafe { GetCurrentThreadId() }, Ordering::SeqCst);
+                    let _ = ready_tx.send(Ok(()));
+                    hook
+                }
+                Err(error) => {
+                    let message = error.to_string();
+                    tracing::error!(error = %message, "failed to install WH_KEYBOARD_LL hook");
+                    let _ = ready_tx.send(Err(message));
+                    return;
+                }
+            };
+
+            let mut msg = MSG::default();
+            loop {
+                // SAFETY: msg points to valid writable memory for the duration of the call. A
+                // null hwnd receives thread messages; WM_QUIT wakes this loop during Drop.
+                let ret = unsafe { GetMessageW(&mut msg, None, 0, 0) };
+                if ret.0 <= 0 || state.stopping.load(Ordering::SeqCst) {
+                    break;
+                }
+                // SAFETY: msg was initialized by a successful GetMessageW call.
+                unsafe {
+                    let _ = TranslateMessage(&msg);
+                    DispatchMessageW(&msg);
+                }
+            }
+
+            *HOOK_STATE.lock().unwrap() = None;
+            // SAFETY: hook was returned by SetWindowsHookExW on this thread and has not yet been
+            // unhooked. Unhooking here keeps hook teardown on the owning message-pump thread.
+            let _ = unsafe { UnhookWindowsHookEx(hook) };
+        });
+
+        self.hook_thread = Some(handle);
+        match ready_rx.recv_timeout(HOOK_START_TIMEOUT) {
+            Ok(Ok(())) => Ok((rx, BACKEND_NAME)),
+            Ok(Err(message)) => {
+                self.join_hook_thread();
+                anyhow::bail!("key listener start: {message}")
+            }
+            Err(_) => {
+                self.stop_hook_thread();
+                anyhow::bail!("key listener start: timed out waiting for WH_KEYBOARD_LL hook")
+            }
+        }
     }
+
+    fn stop_hook_thread(&mut self) {
+        if let Some(state) = HOOK_STATE.lock().unwrap().as_ref() {
+            state.stopping.store(true, Ordering::SeqCst);
+        }
+
+        let id = self.thread_id.load(Ordering::SeqCst);
+        if id != 0 {
+            // SAFETY: id is captured from the hook message-pump thread after it has installed its
+            // message queue. Posting WM_QUIT is the documented way to wake GetMessageW.
+            unsafe {
+                let _ = PostThreadMessageW(id, WM_QUIT, WPARAM(0), LPARAM(0));
+            }
+        }
+
+        self.join_hook_thread();
+    }
+
+    fn join_hook_thread(&mut self) {
+        if let Some(handle) = self.hook_thread.take() {
+            let _ = handle.join();
+        }
+    }
+}
+
+impl Drop for WindowsListener {
+    fn drop(&mut self) {
+        self.stop_hook_thread();
+    }
+}
+
+unsafe extern "system" fn low_level_keyboard_proc(
+    n_code: i32,
+    w_param: WPARAM,
+    l_param: LPARAM,
+) -> LRESULT {
+    if n_code >= 0 {
+        if let Some(state) = HOOK_STATE.lock().unwrap().as_ref() {
+            // SAFETY: Windows calls WH_KEYBOARD_LL callbacks with l_param pointing to a valid
+            // KBDLLHOOKSTRUCT whenever n_code >= 0.
+            let info = unsafe { *(l_param.0 as *const KBDLLHOOKSTRUCT) };
+            let vk = info.vkCode as i32;
+
+            if state.should_forward(vk) {
+                match w_param.0 as u32 {
+                    WM_KEYDOWN => state.send(true),
+                    WM_KEYUP => state.send(false),
+                    _ => {}
+                }
+            }
+        }
+    }
+    // SAFETY: Forwarding to the next hook is required by the Win32 hook contract. Passing None is
+    // accepted for low-level hooks; Windows ignores the hook handle for this call.
+    unsafe { CallNextHookEx(None, n_code, w_param, l_param) }
+}
+
+pub fn capture_activation_key_blocking(
+    timeout: std::time::Duration,
+) -> Result<(i32, String), String> {
+    let (tx, rx) = std::sync::mpsc::sync_channel::<i32>(1);
+    let state = Arc::new(CaptureState {
+        tx,
+        stopping: AtomicBool::new(false),
+        thread_id: AtomicU32::new(0),
+    });
+    let state_for_thread = Arc::clone(&state);
+    let (ready_tx, ready_rx) = std::sync::mpsc::sync_channel::<Result<(), String>>(1);
+
+    let handle = std::thread::spawn(move || {
+        // SAFETY: WH_KEYBOARD_LL allows a null module handle when the callback is in the current
+        // process and the hook is global (dwThreadId = 0). The callback has the correct ABI.
+        let hook = unsafe { SetWindowsHookExW(WH_KEYBOARD_LL, Some(capture_hook_proc), None, 0) };
+        let hook = match hook {
+            Ok(hook) => {
+                // SAFETY: GetCurrentThreadId has no preconditions and returns this message-pump
+                // thread ID, used later to post WM_QUIT.
+                state_for_thread
+                    .thread_id
+                    .store(unsafe { GetCurrentThreadId() }, Ordering::SeqCst);
+                *CAPTURE_STATE.lock().unwrap() = Some(Arc::clone(&state_for_thread));
+                let _ = ready_tx.send(Ok(()));
+                hook
+            }
+            Err(error) => {
+                let message = error.to_string();
+                tracing::error!(error = %message, "failed to install capture hook");
+                let _ = ready_tx.send(Err(message));
+                return;
+            }
+        };
+
+        let mut msg = MSG::default();
+        loop {
+            // SAFETY: msg points to valid writable memory for the duration of the call. A null
+            // hwnd receives thread messages; WM_QUIT wakes this loop on capture completion.
+            let ret = unsafe { GetMessageW(&mut msg, None, 0, 0) };
+            if ret.0 <= 0 || state_for_thread.stopping.load(Ordering::SeqCst) {
+                break;
+            }
+            // SAFETY: msg was initialized by a successful GetMessageW call.
+            unsafe {
+                let _ = TranslateMessage(&msg);
+                DispatchMessageW(&msg);
+            }
+        }
+
+        *CAPTURE_STATE.lock().unwrap() = None;
+        // SAFETY: hook was returned by SetWindowsHookExW on this thread and has not yet been
+        // unhooked. Unhooking here keeps capture teardown on the owning message-pump thread.
+        let _ = unsafe { UnhookWindowsHookEx(hook) };
+    });
+
+    if let Err(error) = wait_for_capture_hook(&ready_rx, &state) {
+        let _ = handle.join();
+        return Err(error);
+    }
+
+    let result = rx.recv_timeout(timeout);
+    stop_capture_thread(&state);
+    let _ = handle.join();
+
+    let vk = result.map_err(|_| "timeout: no key pressed".to_string())?;
+    format_capture_result(vk)
+}
+
+fn wait_for_capture_hook(
+    ready_rx: &std::sync::mpsc::Receiver<Result<(), String>>,
+    state: &CaptureState,
+) -> Result<(), String> {
+    match ready_rx.recv_timeout(HOOK_START_TIMEOUT) {
+        Ok(Ok(())) => Ok(()),
+        Ok(Err(message)) => Err(format!("key capture start: {message}")),
+        Err(_) => {
+            stop_capture_thread(state);
+            Err("key capture start: timed out waiting for WH_KEYBOARD_LL hook".to_string())
+        }
+    }
+}
+
+fn stop_capture_thread(state: &CaptureState) {
+    state.stopping.store(true, Ordering::SeqCst);
+    let id = state.thread_id.load(Ordering::SeqCst);
+    if id != 0 {
+        // SAFETY: id is captured from the capture message-pump thread after the hook is installed.
+        // Posting WM_QUIT wakes GetMessageW so the thread can unhook and exit.
+        unsafe {
+            let _ = PostThreadMessageW(id, WM_QUIT, WPARAM(0), LPARAM(0));
+        }
+    }
+}
+
+unsafe extern "system" fn capture_hook_proc(
+    n_code: i32,
+    w_param: WPARAM,
+    l_param: LPARAM,
+) -> LRESULT {
+    if n_code >= 0 && w_param.0 as u32 == WM_KEYDOWN {
+        if let Some(state) = CAPTURE_STATE.lock().unwrap().as_ref() {
+            // SAFETY: Windows calls WH_KEYBOARD_LL callbacks with l_param pointing to a valid
+            // KBDLLHOOKSTRUCT whenever n_code >= 0.
+            let info = unsafe { *(l_param.0 as *const KBDLLHOOKSTRUCT) };
+            if state.tx.try_send(info.vkCode as i32).is_ok() {
+                stop_capture_thread(state);
+            }
+        }
+    }
+    // SAFETY: Forwarding to the next hook is required by the Win32 hook contract. Passing None is
+    // accepted for low-level hooks; Windows ignores the hook handle for this call.
+    unsafe { CallNextHookEx(None, n_code, w_param, l_param) }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn constructs_listener_from_key_name_fallback() {
-        let cfg = crate::config::KeyListenerConfig {
+    fn test_config() -> crate::config::KeyListenerConfig {
+        crate::config::KeyListenerConfig {
             key_name: "Alt_R".to_string(),
             linux_evdev_code: None,
             windows_vk: None,
@@ -98,23 +382,28 @@ mod tests {
             debounce_window_ms: 100,
             poll_interval_ms: 30,
             min_press_duration_ms: 100,
-        };
+        }
+    }
+
+    #[test]
+    fn constructs_listener_from_key_name_fallback() {
+        let listener = WindowsListener::new(&test_config());
+        assert!(listener.is_ok());
+    }
+
+    #[test]
+    fn constructs_listener_from_windows_vk() {
+        let mut cfg = test_config();
+        cfg.key_name = "space".to_string();
+        cfg.windows_vk = Some(0x20);
         let listener = WindowsListener::new(&cfg);
         assert!(listener.is_ok());
     }
 
     #[test]
     fn rejects_unknown_key_name() {
-        let cfg = crate::config::KeyListenerConfig {
-            key_name: "Caps_Lock".to_string(),
-            linux_evdev_code: None,
-            windows_vk: None,
-            long_press_threshold_ms: 200,
-            double_click_interval_ms: 300,
-            debounce_window_ms: 100,
-            poll_interval_ms: 30,
-            min_press_duration_ms: 100,
-        };
+        let mut cfg = test_config();
+        cfg.key_name = "Caps_Lock".to_string();
         let result = WindowsListener::new(&cfg);
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
@@ -127,21 +416,26 @@ mod tests {
 
     #[test]
     fn start_returns_receiver_and_backend_name() {
-        let cfg = crate::config::KeyListenerConfig {
-            key_name: "space".to_string(),
-            linux_evdev_code: None,
-            windows_vk: Some(0x20),
-            long_press_threshold_ms: 200,
-            double_click_interval_ms: 300,
-            debounce_window_ms: 100,
-            poll_interval_ms: 30,
-            min_press_duration_ms: 100,
-        };
+        let mut cfg = test_config();
+        cfg.windows_vk = Some(0x20);
         let mut listener = WindowsListener::new(&cfg).unwrap();
         let (mut rx, backend) = listener.start().unwrap();
         assert_eq!(backend, "wh_keyboard_ll");
-        // No events yet; just confirm the channel is alive.
         assert!(rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn formats_capture_result_for_known_vk() {
+        let result = format_capture_result(0xA5);
+        assert_eq!(result, Ok((0xA5, "Alt_R".to_string())));
+    }
+
+    #[test]
+    fn formats_capture_result_for_unknown_vk() {
+        let result = format_capture_result(0xFF);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.contains("0xFF"), "error should mention VK: {}", err);
     }
 
     #[test]

@@ -202,5 +202,11 @@ pub fn capture_activation_key_blocking() -> Result<CaptureActivationResponse, St
 
 #[cfg(target_os = "windows")]
 pub fn capture_activation_key_blocking() -> Result<CaptureActivationResponse, String> {
-    Err("Windows activation key capture is not implemented yet".to_string())
+    let (vk, key_name) =
+        crate::key_listener::capture_activation_key_blocking(std::time::Duration::from_secs(12))?;
+    Ok(CaptureActivationResponse {
+        key_name,
+        linux_evdev_code: None,
+        windows_vk: Some(vk),
+    })
 }
