@@ -38,6 +38,10 @@ uuid = { version = "1", features = ["v4"] }
 regex = "1"
 notify = "6"
 thiserror = "1"
+rubato = { version = "0.16", default-features = false }
 
 [dev-dependencies]
 mockito = "1"
+
+[target.'cfg(windows)'.dependencies]
+cpal = "0.18"
