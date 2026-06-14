@@ -45,3 +45,4 @@ mockito = "1"
 
 [target.'cfg(windows)'.dependencies]
 cpal = "0.18"
+arboard = { version = "3", default-features = false }
