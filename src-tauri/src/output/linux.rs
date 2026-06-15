@@ -191,6 +191,36 @@ fn which(cmd: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// Linux `Output` adapter — wraps clipboard tools and `notify-send`.
+pub struct LinuxOutput {
+    tool: Option<ClipboardTool>,
+}
+
+impl LinuxOutput {
+    pub fn new() -> Self {
+        Self {
+            tool: detect_clipboard_tool(),
+        }
+    }
+}
+
+impl super::Output for LinuxOutput {
+    fn write_clipboard(&self, text: &str) -> anyhow::Result<()> {
+        let tool = self
+            .tool
+            .ok_or_else(|| anyhow::anyhow!("no clipboard tool found"))?;
+        write_clipboard_with_tool(tool, text)
+    }
+
+    fn notify(&self, title: &str, body: &str) -> anyhow::Result<()> {
+        notify(title, body, 5000)
+    }
+
+    fn clone_box(&self) -> Box<dyn super::Output> {
+        Box::new(LinuxOutput { tool: self.tool })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

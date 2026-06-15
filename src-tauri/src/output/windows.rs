@@ -26,13 +26,39 @@ pub async fn write_clipboard(text: &str) -> Result<()> {
     .map_err(|e| anyhow::anyhow!("clipboard task panicked: {e}"))?
 }
 
+/// Windows `Output` adapter — arboard for clipboard, overlay for notifications.
+pub struct WindowsOutput;
+
+impl WindowsOutput {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl super::Output for WindowsOutput {
+    fn write_clipboard(&self, text: &str) -> Result<()> {
+        // arboard::Clipboard is !Send; caller wraps this in spawn_blocking.
+        let mut clipboard = arboard::Clipboard::new()
+            .map_err(|e| anyhow::anyhow!("failed to access clipboard: {e}"))?;
+        clipboard
+            .set_text(text.to_string())
+            .map_err(|e| anyhow::anyhow!("failed to set clipboard text: {e}"))
+    }
+
+    fn notify(&self, _title: &str, _body: &str) -> Result<()> {
+        // Notifications on Windows are handled by the Tauri overlay.
+        Ok(())
+    }
+
+    fn clone_box(&self) -> Box<dyn super::Output> {
+        Box::new(WindowsOutput)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
     fn clipboard_new_runs() {
-        // 冒烟测试：验证 arboard 能在当前环境构造 Clipboard（构造不写入，不污染剪切板）。
-        // 无桌面会话时 Clipboard::new 可能失败，故忽略结果 —— 真实写入靠 Windows 手动验证
-        // （路线 B 选项 3）。此测试主要保证 windows.rs 在 Windows 上能编译并链接 arboard。
         let _ = arboard::Clipboard::new();
     }
 }

@@ -40,7 +40,9 @@ impl TauriPipelineSink {
         pipeline_status: Arc<std::sync::RwLock<PipelineStatus>>,
         cfg: Arc<config::Config>,
     ) -> Self {
-        let event_handler = PipelineEventHandler::new(cfg.output.prefer_polished);
+        let platform_output = crate::output::PlatformOutput::new();
+        let event_handler =
+            PipelineEventHandler::new(cfg.output.prefer_polished, Box::new(platform_output));
         let overlay_manager = OverlayManager::new(TauriOverlayWindow::new(app.clone()));
         Self {
             app,
