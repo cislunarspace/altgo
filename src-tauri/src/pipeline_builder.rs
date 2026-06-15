@@ -90,10 +90,12 @@ impl PipelineBuilder {
     /// Returns error if protocol is unknown or HTTP client fails to initialize.
     pub fn build_polisher(&self) -> Result<crate::polisher::LLMFormatter, PipelineError> {
         let polisher_cfg = crate::polisher::PolisherConfig::from(&*self.cfg);
-        let mut formatter = crate::polisher::LLMFormatter::from_config(&polisher_cfg)
+        let formatter = crate::polisher::LLMFormatter::from_config(&polisher_cfg)
             .map_err(|e| PipelineError::Fatal(FatalError::PolisherInitFailed(e)))?;
 
-        // Try to load PromptStore from resources/prompts/
+        // Build prompt source chain: PromptStore → Custom → Hardcoded
+        let mut sources: Vec<Box<dyn crate::polisher::SystemPromptSource>> = Vec::new();
+
         let prompts_dir = std::env::current_exe()
             .ok()
             .and_then(|exe| exe.parent().map(|p| p.join("resources/prompts")))
@@ -106,14 +108,29 @@ impl PipelineBuilder {
                     tracing::warn!(error = %e, "failed to load prompts from PromptStore, using fallback");
                 } else {
                     tracing::info!("PromptStore loaded successfully");
-                    formatter = formatter.with_prompt_store(store);
+                    sources.push(Box::new(crate::polisher::PromptStoreSource::new(store)));
                 }
             } else {
                 tracing::debug!("prompts directory not found, using hardcoded prompts");
             }
         }
 
-        Ok(formatter)
+        if !self.cfg.polisher.system_prompt.is_empty() {
+            sources.push(Box::new(crate::polisher::CustomPromptSource::new(
+                self.cfg.polisher.system_prompt.clone(),
+            )));
+        }
+
+        let fallback = Box::new(crate::polisher::HardcodedPromptSource::new(
+            polisher_cfg.language.clone(),
+        ));
+        let prompt_source: Box<dyn crate::polisher::SystemPromptSource> = if sources.is_empty() {
+            fallback
+        } else {
+            Box::new(crate::polisher::FallbackSource::new(sources, fallback))
+        };
+
+        Ok(formatter.with_prompt_source(prompt_source))
     }
 
     /// Build key listener from config.

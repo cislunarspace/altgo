@@ -216,14 +216,152 @@ fn get_system_prompt(level: PolishLevel, language: &str) -> String {
     }
 }
 
+// ---------------------------------------------------------------------------
+// SystemPromptSource trait and implementations
+// ---------------------------------------------------------------------------
+
+/// 抽象 system prompt 来源，消除 `polish()` 内部的 fallback 链。
+///
+/// 由 `LLMFormatter` 持有，使 prompt 选择逻辑可在测试中替换。
+pub trait SystemPromptSource: Send + Sync {
+    /// 获取指定级别和语言的 system prompt。
+    fn get_prompt(
+        &self,
+        level: PolishLevel,
+        language: &str,
+    ) -> Result<String, crate::prompt_store::PromptError>;
+
+    /// 支持 clone 为 trait object（用于 `LLMFormatter::Clone`）。
+    fn clone_box(&self) -> Box<dyn SystemPromptSource>;
+}
+
+/// 基于 `PromptStore` 的 prompt 来源。
+pub struct PromptStoreSource {
+    store: crate::prompt_store::PromptStore,
+}
+
+impl PromptStoreSource {
+    pub fn new(store: crate::prompt_store::PromptStore) -> Self {
+        Self { store }
+    }
+}
+
+impl SystemPromptSource for PromptStoreSource {
+    fn get_prompt(
+        &self,
+        level: PolishLevel,
+        _language: &str,
+    ) -> Result<String, crate::prompt_store::PromptError> {
+        self.store.get_system_prompt(level)
+    }
+
+    fn clone_box(&self) -> Box<dyn SystemPromptSource> {
+        Box::new(PromptStoreSource {
+            store: self.store.clone(),
+        })
+    }
+}
+
+/// 硬编码 prompt 来源（内置默认）。
+pub struct HardcodedPromptSource {
+    language: String,
+}
+
+impl HardcodedPromptSource {
+    pub fn new(language: String) -> Self {
+        Self { language }
+    }
+}
+
+impl SystemPromptSource for HardcodedPromptSource {
+    fn get_prompt(
+        &self,
+        level: PolishLevel,
+        _language: &str,
+    ) -> Result<String, crate::prompt_store::PromptError> {
+        Ok(get_system_prompt(level, &self.language))
+    }
+
+    fn clone_box(&self) -> Box<dyn SystemPromptSource> {
+        Box::new(HardcodedPromptSource {
+            language: self.language.clone(),
+        })
+    }
+}
+
+/// 用户自定义 prompt 来源（来自 `config.polisher.system_prompt`）。
+pub struct CustomPromptSource {
+    prompt: String,
+}
+
+impl CustomPromptSource {
+    pub fn new(prompt: String) -> Self {
+        Self { prompt }
+    }
+}
+
+impl SystemPromptSource for CustomPromptSource {
+    fn get_prompt(
+        &self,
+        _level: PolishLevel,
+        _language: &str,
+    ) -> Result<String, crate::prompt_store::PromptError> {
+        Ok(self.prompt.clone())
+    }
+
+    fn clone_box(&self) -> Box<dyn SystemPromptSource> {
+        Box::new(CustomPromptSource {
+            prompt: self.prompt.clone(),
+        })
+    }
+}
+
+/// 链式 fallback：按顺序尝试多个来源，返回第一个成功的结果。
+pub struct FallbackSource {
+    sources: Vec<Box<dyn SystemPromptSource>>,
+    fallback: Box<dyn SystemPromptSource>,
+}
+
+impl FallbackSource {
+    pub fn new(
+        sources: Vec<Box<dyn SystemPromptSource>>,
+        fallback: Box<dyn SystemPromptSource>,
+    ) -> Self {
+        Self { sources, fallback }
+    }
+}
+
+impl SystemPromptSource for FallbackSource {
+    fn get_prompt(
+        &self,
+        level: PolishLevel,
+        language: &str,
+    ) -> Result<String, crate::prompt_store::PromptError> {
+        for source in &self.sources {
+            match source.get_prompt(level, language) {
+                Ok(prompt) => return Ok(prompt),
+                Err(e) => {
+                    tracing::warn!(error = %e, "prompt source failed, trying next");
+                }
+            }
+        }
+        self.fallback.get_prompt(level, language)
+    }
+
+    fn clone_box(&self) -> Box<dyn SystemPromptSource> {
+        Box::new(FallbackSource {
+            sources: self.sources.iter().map(|s| s.clone_box()).collect(),
+            fallback: self.fallback.clone_box(),
+        })
+    }
+}
+
 /// LLM 文本润色器。
 ///
 /// 支持 OpenAI 和 Anthropic 两种 API 协议，
 /// 支持指数退避重试（最多 3 次）。
 ///
-/// System prompts are loaded from PromptStore if available,
-/// otherwise falls back to custom_system_prompt from config.
-#[derive(Clone, Debug)]
+/// System prompt 通过 `SystemPromptSource` trait 注入，`polish()` 内部不含 fallback 逻辑。
 pub struct LLMFormatter {
     api_key: String,
     api_base_url: String,
@@ -234,8 +372,34 @@ pub struct LLMFormatter {
     protocol: protocol::ApiProtocol,
     temperature: f32,
     language: String,
-    custom_system_prompt: String,
-    prompt_store: Option<crate::prompt_store::PromptStore>,
+    prompt_source: Box<dyn SystemPromptSource>,
+}
+
+impl Clone for LLMFormatter {
+    fn clone(&self) -> Self {
+        Self {
+            api_key: self.api_key.clone(),
+            api_base_url: self.api_base_url.clone(),
+            model: self.model.clone(),
+            client: self.client.clone(),
+            max_retries: self.max_retries,
+            max_tokens: self.max_tokens,
+            protocol: self.protocol,
+            temperature: self.temperature,
+            language: self.language.clone(),
+            prompt_source: self.prompt_source.clone_box(),
+        }
+    }
+}
+
+impl std::fmt::Debug for LLMFormatter {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LLMFormatter")
+            .field("model", &self.model)
+            .field("protocol", &self.protocol)
+            .field("language", &self.language)
+            .finish()
+    }
 }
 
 impl TryFrom<&crate::config::Config> for LLMFormatter {
@@ -264,7 +428,6 @@ impl LLMFormatter {
             protocol,
             cfg.temperature,
             cfg.language.clone(),
-            cfg.system_prompt.clone(),
         )
     }
     #[allow(dead_code)]
@@ -283,7 +446,6 @@ impl LLMFormatter {
             protocol::ApiProtocol::OpenAi,
             0.3,
             "zh".to_string(),
-            String::new(),
         )
     }
 
@@ -297,12 +459,13 @@ impl LLMFormatter {
         protocol: protocol::ApiProtocol,
         temperature: f32,
         language: String,
-        custom_system_prompt: String,
     ) -> Result<Self, PolisherError> {
         let client = Client::builder()
             .timeout(timeout)
             .build()
             .map_err(|e| PolisherError::HttpError(format!("failed to build HTTP client: {}", e)))?;
+        let prompt_source: Box<dyn SystemPromptSource> =
+            Box::new(HardcodedPromptSource::new(language.clone()));
         Ok(Self {
             api_key,
             api_base_url,
@@ -313,14 +476,13 @@ impl LLMFormatter {
             protocol,
             temperature,
             language,
-            custom_system_prompt,
-            prompt_store: None,
+            prompt_source,
         })
     }
 
-    /// Sets the PromptStore for loading system prompts from external files.
-    pub fn with_prompt_store(mut self, store: crate::prompt_store::PromptStore) -> Self {
-        self.prompt_store = Some(store);
+    /// Sets the prompt source for system prompt resolution.
+    pub fn with_prompt_source(mut self, source: Box<dyn SystemPromptSource>) -> Self {
+        self.prompt_source = source;
         self
     }
 
@@ -333,24 +495,10 @@ impl LLMFormatter {
             return Ok(text.to_string());
         }
 
-        // Try PromptStore first, fall back to custom_system_prompt or hardcoded prompts
-        let system_prompt = if let Some(ref store) = self.prompt_store {
-            match store.get_system_prompt(level) {
-                Ok(prompt) => prompt,
-                Err(e) => {
-                    tracing::warn!(error = %e, "failed to load prompt from PromptStore, falling back");
-                    if self.custom_system_prompt.is_empty() {
-                        get_system_prompt(level, &self.language)
-                    } else {
-                        self.custom_system_prompt.clone()
-                    }
-                }
-            }
-        } else if self.custom_system_prompt.is_empty() {
-            get_system_prompt(level, &self.language)
-        } else {
-            self.custom_system_prompt.clone()
-        };
+        let system_prompt = self
+            .prompt_source
+            .get_prompt(level, &self.language)
+            .map_err(|e| PolisherError::HttpError(format!("failed to get prompt: {e}")))?;
 
         retry_with_backoff(self.max_retries, || async {
             match self.protocol {
@@ -601,7 +749,6 @@ mod tests {
             protocol::ApiProtocol::OpenAi,
             0.3,
             "zh".to_string(),
-            String::new(),
         )
         .unwrap();
         let _ = formatter.polish("test", PolishLevel::Light).await;
