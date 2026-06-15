@@ -169,13 +169,21 @@ mod tests {
 
     #[test]
     #[cfg(target_os = "windows")]
-    fn test_handle_start_record_returns_error_on_windows_stub() {
+    fn test_handle_start_record_windows_returns_error_without_audio_device() {
+        // On a CI/headless environment without a real WASAPI input device,
+        // cpal's default input lookup returns None and start_recording fails.
+        // The Windows recorder is otherwise functionally identical to the
+        // Linux one (start → record → stop → WAV); device-touching paths
+        // are covered by manual Windows validation (路线 B 选项 3).
         let mut recorder = PlatformRecorder::new(16000, 1);
         let sink = MockSink::new();
 
         let result = handle_start_record(&mut recorder, &sink);
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("not implemented yet"));
+        if result.is_ok() {
+            assert_eq!(sink.status_changes(), vec!["recording"]);
+        } else {
+            assert!(sink.status_changes().is_empty());
+        }
     }
 
     #[tokio::test]

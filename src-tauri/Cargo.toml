@@ -38,6 +38,7 @@ uuid = { version = "1", features = ["v4"] }
 regex = "1"
 notify = "6"
 thiserror = "1"
+rubato = { version = "0.16", default-features = false }
 
 [dev-dependencies]
 mockito = "1"
@@ -49,4 +50,5 @@ windows = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_System_Threading",
 ] }
-
+cpal = "0.17"
+arboard = { version = "3", default-features = false }

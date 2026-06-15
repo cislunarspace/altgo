@@ -1,7 +1,12 @@
-//! 录音模块（Linux）。
+//! 录音模块（跨平台调度）。
 //!
-//! 使用 `parecord`（PulseAudio）录制音频。
+//! 平台录音器经 `PlatformRecorder` 别名选择：
+//! - Linux：`PulseRecorder`，使用 `parecord`（PulseAudio）。
+//! - Windows：`WindowsRecorder`，使用 cpal（WASAPI 后端）。
+//!
+//! 公共 DSP 工具（格式转换、降混、重采样，平台无关、可在 Linux 上单元测试）见 `dsp`。
 
+mod dsp;
 #[cfg(target_os = "linux")]
 mod linux;
 #[cfg(target_os = "windows")]
