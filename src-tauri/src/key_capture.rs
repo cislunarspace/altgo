@@ -1,4 +1,11 @@
-//! 短时捕获用户按下的物理键，用于设置激活录音键（Linux evdev）。
+//! 短时捕获用户按下的物理键，用于设置激活录音键（Linux evdev / Windows WH_KEYBOARD_LL）。
+//!
+//! 平台实现分别位于：
+//! - `linux`（cfg）：evtest，阻塞 12s 等一次按键
+//! - `windows`（cfg）：独立 WH_KEYBOARD_LL 钩子，等待 WM_KEYDOWN 后记录 VK 码
+
+#[cfg(target_os = "windows")]
+mod windows;
 
 use serde::Serialize;
 
@@ -202,11 +209,5 @@ pub fn capture_activation_key_blocking() -> Result<CaptureActivationResponse, St
 
 #[cfg(target_os = "windows")]
 pub fn capture_activation_key_blocking() -> Result<CaptureActivationResponse, String> {
-    let (vk, key_name) =
-        crate::key_listener::capture_activation_key_blocking(std::time::Duration::from_secs(12))?;
-    Ok(CaptureActivationResponse {
-        key_name,
-        linux_evdev_code: None,
-        windows_vk: Some(vk),
-    })
+    windows::capture_activation_key_blocking(std::time::Duration::from_secs(12))
 }

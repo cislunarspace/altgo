@@ -37,14 +37,7 @@ impl HookState {
     }
 }
 
-struct CaptureState {
-    tx: std::sync::mpsc::SyncSender<i32>,
-    stopping: AtomicBool,
-    thread_id: AtomicU32,
-}
-
 static HOOK_STATE: Mutex<Option<Arc<HookState>>> = Mutex::new(None);
-static CAPTURE_STATE: Mutex<Option<Arc<CaptureState>>> = Mutex::new(None);
 
 pub fn vk_from_key_name(key_name: &str) -> Option<i32> {
     match key_name {
@@ -71,33 +64,6 @@ fn vk_from_function_key(key_name: &str) -> Option<i32> {
         }
     }
     None
-}
-
-pub fn key_name_from_vk(vk: i32) -> Option<String> {
-    match vk {
-        0xA4 => Some("Alt_L".to_string()),
-        0xA5 => Some("Alt_R".to_string()),
-        0xA2 => Some("Control_L".to_string()),
-        0xA3 => Some("Control_R".to_string()),
-        0xA0 => Some("Shift_L".to_string()),
-        0xA1 => Some("Shift_R".to_string()),
-        0x20 => Some("space".to_string()),
-        0x0D => Some("Return".to_string()),
-        0x09 => Some("Tab".to_string()),
-        0x1B => Some("Escape".to_string()),
-        vk if (0x70..=0x7B).contains(&vk) => Some(format!("F{}", vk - 0x6F)),
-        _ => None,
-    }
-}
-
-pub fn format_capture_result(vk: i32) -> Result<(i32, String), String> {
-    let key_name = key_name_from_vk(vk).ok_or_else(|| {
-        format!(
-            "captured unsupported virtual-key code 0x{:X} on Windows",
-            vk
-        )
-    })?;
-    Ok((vk, key_name))
 }
 
 #[derive(Debug)]
@@ -253,121 +219,6 @@ unsafe extern "system" fn low_level_keyboard_proc(
     unsafe { CallNextHookEx(None, n_code, w_param, l_param) }
 }
 
-pub fn capture_activation_key_blocking(
-    timeout: std::time::Duration,
-) -> Result<(i32, String), String> {
-    let (tx, rx) = std::sync::mpsc::sync_channel::<i32>(1);
-    let state = Arc::new(CaptureState {
-        tx,
-        stopping: AtomicBool::new(false),
-        thread_id: AtomicU32::new(0),
-    });
-    let state_for_thread = Arc::clone(&state);
-    let (ready_tx, ready_rx) = std::sync::mpsc::sync_channel::<Result<(), String>>(1);
-
-    let handle = std::thread::spawn(move || {
-        // SAFETY: WH_KEYBOARD_LL allows a null module handle when the callback is in the current
-        // process and the hook is global (dwThreadId = 0). The callback has the correct ABI.
-        let hook = unsafe { SetWindowsHookExW(WH_KEYBOARD_LL, Some(capture_hook_proc), None, 0) };
-        let hook = match hook {
-            Ok(hook) => {
-                // SAFETY: GetCurrentThreadId has no preconditions and returns this message-pump
-                // thread ID, used later to post WM_QUIT.
-                state_for_thread
-                    .thread_id
-                    .store(unsafe { GetCurrentThreadId() }, Ordering::SeqCst);
-                *CAPTURE_STATE.lock().unwrap() = Some(Arc::clone(&state_for_thread));
-                let _ = ready_tx.send(Ok(()));
-                hook
-            }
-            Err(error) => {
-                let message = error.to_string();
-                tracing::error!(error = %message, "failed to install capture hook");
-                let _ = ready_tx.send(Err(message));
-                return;
-            }
-        };
-
-        let mut msg = MSG::default();
-        loop {
-            // SAFETY: msg points to valid writable memory for the duration of the call. A null
-            // hwnd receives thread messages; WM_QUIT wakes this loop on capture completion.
-            let ret = unsafe { GetMessageW(&mut msg, None, 0, 0) };
-            if ret.0 <= 0 || state_for_thread.stopping.load(Ordering::SeqCst) {
-                break;
-            }
-            // SAFETY: msg was initialized by a successful GetMessageW call.
-            unsafe {
-                let _ = TranslateMessage(&msg);
-                DispatchMessageW(&msg);
-            }
-        }
-
-        *CAPTURE_STATE.lock().unwrap() = None;
-        // SAFETY: hook was returned by SetWindowsHookExW on this thread and has not yet been
-        // unhooked. Unhooking here keeps capture teardown on the owning message-pump thread.
-        let _ = unsafe { UnhookWindowsHookEx(hook) };
-    });
-
-    if let Err(error) = wait_for_capture_hook(&ready_rx, &state) {
-        let _ = handle.join();
-        return Err(error);
-    }
-
-    let result = rx.recv_timeout(timeout);
-    stop_capture_thread(&state);
-    let _ = handle.join();
-
-    let vk = result.map_err(|_| "timeout: no key pressed".to_string())?;
-    format_capture_result(vk)
-}
-
-fn wait_for_capture_hook(
-    ready_rx: &std::sync::mpsc::Receiver<Result<(), String>>,
-    state: &CaptureState,
-) -> Result<(), String> {
-    match ready_rx.recv_timeout(HOOK_START_TIMEOUT) {
-        Ok(Ok(())) => Ok(()),
-        Ok(Err(message)) => Err(format!("key capture start: {message}")),
-        Err(_) => {
-            stop_capture_thread(state);
-            Err("key capture start: timed out waiting for WH_KEYBOARD_LL hook".to_string())
-        }
-    }
-}
-
-fn stop_capture_thread(state: &CaptureState) {
-    state.stopping.store(true, Ordering::SeqCst);
-    let id = state.thread_id.load(Ordering::SeqCst);
-    if id != 0 {
-        // SAFETY: id is captured from the capture message-pump thread after the hook is installed.
-        // Posting WM_QUIT wakes GetMessageW so the thread can unhook and exit.
-        unsafe {
-            let _ = PostThreadMessageW(id, WM_QUIT, WPARAM(0), LPARAM(0));
-        }
-    }
-}
-
-unsafe extern "system" fn capture_hook_proc(
-    n_code: i32,
-    w_param: WPARAM,
-    l_param: LPARAM,
-) -> LRESULT {
-    if n_code >= 0 && w_param.0 as u32 == WM_KEYDOWN {
-        if let Some(state) = CAPTURE_STATE.lock().unwrap().as_ref() {
-            // SAFETY: Windows calls WH_KEYBOARD_LL callbacks with l_param pointing to a valid
-            // KBDLLHOOKSTRUCT whenever n_code >= 0.
-            let info = unsafe { *(l_param.0 as *const KBDLLHOOKSTRUCT) };
-            if state.tx.try_send(info.vkCode as i32).is_ok() {
-                stop_capture_thread(state);
-            }
-        }
-    }
-    // SAFETY: Forwarding to the next hook is required by the Win32 hook contract. Passing None is
-    // accepted for low-level hooks; Windows ignores the hook handle for this call.
-    unsafe { CallNextHookEx(None, n_code, w_param, l_param) }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -425,21 +276,10 @@ mod tests {
     }
 
     #[test]
-    fn formats_capture_result_for_known_vk() {
-        let result = format_capture_result(0xA5);
-        assert_eq!(result, Ok((0xA5, "Alt_R".to_string())));
-    }
-
-    #[test]
-    fn formats_capture_result_for_unknown_vk() {
-        let result = format_capture_result(0xFF);
-        assert!(result.is_err());
-        let err = result.unwrap_err();
-        assert!(err.contains("0xFF"), "error should mention VK: {}", err);
-    }
-
-    #[test]
-    fn vk_mapping_round_trips_for_supported_keys() {
+    fn vk_from_key_name_resolves_supported_names() {
+        // The listener takes xmodmap-style names; verify each supported name
+        // resolves to a non-zero VK. (The reverse VK→name mapping for
+        // capture is in `crate::key_capture::windows::vk_to_name`.)
         let names = [
             "Alt_L",
             "Alt_R",
@@ -466,12 +306,7 @@ mod tests {
         ];
         for name in names {
             let vk = vk_from_key_name(name).expect(name);
-            assert_eq!(
-                key_name_from_vk(vk),
-                Some(name.to_string()),
-                "round-trip failed for {}",
-                name
-            );
+            assert!(vk > 0, "expected non-zero VK for {name}, got {vk}");
         }
     }
 }

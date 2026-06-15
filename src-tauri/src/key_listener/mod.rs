@@ -10,7 +10,7 @@ mod windows;
 #[cfg(target_os = "linux")]
 pub use linux::{list_keyboard_devices, X11Listener};
 #[cfg(target_os = "windows")]
-pub use windows::{capture_activation_key_blocking, vk_from_key_name, WindowsListener};
+pub use windows::{vk_from_key_name, WindowsListener};
 
 #[cfg(target_os = "linux")]
 pub type PlatformListener = X11Listener;
