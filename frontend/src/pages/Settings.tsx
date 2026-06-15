@@ -1,10 +1,8 @@
-import { useState, useEffect, useCallback } from "react";
-import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
+import { useEffect, useState } from "react";
 import { getVersion } from "@tauri-apps/api/app";
-import { message as showMessageDialog } from "@tauri-apps/plugin-dialog";
 import { useTranslation } from "../i18n";
-import { useModelDownloadProgress } from "../hooks/useTauri";
+import { useConfigForm } from "../hooks/useConfigForm";
+import { useModelManager } from "../hooks/useModelManager";
 import {
   Save,
   Globe,
@@ -23,52 +21,15 @@ import {
 import { useTheme, type ThemePref } from "../ThemeContext";
 import "../styles/components.css";
 
-/** Matches backend ConfigResponse (camelCase). */
-interface AppConfig {
-  keyName: string;
-  /** Linux evdev 键码；由「按下以设置」写入 */
-  linuxEvdevCode: number | null;
-  /** Windows 虚拟键码 */
-  windowsVk: number | null;
-  language: string;
-  engine: string;
-  model: string;
-  apiBaseUrl: string;
-  polishLevel: string;
-  polishModel: string;
-  polishApiBaseUrl: string;
-  guiLanguage: string;
-  /** User-entered API key (empty = keep existing if hasTranscriberApiKey is true) */
-  transcriberApiKey: string;
-  /** User-entered API key (empty = keep existing if hasPolisherApiKey is true) */
-  polisherApiKey: string;
-  hasTranscriberApiKey: boolean;
-  hasPolisherApiKey: boolean;
-}
-
-interface ModelEntry {
-  name: string;
-  filename: string;
-  sizeBytes: number;
-  description: string;
-  downloaded: boolean;
-}
-
-interface SaveConfigArgs extends Record<string, unknown> {
-  patch: ReturnType<typeof saveRequestBody>;
-}
-
 const KEY_PRESETS: { value: string; labelKey: string }[] = [
   { value: "Alt_R", labelKey: "settings.key_preset_right_alt" },
 ];
 
-/** 与下拉「右Alt」一致的老 keysym 名，仍视为预设而非自定义输入 */
 function isPresetKeyName(keyName: string): boolean {
   if (KEY_PRESETS.some((p) => p.value === keyName)) return true;
   return keyName === "ISO_Level3_Shift" || keyName === "AltGr";
 }
 
-/** 下拉框受控 value：老配置里的右 Alt keysym 显示为「右Alt」 */
 function presetSelectValue(keyName: string): string {
   if (KEY_PRESETS.some((p) => p.value === keyName)) return keyName;
   if (keyName === "ISO_Level3_Shift" || keyName === "AltGr") return "Alt_R";
@@ -81,256 +42,60 @@ function formatSize(bytes: number): string {
   return `${Math.round(mb)} MB`;
 }
 
-function saveRequestBody(c: AppConfig) {
-  return {
-    keyName: c.keyName,
-    linuxEvdevCode: c.linuxEvdevCode,
-    windowsVk: c.windowsVk,
-    language: c.language,
-    engine: c.engine,
-    model: c.model,
-    // Only send API keys when user entered a new value (empty = keep existing)
-    ...(c.transcriberApiKey ? { apiKey: c.transcriberApiKey } : {}),
-    apiBaseUrl: c.apiBaseUrl,
-    polishLevel: c.polishLevel,
-    polishModel: c.polishModel,
-    ...(c.polisherApiKey ? { polishApiKey: c.polisherApiKey } : {}),
-    polishApiBaseUrl: c.polishApiBaseUrl,
-    guiLanguage: c.guiLanguage,
-  };
-}
-
-function saveConfigArgs(c: AppConfig): SaveConfigArgs {
-  return { patch: saveRequestBody(c) };
-}
-
-function normalizeConfig(c: AppConfig): AppConfig {
-  return {
-    ...c,
-    linuxEvdevCode: c.linuxEvdevCode ?? null,
-    windowsVk: c.windowsVk ?? null,
-    // API keys are not returned from backend; start empty (user enters only when changing)
-    transcriberApiKey: "",
-    polisherApiKey: "",
-    hasTranscriberApiKey: c.hasTranscriberApiKey ?? false,
-    hasPolisherApiKey: c.hasPolisherApiKey ?? false,
-  };
-}
-
 export default function Settings() {
   const { t, setLang } = useTranslation();
   const { themePref, setTheme } = useTheme();
-  const [config, setConfig] = useState<AppConfig | null>(null);
-  const [models, setModels] = useState<ModelEntry[]>([]);
-  const [resolvedPath, setResolvedPath] = useState<string | null | undefined>(undefined);
-  const [downloading, setDownloading] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState<"saved" | string>("");
   const [polishOpen, setPolishOpen] = useState(false);
   const [advancedPath, setAdvancedPath] = useState(false);
-  const [keyCapturing, setKeyCapturing] = useState(false);
   const [appVersion, setAppVersion] = useState<string>("");
-  const progress = useModelDownloadProgress();
+
+  const modelMgr = useModelManager({ t });
+  const form = useConfigForm({
+    t,
+    setLang,
+    onAfterSave: (saved) => {
+      modelMgr.refreshResolved(saved.model, saved.engine);
+      modelMgr.refreshModels();
+    },
+  });
+  const {
+    config,
+    setConfig,
+    saving,
+    message,
+    update,
+    save,
+    saveWith,
+    keyCapturing,
+    captureActivationKey,
+  } = form;
+  const { models, downloading, resolvedPath, refreshResolved } = modelMgr;
 
   useEffect(() => {
     getVersion().then(setAppVersion).catch(() => {});
   }, []);
-
-  const refreshModels = useCallback(() => {
-    invoke<ModelEntry[]>("list_models").then(setModels).catch(() => {});
-  }, []);
-
-  const reportModelFailure = useCallback(
-    async (err: unknown) => {
-      await showMessageDialog(String(err), {
-        title: t("settings.model_error_title"),
-        kind: "error",
-      });
-    },
-    [t],
-  );
-
-  const refreshResolved = useCallback((model: string, engine: string) => {
-    if (engine !== "local" || !model.trim()) {
-      setResolvedPath(null);
-      return;
-    }
-    invoke<string | null>("resolve_model", { model })
-      .then(setResolvedPath)
-      .catch(() => setResolvedPath(null));
-  }, []);
-
-  useEffect(() => {
-    invoke<AppConfig>("get_config")
-      .then((c) => {
-        setConfig(normalizeConfig(c));
-        refreshResolved(c.model, c.engine);
-      })
-      .catch((e) => {
-        setMessage(String(e));
-      });
-    refreshModels();
-  }, [refreshModels, refreshResolved]);
 
   useEffect(() => {
     if (!config) return;
     refreshResolved(config.model, config.engine);
   }, [config?.model, config?.engine, refreshResolved]);
 
-  const update = <K extends keyof AppConfig>(key: K, value: AppConfig[K]) => {
-    setConfig((prev) => (prev ? { ...prev, [key]: value } : prev));
-  };
-
-  const save = async () => {
+  const applyLocalModel = async (name: string) => {
     if (!config) return;
-    setSaving(true);
-    setMessage("");
-    try {
-      await invoke("save_config", saveConfigArgs(config));
-      setLang(config.guiLanguage);
-      setMessage("saved");
-      refreshResolved(config.model, config.engine);
-      refreshModels();
-    } catch (e) {
-      setMessage(String(e));
-    } finally {
-      setSaving(false);
-    }
+    await saveWith({ ...config, engine: "local", model: name });
   };
 
   const downloadAndUse = async (name: string) => {
-    setDownloading(name);
-    type FinishPayload = {
-      name: string;
-      success: boolean;
-      path?: string;
-      error?: string;
-    };
-    let resolveFinished!: (v: {
-      success: boolean;
-      path?: string;
-      error?: string;
-    }) => void;
-    const finished = new Promise<{
-      success: boolean;
-      path?: string;
-      error?: string;
-    }>((resolve) => {
-      resolveFinished = resolve;
-    });
-
-    const unlisten = await listen<FinishPayload>("model-download-finished", (event) => {
-      const p = event.payload;
-      if (p.name !== name) return;
-      resolveFinished({
-        success: p.success,
-        path: p.path,
-        error: p.error,
-      });
-    });
-
-    try {
-      await invoke("download_model", { name });
-      const result = await finished;
-
-      if (!result.success) {
-        await reportModelFailure(result.error ?? "download failed");
-        return;
-      }
-
-      const updated = await invoke<ModelEntry[]>("list_models");
-      setModels(updated);
-      if (!config) return;
-      const next = { ...config, engine: "local", model: name };
-      setConfig(next);
-      await invoke("save_config", saveConfigArgs(next));
-      setLang(next.guiLanguage);
-      setMessage("saved");
-      refreshResolved(name, "local");
-    } catch (e) {
-      await reportModelFailure(e);
-    } finally {
-      unlisten();
-      setDownloading(null);
-    }
+    await modelMgr.downloadAndUse(name, applyLocalModel);
   };
 
   const handleDelete = async (name: string) => {
-    try {
-      await invoke("delete_model", { name });
-      refreshModels();
-      if (config?.model === name) {
+    await modelMgr.deleteModel(name, (deleted) => {
+      if (config?.model === deleted) {
         update("model", "");
       }
-    } catch (e) {
-      await reportModelFailure(e);
-    }
+    });
   };
-
-  const applyLocalModel = async (name: string) => {
-    if (!config) return;
-    const next = { ...config, engine: "local", model: name };
-    setConfig(next);
-    setSaving(true);
-    setMessage("");
-    try {
-      await invoke("save_config", saveConfigArgs(next));
-      setLang(next.guiLanguage);
-      setMessage("saved");
-      refreshResolved(name, "local");
-      refreshModels();
-    } catch (e) {
-      setMessage(String(e));
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const captureActivationKey = async () => {
-    if (!config) return;
-    setKeyCapturing(true);
-    setMessage("");
-    try {
-      const r = await invoke<{
-        keyName: string;
-        linuxEvdevCode?: number | null;
-        windowsVk?: number | null;
-      }>("capture_activation_key");
-      const next: AppConfig = {
-        ...config,
-        keyName: r.keyName,
-        linuxEvdevCode: r.linuxEvdevCode ?? null,
-        windowsVk: r.windowsVk ?? null,
-      };
-      setConfig(next);
-      await invoke("save_config", saveConfigArgs(next));
-      setLang(next.guiLanguage);
-      setMessage("saved");
-      refreshResolved(next.model, next.engine);
-      refreshModels();
-    } catch (e) {
-      setMessage(String(e));
-      await invoke("start_pipeline").catch(() => {});
-    } finally {
-      setKeyCapturing(false);
-    }
-  };
-
-  const downloadingProgress = (() => {
-    if (!downloading) return 0;
-    const meta = models.find((m) => m.name === downloading);
-    const total =
-      progress.name === downloading && progress.total > 0
-        ? progress.total
-        : meta?.sizeBytes ?? Math.max(progress.total, 1);
-    const downloaded = progress.name === downloading ? progress.downloaded : 0;
-    return Math.round((downloaded / Math.max(total, 1)) * 100);
-  })();
-
-  const showDownloadConnecting =
-    !!downloading &&
-    (progress.name !== downloading ||
-      (progress.name === downloading && progress.downloaded === 0));
 
   if (!config) {
     return <div className="loading-container">{t("settings.loading")}</div>;
@@ -345,7 +110,6 @@ export default function Settings() {
 
   return (
     <div className="settings-page settings-page--v2">
-      {/* Readiness — implicit state made explicit */}
       <div
         className={`settings-readiness ${
           config.engine === "api"
@@ -386,7 +150,6 @@ export default function Settings() {
       </div>
 
       <div className="settings-form">
-        {/* Transcription — primary */}
         <section className="settings-section settings-section--primary">
           <h3 className="settings-section-title">
             <Sparkles size={14} />
@@ -429,6 +192,7 @@ export default function Settings() {
               <div className="settings-model-grid">
                 {models.map((m) => {
                   const isActive = config.model === m.name;
+                  const { percent, connecting } = modelMgr.getDownloadProgress(m.name);
                   return (
                     <div
                       key={m.name}
@@ -467,15 +231,12 @@ export default function Settings() {
                         ) : downloading === m.name ? (
                           <div className="model-progress" style={{ width: "100%" }}>
                             <div className="progress-bar">
-                              <div
-                                className="progress-fill"
-                                style={{ width: `${downloadingProgress}%` }}
-                              />
+                              <div className="progress-fill" style={{ width: `${percent}%` }} />
                             </div>
                             <span className="progress-text">
-                              {showDownloadConnecting
+                              {connecting
                                 ? t("settings.model_download_connecting")
-                                : `${downloadingProgress}%`}
+                                : `${percent}%`}
                             </span>
                           </div>
                         ) : (
@@ -572,7 +333,6 @@ export default function Settings() {
           )}
         </section>
 
-        {/* Recording */}
         <section className="settings-section">
           <h3 className="settings-section-title">
             <Mic size={14} />
@@ -655,7 +415,6 @@ export default function Settings() {
           <p className="settings-hint">{t("settings.capture_activation_lead")}</p>
         </section>
 
-        {/* Polishing — collapsible */}
         <section className="settings-section">
           <button
             type="button"
@@ -724,7 +483,6 @@ export default function Settings() {
           )}
         </section>
 
-        {/* Appearance */}
         <section className="settings-section">
           <h3 className="settings-section-title">
             <Palette size={14} />
@@ -747,7 +505,6 @@ export default function Settings() {
           </div>
         </section>
 
-        {/* UI language */}
         <section className="settings-section">
           <h3 className="settings-section-title">
             <Globe size={14} />

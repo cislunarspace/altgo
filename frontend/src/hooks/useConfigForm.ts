@@ -1,0 +1,163 @@
+import { useCallback, useEffect, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
+import { message as showMessageDialog } from "@tauri-apps/plugin-dialog";
+
+export interface AppConfig {
+  keyName: string;
+  linuxEvdevCode: number | null;
+  windowsVk: number | null;
+  language: string;
+  engine: string;
+  model: string;
+  apiBaseUrl: string;
+  polishLevel: string;
+  polishModel: string;
+  polishApiBaseUrl: string;
+  guiLanguage: string;
+  transcriberApiKey: string;
+  polisherApiKey: string;
+  hasTranscriberApiKey: boolean;
+  hasPolisherApiKey: boolean;
+}
+
+function saveRequestBody(c: AppConfig) {
+  return {
+    keyName: c.keyName,
+    linuxEvdevCode: c.linuxEvdevCode,
+    windowsVk: c.windowsVk,
+    language: c.language,
+    engine: c.engine,
+    model: c.model,
+    ...(c.transcriberApiKey ? { apiKey: c.transcriberApiKey } : {}),
+    apiBaseUrl: c.apiBaseUrl,
+    polishLevel: c.polishLevel,
+    polishModel: c.polishModel,
+    ...(c.polisherApiKey ? { polishApiKey: c.polisherApiKey } : {}),
+    polishApiBaseUrl: c.polishApiBaseUrl,
+    guiLanguage: c.guiLanguage,
+  };
+}
+
+function normalizeConfig(c: AppConfig): AppConfig {
+  return {
+    ...c,
+    linuxEvdevCode: c.linuxEvdevCode ?? null,
+    windowsVk: c.windowsVk ?? null,
+    transcriberApiKey: "",
+    polisherApiKey: "",
+    hasTranscriberApiKey: c.hasTranscriberApiKey ?? false,
+    hasPolisherApiKey: c.hasPolisherApiKey ?? false,
+  };
+}
+
+export interface UseConfigFormOptions {
+  t: (key: string) => string;
+  setLang: (lang: string) => void;
+  onAfterSave?: (saved: AppConfig) => void;
+}
+
+export interface UseConfigFormResult {
+  config: AppConfig | null;
+  setConfig: React.Dispatch<React.SetStateAction<AppConfig | null>>;
+  saving: boolean;
+  message: string;
+  setMessage: (msg: string) => void;
+  update: <K extends keyof AppConfig>(key: K, value: AppConfig[K]) => void;
+  save: () => Promise<void>;
+  saveWith: (next: AppConfig) => Promise<void>;
+  keyCapturing: boolean;
+  captureActivationKey: () => Promise<void>;
+}
+
+/**
+ * Owns the configuration form: state, normalization, persistence, key capture.
+ */
+export function useConfigForm({
+  t,
+  setLang,
+  onAfterSave,
+}: UseConfigFormOptions): UseConfigFormResult {
+  const [config, setConfig] = useState<AppConfig | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState("");
+  const [keyCapturing, setKeyCapturing] = useState(false);
+
+  useEffect(() => {
+    invoke<AppConfig>("get_config")
+      .then((c) => setConfig(normalizeConfig(c)))
+      .catch((e) => setMessage(String(e)));
+  }, []);
+
+  const update = useCallback(
+    <K extends keyof AppConfig>(key: K, value: AppConfig[K]) => {
+      setConfig((prev) => (prev ? { ...prev, [key]: value } : prev));
+    },
+    [],
+  );
+
+  const saveWith = useCallback(
+    async (next: AppConfig) => {
+      setSaving(true);
+      setMessage("");
+      try {
+        await invoke("save_config", { patch: saveRequestBody(next) });
+        setConfig(next);
+        setLang(next.guiLanguage);
+        setMessage("saved");
+        onAfterSave?.(next);
+      } catch (e) {
+        setMessage(String(e));
+      } finally {
+        setSaving(false);
+      }
+    },
+    [setLang, onAfterSave],
+  );
+
+  const save = useCallback(async () => {
+    if (!config) return;
+    await saveWith(config);
+  }, [config, saveWith]);
+
+  const captureActivationKey = useCallback(async () => {
+    if (!config) return;
+    setKeyCapturing(true);
+    setMessage("");
+    try {
+      const r = await invoke<{
+        keyName: string;
+        linuxEvdevCode?: number | null;
+        windowsVk?: number | null;
+      }>("capture_activation_key");
+      const next: AppConfig = {
+        ...config,
+        keyName: r.keyName,
+        linuxEvdevCode: r.linuxEvdevCode ?? null,
+        windowsVk: r.windowsVk ?? null,
+      };
+      await saveWith(next);
+    } catch (e) {
+      setMessage(String(e));
+      await invoke("start_pipeline").catch(() => {});
+      await showMessageDialog(String(e), {
+        title: t("settings.capture_error_title"),
+        kind: "error",
+      }).then(() => undefined);
+    } finally {
+      setKeyCapturing(false);
+    }
+  }, [config, saveWith, t]);
+
+  return {
+    config,
+    setConfig,
+    saving,
+    message,
+    setMessage,
+    update,
+    save,
+    saveWith,
+    keyCapturing,
+    captureActivationKey,
+  };
+}

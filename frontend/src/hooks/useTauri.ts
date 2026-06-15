@@ -1,24 +1,44 @@
-import { useState, useEffect } from "react";
-import { listen } from "@tauri-apps/api/event";
+import { useEffect, useState } from "react";
+import { listen, type EventCallback, type UnlistenFn } from "@tauri-apps/api/event";
 
-export function useStatus(): string {
-  const [status, setStatus] = useState("idle");
+/**
+ * Subscribe to a Tauri event. Returns the latest payload (or `initial` if no event yet).
+ *
+ * The callback is captured in the effect closure, so changing it does not re-subscribe.
+ * Use the returned `payload` to drive UI; if you need a derived transformation, do it
+ * in the caller.
+ */
+export function useTauriEvent<T>(
+  event: string,
+  initial: T,
+  callback?: EventCallback<T>,
+): T {
+  const [state, setState] = useState<T>(initial);
 
   useEffect(() => {
-    const unlisten = listen<string>("pipeline-status", (event) => {
-      setStatus(event.payload);
+    let active = true;
+    const unlistenPromise: Promise<UnlistenFn> = listen<T>(event, (event) => {
+      if (!active) return;
+      setState(event.payload);
+      callback?.(event);
     });
     return () => {
-      unlisten.then((fn) => fn());
+      active = false;
+      unlistenPromise.then((fn) => fn());
     };
-  }, []);
+    // callback is intentionally not a dep; consumers that need it can memoise.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [event]);
 
-  return status;
+  return state;
+}
+
+export function useStatus(): string {
+  return useTauriEvent<string>("pipeline-status", "idle");
 }
 
 export function useLatestTranscription(): string | null {
   const [text, setText] = useState<string | null>(null);
-
   useEffect(() => {
     let timer: number | null = null;
     const unlisten = listen<string>("transcription-result", (event) => {
@@ -35,42 +55,17 @@ export function useLatestTranscription(): string | null {
       }
     };
   }, []);
-
   return text;
 }
 
 export function usePipelineError(): string | null {
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    const unlisten = listen<string>("pipeline-error", (event) => {
-      setError(event.payload);
-    });
-    return () => {
-      unlisten.then((fn) => fn());
-    };
-  }, []);
-
-  return error;
+  return useTauriEvent<string | null>("pipeline-error", null);
 }
 
-/** Linux: `evtest` or `xinput` — set when the voice pipeline starts. */
 export function useKeyListenerBackend(): string | null {
-  const [backend, setBackend] = useState<string | null>(null);
-
-  useEffect(() => {
-    const unlisten = listen<string>("key-listener-backend", (event) => {
-      setBackend(event.payload);
-    });
-    return () => {
-      unlisten.then((fn) => fn());
-    };
-  }, []);
-
-  return backend;
+  return useTauriEvent<string | null>("key-listener-backend", null);
 }
 
-/** 转写/润色阶段进度（`fraction` 为 null 时不确定进度，如云端 API 或未解析到 whisper-cli 输出）。 */
 export function useTranscriptionProgress(): {
   phase: string;
   fraction: number | null;
@@ -79,16 +74,13 @@ export function useTranscriptionProgress(): {
     phase: string;
     fraction: number | null;
   } | null>(null);
-
   useEffect(() => {
     let active = true;
     const unlistenProgress = listen<{
       phase: string;
       fraction: number | null;
     }>("transcription-progress", (event) => {
-      if (active) {
-        setProgress(event.payload);
-      }
+      if (active) setProgress(event.payload);
     });
     const unlistenStatus = listen<string>("pipeline-status", (event) => {
       if (!active) return;
@@ -102,7 +94,6 @@ export function useTranscriptionProgress(): {
       unlistenStatus.then((fn) => fn());
     };
   }, []);
-
   return progress;
 }
 
@@ -111,24 +102,9 @@ export function useModelDownloadProgress(): {
   downloaded: number;
   total: number;
 } {
-  const [progress, setProgress] = useState<{
-    name: string | null;
-    downloaded: number;
-    total: number;
-  }>({ name: null, downloaded: 0, total: 0 });
-
-  useEffect(() => {
-    const unlisten = listen<{
-      name: string;
-      downloaded: number;
-      total: number;
-    }>("model-download-progress", (event) => {
-      setProgress(event.payload);
-    });
-    return () => {
-      unlisten.then((fn) => fn());
-    };
-  }, []);
-
-  return progress;
+  return useTauriEvent("model-download-progress", {
+    name: null,
+    downloaded: 0,
+    total: 0,
+  });
 }
