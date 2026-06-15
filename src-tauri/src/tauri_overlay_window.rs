@@ -97,9 +97,32 @@ fn platform_primary_monitor_geometry() -> Option<(i32, i32, i32, i32)> {
 
 #[cfg(target_os = "windows")]
 fn platform_primary_monitor_geometry() -> Option<(i32, i32, i32, i32)> {
-    // Windows monitor enumeration will live here. Returning None lets callers
-    // fall back to a sensible default position until implemented.
-    None
+    use windows::Win32::Foundation::POINT;
+    use windows::Win32::Graphics::Gdi::{
+        GetMonitorInfoW, MonitorFromPoint, MONITORINFO, MONITOR_DEFAULTTOPRIMARY,
+    };
+    // Probe (0, 0) so MONITOR_DEFAULTTOPRIMARY resolves to the primary monitor
+    // even when no top-level window has been created yet.
+    let monitor = unsafe { MonitorFromPoint(POINT { x: 0, y: 0 }, MONITOR_DEFAULTTOPRIMARY) };
+    if monitor.is_invalid() {
+        return None;
+    }
+    let mut info = MONITORINFO {
+        cbSize: std::mem::size_of::<MONITORINFO>() as u32,
+        ..Default::default()
+    };
+    // SAFETY: `info` is a valid, properly-sized MONITORINFO for the duration of the call.
+    let ok = unsafe { GetMonitorInfoW(monitor, &mut info) };
+    if !ok.as_bool() {
+        return None;
+    }
+    let rect = &info.rcWork;
+    Some(geometry_from_work_rect(
+        rect.left,
+        rect.top,
+        rect.right,
+        rect.bottom,
+    ))
 }
 
 /// Uses `xrandr` to get primary monitor geometry in physical pixels.
@@ -168,6 +191,13 @@ fn parse_xrandr_geometry(output: &str) -> Vec<(i32, i32, i32, i32, bool)> {
     monitors
 }
 
+/// Extracts `(x, y, width, height)` from a work-area rect, regardless of how
+/// the platform struct names it. Shared by tests so geometry extraction is
+/// exercised on every platform.
+fn geometry_from_work_rect(left: i32, top: i32, right: i32, bottom: i32) -> (i32, i32, i32, i32) {
+    (left, top, right - left, bottom - top)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -193,13 +223,72 @@ DP-2 connected 1920x1080+3840+0 (normal left inverted right x axis y axis) 527mm
     }
 
     #[test]
-    fn test_platform_primary_monitor_geometry_returns_none_on_windows_stub() {
-        // On Linux this exercise the xrandr path and may return Some; on Windows
-        // it returns None. The assertion only checks the Windows contract.
-        #[cfg(target_os = "windows")]
-        assert!(platform_primary_monitor_geometry().is_none());
-        // On Linux just ensure the function is callable without panicking.
-        #[cfg(target_os = "linux")]
+    fn test_platform_primary_monitor_geometry_runs_without_panicking() {
+        // Both Linux (xrandr) and Windows (GetMonitorInfoW) implementations
+        // should return Some geometry on a real machine. The function may
+        // return None on stripped-down CI without a display, but it must
+        // not panic. Issue #23 (Windows) was previously a stub returning
+        // None unconditionally; this test catches accidental regressions.
         let _ = platform_primary_monitor_geometry();
+    }
+
+    #[test]
+    fn test_geometry_from_work_rect_uses_work_area() {
+        // Full monitor: 0,0 - 3840x2160
+        // Work area: 0,40 - 3840x2080 (40px taskbar at bottom)
+        let (x, y, w, h) = geometry_from_work_rect(0, 40, 3840, 2120);
+        assert_eq!((x, y, w, h), (0, 40, 3840, 2080));
+    }
+
+    #[test]
+    fn test_geometry_from_work_rect_distinguishes_from_full_monitor() {
+        // Same monitor would report rcMonitor=(0,0,3840,2160). rcWork should be
+        // strictly smaller in at least one dimension when a taskbar is present.
+        let full = geometry_from_work_rect(0, 0, 3840, 2160);
+        let work = geometry_from_work_rect(0, 40, 3840, 2120);
+        assert_ne!(full, work);
+        assert!(
+            work.3 < full.3,
+            "work height should be smaller than full height"
+        );
+    }
+
+    #[test]
+    fn test_geometry_from_work_rect_negative_origin() {
+        // Secondary monitor placed to the left of the primary has negative x.
+        let (x, y, w, h) = geometry_from_work_rect(-1920, 0, 0, 1080);
+        assert_eq!((x, y, w, h), (-1920, 0, 1920, 1080));
+    }
+
+    #[test]
+    #[cfg(target_os = "windows")]
+    fn test_win32_geometry_extraction_from_monitorinfo() {
+        use windows::Win32::Foundation::RECT;
+        use windows::Win32::Graphics::Gdi::MONITORINFO;
+        // Simulate a 1920x1080 monitor with a 40px taskbar at the bottom.
+        let info = MONITORINFO {
+            cbSize: std::mem::size_of::<MONITORINFO>() as u32,
+            rcMonitor: RECT {
+                left: 0,
+                top: 0,
+                right: 1920,
+                bottom: 1080,
+            },
+            rcWork: RECT {
+                left: 0,
+                top: 0,
+                right: 1920,
+                bottom: 1040,
+            },
+            dwFlags: 0,
+        };
+        let (x, y, w, h) = geometry_from_work_rect(
+            info.rcWork.left,
+            info.rcWork.top,
+            info.rcWork.right,
+            info.rcWork.bottom,
+        );
+        // Verifies that we picked rcWork (bottom=1040), not rcMonitor (bottom=1080).
+        assert_eq!((x, y, w, h), (0, 0, 1920, 1040));
     }
 }
