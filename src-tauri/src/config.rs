@@ -368,6 +368,112 @@ impl Config {
     }
 }
 
+// ---------------------------------------------------------------------------
+// ConfigPatch — partial update for Config
+// ---------------------------------------------------------------------------
+
+/// 三态反序列化：JSON 字段缺失 = 不修改；`null` = 清除；数值 = 设置。
+///
+/// 紧靠 `KeyListenerConfig.linux_evdev_code` 字段定义。
+fn deserialize_opt_patch_u16<'de, D>(deserializer: D) -> Result<Option<Option<u16>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let v = serde_json::Value::deserialize(deserializer)?;
+    match v {
+        serde_json::Value::Null => Ok(Some(None)),
+        serde_json::Value::Number(n) => {
+            let u = n
+                .as_u64()
+                .ok_or_else(|| serde::de::Error::custom("linux_evdev_code: expected number"))?;
+            if u > u16::MAX as u64 {
+                return Err(serde::de::Error::custom("linux_evdev_code out of range"));
+            }
+            Ok(Some(Some(u as u16)))
+        }
+        _ => Err(serde::de::Error::custom(
+            "linux_evdev_code: expected null or number",
+        )),
+    }
+}
+
+fn apply_nested_opt_u16(target: &mut Option<u16>, patch: Option<Option<u16>>) {
+    match patch {
+        None => {}
+        Some(None) => *target = None,
+        Some(Some(v)) => *target = Some(v),
+    }
+}
+
+/// Partial update applied to the in-memory config. All fields are optional;
+/// absent fields are left unchanged.
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConfigPatch {
+    pub key_name: Option<String>,
+    /// `None` = field absent (no change); `Some(None)` = JSON `null` (clear);
+    /// `Some(Some(v))` = set to v.
+    #[serde(default, deserialize_with = "deserialize_opt_patch_u16")]
+    pub linux_evdev_code: Option<Option<u16>>,
+    pub windows_vk: Option<i32>,
+    pub language: Option<String>,
+    pub engine: Option<String>,
+    pub model: Option<String>,
+    pub api_key: Option<String>,
+    pub api_base_url: Option<String>,
+    pub polish_level: Option<String>,
+    pub polish_model: Option<String>,
+    pub polish_api_key: Option<String>,
+    pub polish_api_base_url: Option<String>,
+    pub gui_language: Option<String>,
+}
+
+impl ConfigPatch {
+    /// 将 patch 中的 `Some` 字段写入 `cfg`。
+    pub fn apply_to_config(&self, cfg: &mut Config) {
+        if let Some(ref v) = self.key_name {
+            cfg.key_listener.key_name = v.clone();
+        }
+        apply_nested_opt_u16(
+            &mut cfg.key_listener.linux_evdev_code,
+            self.linux_evdev_code,
+        );
+        if let Some(v) = self.windows_vk {
+            cfg.key_listener.windows_vk = Some(v);
+        }
+        if let Some(ref v) = self.language {
+            cfg.transcriber.language = v.clone();
+        }
+        if let Some(ref v) = self.engine {
+            cfg.transcriber.engine = v.clone();
+        }
+        if let Some(ref v) = self.model {
+            cfg.transcriber.model = v.clone();
+        }
+        if let Some(ref v) = self.api_key {
+            cfg.transcriber.api_key = v.clone();
+        }
+        if let Some(ref v) = self.api_base_url {
+            cfg.transcriber.api_base_url = v.clone();
+        }
+        if let Some(ref v) = self.polish_level {
+            cfg.polisher.level = v.clone();
+        }
+        if let Some(ref v) = self.polish_model {
+            cfg.polisher.model = v.clone();
+        }
+        if let Some(ref v) = self.polish_api_key {
+            cfg.polisher.api_key = v.clone();
+        }
+        if let Some(ref v) = self.polish_api_base_url {
+            cfg.polisher.api_base_url = v.clone();
+        }
+        if let Some(ref v) = self.gui_language {
+            cfg.gui.language = v.clone();
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -554,5 +660,67 @@ level = "debug"
         cfg.polisher.level = "medium".to_string();
         cfg.polisher.api_key = String::new();
         assert!(cfg.validate().is_err());
+    }
+
+    // -- ConfigPatch tests ---------------------------------------------------
+
+    #[test]
+    fn evdev_json_null_clears() {
+        let j = r#"{"linuxEvdevCode":null}"#;
+        let p: ConfigPatch = serde_json::from_str(j).unwrap();
+        assert_eq!(p.linux_evdev_code, Some(None));
+    }
+
+    #[test]
+    fn evdev_missing_field_means_no_patch() {
+        let j = r#"{}"#;
+        let p: ConfigPatch = serde_json::from_str(j).unwrap();
+        assert!(p.linux_evdev_code.is_none());
+    }
+
+    #[test]
+    fn evdev_number_sets() {
+        let j = r#"{"linuxEvdevCode":100}"#;
+        let p: ConfigPatch = serde_json::from_str(j).unwrap();
+        assert_eq!(p.linux_evdev_code, Some(Some(100)));
+    }
+
+    #[test]
+    fn patch_apply_to_config_updates_selected_fields() {
+        let mut cfg = Config::default();
+        let patch: ConfigPatch =
+            serde_json::from_str(r#"{"keyName":"space","language":"en","polishLevel":"heavy"}"#)
+                .unwrap();
+        patch.apply_to_config(&mut cfg);
+        assert_eq!(cfg.key_listener.key_name, "space");
+        assert_eq!(cfg.transcriber.language, "en");
+        assert_eq!(cfg.polisher.level, "heavy");
+        // Unchanged fields keep defaults
+        assert_eq!(cfg.transcriber.engine, "local");
+    }
+
+    #[test]
+    fn patch_apply_evdev_null_clears() {
+        let mut cfg = Config::default();
+        cfg.key_listener.linux_evdev_code = Some(56);
+        let patch: ConfigPatch = serde_json::from_str(r#"{"linuxEvdevCode":null}"#).unwrap();
+        patch.apply_to_config(&mut cfg);
+        assert!(cfg.key_listener.linux_evdev_code.is_none());
+    }
+
+    #[test]
+    fn patch_round_trip_through_save_load() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("altgo.toml");
+
+        let mut cfg = Config::default();
+        let patch: ConfigPatch =
+            serde_json::from_str(r#"{"keyName":"F1","language":"en"}"#).unwrap();
+        patch.apply_to_config(&mut cfg);
+        cfg.save(&path).unwrap();
+
+        let loaded = Config::load(&path).unwrap();
+        assert_eq!(loaded.key_listener.key_name, "F1");
+        assert_eq!(loaded.transcriber.language, "en");
     }
 }

@@ -7,7 +7,8 @@ use tauri::{AppHandle, Emitter, State};
 
 use crate::{
     config,
-    config_store::{ConfigPatch, ConfigStore},
+    config::ConfigPatch,
+    config_store::ConfigStore,
     history,
     history::HistoryStore,
     output,
