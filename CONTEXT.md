@@ -59,6 +59,14 @@ On Windows, the recorder captures from the default WASAPI input device and adapt
 
 ## Key Input
 
+**KeyListener**
+The interface for continuously monitoring the configured activation key and emitting `KeyEvent`s while the pipeline is running. Implemented by platform adapters (`X11Listener` on Linux, `WindowsListener` on Windows). The pipeline consumes it as `Box<dyn KeyListener>` so the same lifecycle code runs on both platforms.
+_Avoid_: key listener (lowercase, when referring to the concept), platform listener.
+
+**KeyCapture**
+The interface for one-shot capture of any physical key during Settings configuration, returning the key identifiers needed by `KeyListenerConfig` (`key_name`, `linux_evdev_code`, `windows_vk`). Implemented by platform adapters that reuse the same low-level input mechanism as `KeyListener` but expose a synchronous blocking API.
+_Avoid_: capture mode, key capture mode.
+
 **Activation Key**
 The physical key held to start recording. Configured per-device as either an X11 keysym name (`key_name`) or an evdev scancode (`linux_evdev_code`). The evdev path is preferred on Wayland. On Windows, configured via Windows virtual key code (`windows_vk`); falls back to `key_name` if absent. If the user edits `key_name` through Settings after a Windows capture, `windows_vk` is cleared so the new `key_name` takes effect.
 

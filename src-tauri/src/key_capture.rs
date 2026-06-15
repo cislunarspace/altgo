@@ -32,6 +32,17 @@ pub struct CaptureActivationResponse {
     pub windows_vk: Option<i32>,
 }
 
+/// 一次性捕获用户按下物理键的 trait seam。
+///
+/// 由平台 adapter 实现（Linux evdev / Windows WH_KEYBOARD_LL），
+/// 与 `KeyListener` 共享平台能力但作为独立 seam，避免污染监听接口。
+pub trait KeyCapture: Send {
+    /// 阻塞等待用户按键，返回按键标识。
+    fn capture_blocking(timeout: std::time::Duration) -> Result<CaptureActivationResponse, String>
+    where
+        Self: Sized;
+}
+
 #[cfg(target_os = "linux")]
 fn parse_ev_key_line(line: &str) -> Option<(u16, i32)> {
     if !line.contains("EV_KEY") {
@@ -207,7 +218,98 @@ pub fn capture_activation_key_blocking() -> Result<CaptureActivationResponse, St
     })
 }
 
+/// Linux `KeyCapture` adapter（evdev 路径）。
+#[cfg(target_os = "linux")]
+pub struct LinuxKeyCapture;
+
+#[cfg(target_os = "linux")]
+impl KeyCapture for LinuxKeyCapture {
+    fn capture_blocking(timeout: Duration) -> Result<CaptureActivationResponse, String>
+    where
+        Self: Sized,
+    {
+        let code = capture_evdev_press(timeout)?;
+        let key_name = evdev_code_to_keysym_name(code);
+        Ok(CaptureActivationResponse {
+            key_name,
+            linux_evdev_code: Some(code),
+            windows_vk: None,
+        })
+    }
+}
+
 #[cfg(target_os = "windows")]
 pub fn capture_activation_key_blocking() -> Result<CaptureActivationResponse, String> {
     windows::capture_activation_key_blocking(std::time::Duration::from_secs(12))
+}
+
+/// Windows `KeyCapture` adapter（WH_KEYBOARD_LL 路径）。
+#[cfg(target_os = "windows")]
+pub struct WindowsKeyCapture;
+
+#[cfg(target_os = "windows")]
+impl KeyCapture for WindowsKeyCapture {
+    fn capture_blocking(timeout: std::time::Duration) -> Result<CaptureActivationResponse, String>
+    where
+        Self: Sized,
+    {
+        windows::capture_activation_key_blocking(timeout)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn evdev_code_to_keysym_name_common_keys() {
+        assert_eq!(evdev_code_to_keysym_name(56), "Alt_L");
+        assert_eq!(evdev_code_to_keysym_name(100), "ISO_Level3_Shift");
+        assert_eq!(evdev_code_to_keysym_name(29), "Control_L");
+        assert_eq!(evdev_code_to_keysym_name(97), "Control_R");
+        assert_eq!(evdev_code_to_keysym_name(42), "Shift_L");
+        assert_eq!(evdev_code_to_keysym_name(54), "Shift_R");
+        assert_eq!(evdev_code_to_keysym_name(57), "space");
+        assert_eq!(evdev_code_to_keysym_name(28), "Return");
+        assert_eq!(evdev_code_to_keysym_name(15), "Tab");
+        assert_eq!(evdev_code_to_keysym_name(1), "Escape");
+    }
+
+    #[test]
+    fn evdev_code_to_keysym_name_function_keys() {
+        assert_eq!(evdev_code_to_keysym_name(59), "F1");
+        assert_eq!(evdev_code_to_keysym_name(60), "F2");
+        assert_eq!(evdev_code_to_keysym_name(88), "F12");
+    }
+
+    #[test]
+    fn evdev_code_to_keysym_name_unknown_returns_evdev_prefix() {
+        assert_eq!(evdev_code_to_keysym_name(999), "evdev_999");
+        assert_eq!(evdev_code_to_keysym_name(200), "evdev_200");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn parse_ev_key_line_extracts_code_and_value() {
+        let line = "Event: time 1234.567, type 1 (EV_KEY), code 56 (KEY_LEFTALT), value 1";
+        let (code, value) = parse_ev_key_line(line).unwrap();
+        assert_eq!(code, 56);
+        assert_eq!(value, 1);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn parse_ev_key_line_release() {
+        let line = "Event: time 1234.568, type 1 (EV_KEY), code 56 (KEY_LEFTALT), value 0";
+        let (code, value) = parse_ev_key_line(line).unwrap();
+        assert_eq!(code, 56);
+        assert_eq!(value, 0);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn parse_ev_key_line_non_ev_key_returns_none() {
+        let line = "Event: time 1234.567, type 3 (EV_ABS), code 0 (ABS_X), value 128";
+        assert!(parse_ev_key_line(line).is_none());
+    }
 }

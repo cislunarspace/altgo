@@ -4,7 +4,7 @@
 //! message-pump thread. The hook callback filters by the configured virtual-key
 //! code and forwards `KeyEvent`s to the async pipeline through a tokio channel.
 
-use super::KeyEvent;
+use super::{KeyEvent, KeyListener};
 use crate::config::KeyListenerConfig;
 use anyhow::Result;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
@@ -190,6 +190,12 @@ impl WindowsListener {
 impl Drop for WindowsListener {
     fn drop(&mut self) {
         self.stop_hook_thread();
+    }
+}
+
+impl KeyListener for WindowsListener {
+    fn start(&mut self) -> Result<(mpsc::UnboundedReceiver<KeyEvent>, &'static str)> {
+        self.start()
     }
 }
 

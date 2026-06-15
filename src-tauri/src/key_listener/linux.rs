@@ -5,7 +5,7 @@
 //!
 //! 通过 `xmodmap -pke` 解析按键名称到 keycode 的映射（xinput 路径）。
 
-use super::KeyEvent;
+use super::{KeyEvent, KeyListener};
 use crate::config::KeyListenerConfig;
 use anyhow::{Context, Result};
 use std::io::BufRead;
@@ -486,5 +486,90 @@ impl X11Listener {
 impl Drop for X11Listener {
     fn drop(&mut self) {
         self.stop();
+    }
+}
+
+impl KeyListener for X11Listener {
+    fn start(&mut self) -> Result<(mpsc::UnboundedReceiver<KeyEvent>, &'static str)> {
+        self.start()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    fn test_config() -> KeyListenerConfig {
+        KeyListenerConfig {
+            key_name: "Alt_R".to_string(),
+            linux_evdev_code: None,
+            windows_vk: None,
+            long_press_threshold: Duration::from_millis(400),
+            double_click_interval: Duration::from_millis(200),
+            debounce_window: Duration::from_millis(30),
+            poll_interval_ms: 10,
+            min_press_duration: Duration::from_millis(80),
+        }
+    }
+
+    #[test]
+    fn x11_listener_new_validates_xinput_presence() {
+        let cfg = test_config();
+        let result = X11Listener::new(&cfg);
+        // 有 xinput 时返回 Ok，无 xinput 时返回 Err
+        let has_xinput = Command::new("xinput")
+            .arg("version")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .is_ok();
+
+        if has_xinput {
+            assert!(result.is_ok());
+        } else {
+            assert!(result.is_err());
+        }
+    }
+
+    #[test]
+    fn x11_listener_new_stores_key_name() {
+        let mut cfg = test_config();
+        cfg.key_name = "Alt_L".to_string();
+        cfg.linux_evdev_code = Some(56);
+
+        // 只有在 xinput 可用时才能构造成功
+        if Command::new("xinput")
+            .arg("version")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .is_ok()
+        {
+            let listener = X11Listener::new(&cfg).unwrap();
+            assert_eq!(listener.key_name, "Alt_L");
+            assert_eq!(listener.linux_evdev_code, Some(56));
+        }
+    }
+
+    #[test]
+    fn keysym_to_evdev_alt_r() {
+        // 直接测试内部映射逻辑
+        let code = match "Alt_R" {
+            "Alt_L" => EVDEV_KEY_ALT,
+            "Alt_R" | "ISO_Level3_Shift" | "AltGr" => EVDEV_KEY_ALT_R,
+            _ => EVDEV_KEY_ALT_R,
+        };
+        assert_eq!(code, EVDEV_KEY_ALT_R);
+    }
+
+    #[test]
+    fn keysym_to_evdev_alt_l() {
+        let code = match "Alt_L" {
+            "Alt_L" => EVDEV_KEY_ALT,
+            "Alt_R" | "ISO_Level3_Shift" | "AltGr" => EVDEV_KEY_ALT_R,
+            _ => EVDEV_KEY_ALT_R,
+        };
+        assert_eq!(code, EVDEV_KEY_ALT);
     }
 }

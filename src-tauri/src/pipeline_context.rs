@@ -6,7 +6,7 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-use crate::key_listener::{KeyListenerConfig, PlatformListener};
+use crate::key_listener::{KeyListener, KeyListenerConfig};
 use crate::pipeline_command_handler::{handle_start_record, handle_stop_record};
 use crate::pipeline_sink::PipelineSink;
 use crate::polisher::{LLMFormatter, PolishLevel};
@@ -23,7 +23,7 @@ pub struct PipelineContext {
     pub poll_running: Arc<AtomicBool>,
     pub key_listener_config: KeyListenerConfig,
     pub poll_interval_ms: u64,
-    pub(crate) listener: Mutex<Option<PlatformListener>>,
+    pub(crate) listener: Mutex<Option<Box<dyn KeyListener>>>,
 }
 
 impl PipelineContext {
@@ -41,7 +41,7 @@ impl PipelineContext {
         let poll_interval_ms = self.poll_interval_ms;
         let key_listener_config = self.key_listener_config.clone();
 
-        let mut listener: PlatformListener = match self.listener.lock().unwrap().take() {
+        let mut listener: Box<dyn KeyListener> = match self.listener.lock().unwrap().take() {
             Some(l) => l,
             None => {
                 sink.on_error("pipeline context already used");
@@ -134,5 +134,136 @@ impl PipelineContext {
 
         sink.on_status_change("stopped");
         tracing::info!("pipeline stopped");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::polisher::PolisherConfig;
+    use tokio::sync::mpsc;
+
+    struct FakeListener {
+        backend: &'static str,
+    }
+
+    impl KeyListener for FakeListener {
+        fn start(
+            &mut self,
+        ) -> anyhow::Result<(
+            mpsc::UnboundedReceiver<crate::key_listener::KeyEvent>,
+            &'static str,
+        )> {
+            let (_, rx) = mpsc::unbounded_channel();
+            Ok((rx, self.backend))
+        }
+    }
+
+    fn test_polisher_config() -> PolisherConfig {
+        PolisherConfig {
+            api_key: "test-key".to_string(),
+            api_base_url: "http://localhost".to_string(),
+            model: "test-model".to_string(),
+            protocol: "openai".to_string(),
+            max_tokens: 256,
+            temperature: 0.0,
+            system_prompt: String::new(),
+            timeout: std::time::Duration::from_secs(10),
+            level: "none".to_string(),
+            language: "en".to_string(),
+        }
+    }
+
+    #[test]
+    fn pipeline_context_accepts_boxed_key_listener() {
+        let fake: Box<dyn KeyListener> = Box::new(FakeListener {
+            backend: "test-fake",
+        });
+        let ctx = PipelineContext {
+            recorder: PlatformRecorder::new(16000, 1),
+            transcriber: crate::transcriber::Transcriber::Api(
+                crate::transcriber::WhisperApi::new(
+                    "test-key".to_string(),
+                    "http://localhost".to_string(),
+                    "test-model".to_string(),
+                    "en".to_string(),
+                    0.0,
+                    String::new(),
+                    std::time::Duration::from_secs(10),
+                )
+                .unwrap(),
+            ),
+            formatter: LLMFormatter::from_config(&test_polisher_config()).unwrap(),
+            polish_level: PolishLevel::None,
+            poll_running: Arc::new(AtomicBool::new(true)),
+            key_listener_config: KeyListenerConfig {
+                key_name: "Alt_R".to_string(),
+                linux_evdev_code: None,
+                windows_vk: None,
+                long_press_threshold: std::time::Duration::from_millis(400),
+                double_click_interval: std::time::Duration::from_millis(200),
+                debounce_window: std::time::Duration::from_millis(30),
+                poll_interval_ms: 10,
+                min_press_duration: std::time::Duration::from_millis(80),
+            },
+            poll_interval_ms: 10,
+            listener: Mutex::new(Some(fake)),
+        };
+
+        // 从 ctx 取出 listener 并验证类型
+        let mut taken = ctx.listener.lock().unwrap().take().unwrap();
+        assert_eq!(taken.start().unwrap().1, "test-fake");
+    }
+
+    #[test]
+    fn pipeline_context_run_returns_early_when_listener_already_taken() {
+        use crate::pipeline::PipelineOutput;
+
+        struct MockSink;
+        impl PipelineSink for MockSink {
+            fn on_status_change(&self, _: &str) {}
+            fn on_error(&self, _: &str) {}
+            fn on_transcription_result(&self, _: &PipelineOutput) {}
+            fn on_progress(&self, _: &str, _: Option<f32>) {}
+            fn on_key_listener_backend(&self, _: &str) {}
+        }
+
+        let ctx = PipelineContext {
+            recorder: PlatformRecorder::new(16000, 1),
+            transcriber: crate::transcriber::Transcriber::Api(
+                crate::transcriber::WhisperApi::new(
+                    "test-key".to_string(),
+                    "http://localhost".to_string(),
+                    "test-model".to_string(),
+                    "en".to_string(),
+                    0.0,
+                    String::new(),
+                    std::time::Duration::from_secs(10),
+                )
+                .unwrap(),
+            ),
+            formatter: LLMFormatter::from_config(&test_polisher_config()).unwrap(),
+            polish_level: PolishLevel::None,
+            poll_running: Arc::new(AtomicBool::new(true)),
+            key_listener_config: KeyListenerConfig {
+                key_name: "Alt_R".to_string(),
+                linux_evdev_code: None,
+                windows_vk: None,
+                long_press_threshold: std::time::Duration::from_millis(400),
+                double_click_interval: std::time::Duration::from_millis(200),
+                debounce_window: std::time::Duration::from_millis(30),
+                poll_interval_ms: 10,
+                min_press_duration: std::time::Duration::from_millis(80),
+            },
+            poll_interval_ms: 10,
+            listener: Mutex::new(None), // 已被取走
+        };
+
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
+        drop(stop_tx);
+
+        // run() 应立即返回（listener 为 None 时 sink.on_error 被调用后 return）
+        rt.block_on(ctx.run(stop_rx, MockSink));
     }
 }

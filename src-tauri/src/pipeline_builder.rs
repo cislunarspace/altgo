@@ -115,36 +115,18 @@ impl PipelineBuilder {
 
     /// Build key listener from config.
     ///
-    /// Returns the listener and a receiver for key events.
+    /// Returns a boxed trait object for platform-independent use in the pipeline.
     pub fn build_key_listener(
         &self,
-    ) -> Result<
-        (
-            crate::key_listener::PlatformListener,
-            tokio::sync::mpsc::UnboundedReceiver<crate::key_listener::KeyEvent>,
-            String,
-        ),
-        PipelineError,
-    > {
-        let mut listener = crate::key_listener::PlatformListener::new(&self.cfg.key_listener)
-            .map_err(|e| {
+    ) -> Result<Box<dyn crate::key_listener::KeyListener>, PipelineError> {
+        let listener =
+            crate::key_listener::PlatformListener::new(&self.cfg.key_listener).map_err(|e| {
                 PipelineError::Fatal(FatalError::KeyListenerFailed {
-                    backend: "unknown".to_string(),
+                    backend: "platform".to_string(),
                     reason: e.to_string(),
                 })
             })?;
-
-        let (key_events, key_backend): (
-            tokio::sync::mpsc::UnboundedReceiver<crate::key_listener::KeyEvent>,
-            &'static str,
-        ) = listener.start().map_err(|e| {
-            PipelineError::Fatal(FatalError::KeyListenerFailed {
-                backend: "unknown".to_string(),
-                reason: format!("failed to start: {}", e),
-            })
-        })?;
-
-        Ok((listener, key_events, key_backend.to_string()))
+        Ok(Box::new(listener))
     }
 
     /// Get polish level from config.
@@ -167,14 +149,7 @@ impl PipelineBuilder {
         let polish_level = self.polish_level();
         let key_listener_config = self.key_listener_config();
         let poll_interval_ms = key_listener_config.poll_interval_ms;
-
-        let listener =
-            crate::key_listener::PlatformListener::new(&self.cfg.key_listener).map_err(|e| {
-                PipelineError::Fatal(FatalError::KeyListenerFailed {
-                    backend: "platform".to_string(),
-                    reason: e.to_string(),
-                })
-            })?;
+        let listener = self.build_key_listener()?;
 
         Ok(crate::pipeline_context::PipelineContext {
             recorder,
