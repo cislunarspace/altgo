@@ -10,13 +10,13 @@ use crate::key_listener::{KeyListener, KeyListenerConfig};
 use crate::pipeline_command_handler::{handle_start_record, handle_stop_record};
 use crate::pipeline_sink::PipelineSink;
 use crate::polisher::{LLMFormatter, PolishLevel};
-use crate::recorder::PlatformRecorder;
+use crate::recorder::Recorder;
 use crate::state_machine::{Command, Machine};
 use crate::transcriber::Transcriber;
 
 /// 管道上下文 — 拥有管道运行期间所需的全部组件。
 pub struct PipelineContext {
-    pub recorder: PlatformRecorder,
+    pub recorder: Box<dyn Recorder>,
     pub transcriber: Transcriber,
     pub formatter: LLMFormatter,
     pub polish_level: PolishLevel,
@@ -109,11 +109,11 @@ impl PipelineContext {
                 cmd = commands.recv() => {
                     match cmd {
                         Some(Command::StartRecord) => {
-                            let _ = handle_start_record(&mut self.recorder, &sink);
+                            let _ = handle_start_record(&mut *self.recorder, &sink);
                         }
                         Some(Command::StopRecord) => {
                             handle_stop_record(
-                                &mut self.recorder,
+                                &mut *self.recorder,
                                 &self.transcriber,
                                 &self.formatter,
                                 self.polish_level,
@@ -141,6 +141,7 @@ impl PipelineContext {
 mod tests {
     use super::*;
     use crate::polisher::PolisherConfig;
+    use crate::recorder::PlatformRecorder;
     use tokio::sync::mpsc;
 
     struct FakeListener {
@@ -180,7 +181,7 @@ mod tests {
             backend: "test-fake",
         });
         let ctx = PipelineContext {
-            recorder: PlatformRecorder::new(16000, 1),
+            recorder: Box::new(PlatformRecorder::new(16000, 1)),
             transcriber: crate::transcriber::Transcriber::Api(
                 crate::transcriber::WhisperApi::new(
                     "test-key".to_string(),
@@ -229,7 +230,7 @@ mod tests {
         }
 
         let ctx = PipelineContext {
-            recorder: PlatformRecorder::new(16000, 1),
+            recorder: Box::new(PlatformRecorder::new(16000, 1)),
             transcriber: crate::transcriber::Transcriber::Api(
                 crate::transcriber::WhisperApi::new(
                     "test-key".to_string(),

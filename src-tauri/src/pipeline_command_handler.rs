@@ -5,12 +5,12 @@
 
 use crate::pipeline_sink::PipelineSink;
 use crate::polisher::{LLMFormatter, PolishLevel};
-use crate::recorder::{PlatformRecorder, Recorder};
+use crate::recorder::Recorder;
 use crate::transcriber::Transcriber;
 
 /// Handle StartRecord command: start recording and notify sink.
 pub fn handle_start_record(
-    recorder: &mut PlatformRecorder,
+    recorder: &mut dyn Recorder,
     sink: &impl PipelineSink,
 ) -> Result<(), String> {
     tracing::info!("recording started");
@@ -24,7 +24,7 @@ pub fn handle_start_record(
 
 /// Handle StopRecord command: stop recording, process audio, notify sink.
 pub async fn handle_stop_record(
-    recorder: &mut PlatformRecorder,
+    recorder: &mut dyn Recorder,
     transcriber: &Transcriber,
     formatter: &LLMFormatter,
     polish_level: PolishLevel,
@@ -111,6 +111,7 @@ pub async fn handle_stop_record(
 mod tests {
     use super::*;
     use crate::pipeline::PipelineOutput;
+    use crate::recorder::PlatformRecorder;
     use std::sync::{Arc, Mutex};
 
     #[derive(Clone)]
@@ -224,6 +225,95 @@ mod tests {
         let statuses = sink.status_changes();
         assert!(statuses.contains(&"processing".to_string()));
         // Will either go to idle (on stop error) or error (on transcription failure)
+        assert!(
+            statuses.contains(&"idle".to_string()) || !sink.errors().is_empty(),
+            "Expected idle status or error, got statuses: {:?}, errors: {:?}",
+            statuses,
+            sink.errors()
+        );
+    }
+
+    // -- FakeRecorder tests (no platform audio device needed) ------------------
+
+    struct FakeRecorder {
+        recording: std::sync::atomic::AtomicBool,
+        audio: Vec<u8>,
+    }
+
+    impl FakeRecorder {
+        fn new(audio: Vec<u8>) -> Self {
+            Self {
+                recording: std::sync::atomic::AtomicBool::new(false),
+                audio,
+            }
+        }
+    }
+
+    impl Recorder for FakeRecorder {
+        fn start_recording(&mut self) -> anyhow::Result<()> {
+            self.recording
+                .store(true, std::sync::atomic::Ordering::SeqCst);
+            Ok(())
+        }
+
+        fn stop_recording(&self) -> anyhow::Result<Vec<u8>> {
+            self.recording
+                .store(false, std::sync::atomic::Ordering::SeqCst);
+            Ok(self.audio.clone())
+        }
+
+        fn is_recording(&self) -> bool {
+            self.recording.load(std::sync::atomic::Ordering::SeqCst)
+        }
+    }
+
+    #[test]
+    fn handle_start_record_with_fake_recorder() {
+        let mut recorder = FakeRecorder::new(vec![]);
+        let sink = MockSink::new();
+
+        let result = handle_start_record(&mut recorder, &sink);
+        assert!(result.is_ok());
+        assert!(recorder.is_recording());
+        assert_eq!(sink.status_changes(), vec!["recording"]);
+    }
+
+    #[tokio::test]
+    async fn handle_stop_record_with_fake_recorder_reports_empty_audio() {
+        let mut recorder = FakeRecorder::new(vec![0u8; 44]); // minimal WAV header
+        let sink = MockSink::new();
+
+        recorder.start_recording().unwrap();
+
+        let transcriber =
+            crate::transcriber::Transcriber::Local(crate::transcriber::LocalWhisper::new(
+                "/nonexistent/model".to_string(),
+                "zh".to_string(),
+                "whisper-cli".to_string(),
+                0,
+                0,
+            ));
+        let formatter = crate::polisher::LLMFormatter::new(
+            "test-key".to_string(),
+            "http://localhost".to_string(),
+            "test-model".to_string(),
+            std::time::Duration::from_secs(5),
+        )
+        .unwrap();
+
+        handle_stop_record(
+            &mut recorder,
+            &transcriber,
+            &formatter,
+            PolishLevel::None,
+            &sink,
+        )
+        .await;
+
+        let statuses = sink.status_changes();
+        assert!(statuses.contains(&"processing".to_string()));
+        // Transcription will fail (model not found) or return empty; either way
+        // the pipeline should handle it gracefully.
         assert!(
             statuses.contains(&"idle".to_string()) || !sink.errors().is_empty(),
             "Expected idle status or error, got statuses: {:?}, errors: {:?}",

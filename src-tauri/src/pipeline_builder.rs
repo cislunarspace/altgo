@@ -19,9 +19,12 @@ impl PipelineBuilder {
     }
 
     /// Build recorder from config.
-    pub fn build_recorder(&self) -> crate::recorder::PlatformRecorder {
+    pub fn build_recorder(&self) -> Box<dyn crate::recorder::Recorder> {
         let recorder_cfg = crate::recorder::RecorderConfig::from(&*self.cfg);
-        crate::recorder::PlatformRecorder::new(recorder_cfg.sample_rate, recorder_cfg.channels)
+        Box::new(crate::recorder::PlatformRecorder::new(
+            recorder_cfg.sample_rate,
+            recorder_cfg.channels,
+        ))
     }
 
     /// Build transcriber from config.

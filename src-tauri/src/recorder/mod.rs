@@ -22,7 +22,7 @@ pub type PlatformRecorder = PulseRecorder;
 #[cfg(target_os = "windows")]
 pub type PlatformRecorder = WindowsRecorder;
 
-pub trait Recorder {
+pub trait Recorder: Send {
     fn start_recording(&mut self) -> anyhow::Result<()>;
     fn stop_recording(&self) -> anyhow::Result<Vec<u8>>;
     fn is_recording(&self) -> bool;
