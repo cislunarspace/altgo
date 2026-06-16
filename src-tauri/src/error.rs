@@ -24,6 +24,24 @@ impl PipelineError {
         matches!(self, Self::Recoverable(_))
     }
 
+    /// Wrap a `TranscriberError` as a fatal `TranscriberInitFailed` (for
+    /// construction-time failures) or as a recoverable `TranscriptionFailed`
+    /// (for runtime failures). Callers choose which via this method.
+    pub fn fatal_transcriber(e: TranscriberError) -> Self {
+        Self::Fatal(FatalError::TranscriberInitFailed(e))
+    }
+
+    /// Wrap a `PolisherError` as a fatal `PolisherInitFailed` (for construction
+    /// time) or as a recoverable `PolishingFailed` (for runtime failures).
+    pub fn fatal_polisher(e: PolisherError) -> Self {
+        Self::Fatal(FatalError::PolisherInitFailed(e))
+    }
+
+    /// Wrap a `RecorderError` as a fatal `RecorderInitFailed`.
+    pub fn fatal_recorder(e: RecorderError) -> Self {
+        Self::Fatal(FatalError::RecorderInitFailed(e))
+    }
+
     /// Returns a user-facing error message in the specified language.
     pub fn message(&self, lang: &str) -> String {
         match self {
@@ -383,14 +401,9 @@ impl RecorderError {
     }
 }
 
-// Conversion from anyhow::Error for gradual migration
-impl From<anyhow::Error> for PipelineError {
-    fn from(e: anyhow::Error) -> Self {
-        // Default to fatal config error
-        // Specific error types should be constructed directly, not via anyhow
-        Self::Fatal(FatalError::ConfigError(e.to_string()))
-    }
-}
+// Conversion from anyhow::Error for gradual migration was removed: modules now
+// return typed errors directly (TranscriberError, PolisherError, RecorderError)
+// and the pipeline aggregates them at the boundary.
 
 #[cfg(test)]
 mod tests {

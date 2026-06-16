@@ -10,7 +10,6 @@
 
 use crate::error::TranscriberError;
 use crate::resource::expand_tilde;
-use anyhow::Context;
 use async_trait::async_trait;
 use regex::Regex;
 use reqwest::Client;
@@ -112,11 +111,11 @@ impl WhisperApi {
         temperature: f32,
         prompt: String,
         timeout: Duration,
-    ) -> anyhow::Result<Self> {
+    ) -> Result<Self, TranscriberError> {
         let client = Client::builder()
             .timeout(timeout)
             .build()
-            .context("failed to build HTTP client for WhisperApi")?;
+            .map_err(|e| TranscriberError::HttpError(format!("failed to build HTTP client: {}", e)))?;
         Ok(Self {
             api_key,
             api_base_url,

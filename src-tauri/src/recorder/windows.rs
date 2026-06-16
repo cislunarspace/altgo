@@ -228,12 +228,18 @@ fn build_stream_err(e: cpal::BuildStreamError) -> anyhow::Error {
 }
 
 impl Recorder for WindowsRecorder {
-    fn start_recording(&mut self) -> Result<()> {
-        self.start()
+    fn start_recording(&mut self) -> Result<(), crate::error::RecorderError> {
+        self.start().map_err(|e| match e.downcast::<crate::error::RecorderError>() {
+            Ok(rec_err) => rec_err,
+            Err(other) => crate::error::RecorderError::StartFailed(other.to_string()),
+        })
     }
 
-    fn stop_recording(&self) -> Result<Vec<u8>> {
-        self.stop()
+    fn stop_recording(&self) -> Result<Vec<u8>, crate::error::RecorderError> {
+        self.stop().map_err(|e| match e.downcast::<crate::error::RecorderError>() {
+            Ok(rec_err) => rec_err,
+            Err(other) => crate::error::RecorderError::StopFailed(other.to_string()),
+        })
     }
 
     fn is_recording(&self) -> bool {

@@ -89,11 +89,7 @@ impl PipelineBuilder {
                     transcriber_cfg.prompt.clone(),
                     transcriber_cfg.timeout,
                 )
-                .map_err(|e| {
-                    PipelineError::Fatal(FatalError::TranscriberInitFailed(
-                        crate::error::TranscriberError::HttpError(e.to_string()),
-                    ))
-                })?;
+                .map_err(PipelineError::fatal_transcriber)?;
                 Box::new(api)
             }
         };
@@ -107,7 +103,7 @@ impl PipelineBuilder {
     pub fn build_polisher(&self) -> Result<LLMFormatter, PipelineError> {
         let polisher_cfg = crate::polisher::PolisherConfig::from(&*self.cfg);
         let formatter = LLMFormatter::from_config(&polisher_cfg)
-            .map_err(|e| PipelineError::Fatal(FatalError::PolisherInitFailed(e)))?;
+            .map_err(PipelineError::fatal_polisher)?;
 
         // Build prompt source chain: PromptStore → Custom → Hardcoded
         let mut sources: Vec<Box<dyn crate::polisher::SystemPromptSource>> = Vec::new();
@@ -335,10 +331,12 @@ pub fn handle_start_record(
     sink: &(impl PipelineSink + ?Sized),
 ) -> Result<(), String> {
     tracing::info!("recording started");
-    recorder.start_recording().map_err(|e: anyhow::Error| {
-        tracing::error!(error = %e, "failed to start recording");
-        e.to_string()
-    })?;
+    recorder
+        .start_recording()
+        .map_err(|e: crate::error::RecorderError| {
+            tracing::error!(error = %e, "failed to start recording");
+            e.to_string()
+        })?;
     sink.on_status_change("recording");
     Ok(())
 }
@@ -672,11 +670,11 @@ mod tests {
     }
 
     impl Recorder for FakeRecorder {
-        fn start_recording(&mut self) -> anyhow::Result<()> {
+        fn start_recording(&mut self) -> Result<(), crate::error::RecorderError> {
             self.recording.store(true, std::sync::atomic::Ordering::SeqCst);
             Ok(())
         }
-        fn stop_recording(&self) -> anyhow::Result<Vec<u8>> {
+        fn stop_recording(&self) -> Result<Vec<u8>, crate::error::RecorderError> {
             self.recording.store(false, std::sync::atomic::Ordering::SeqCst);
             Ok(self.audio.clone())
         }

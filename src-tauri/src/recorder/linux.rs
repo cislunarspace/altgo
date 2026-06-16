@@ -4,6 +4,7 @@
 //! 在独立线程中运行，通过共享的 `Buffer` 累积音频数据。
 
 use crate::audio::{self, Buffer};
+use crate::error::RecorderError;
 use crate::recorder::Recorder;
 use anyhow::Result;
 use std::io::Read;
@@ -33,9 +34,9 @@ impl PulseRecorder {
     }
 
     /// 开始录音。
-    pub fn start(&mut self) -> Result<()> {
+    pub fn start(&mut self) -> Result<(), RecorderError> {
         if self.recording.load(Ordering::SeqCst) {
-            return Err(anyhow::anyhow!("already recording"));
+            return Err(RecorderError::StartFailed("already recording".to_string()));
         }
 
         self.shared_buffer.reset();
@@ -108,7 +109,7 @@ impl PulseRecorder {
     }
 
     /// 停止录音并返回 WAV 编码的音频数据。
-    pub fn stop(&self) -> Result<Vec<u8>> {
+    pub fn stop(&self) -> Result<Vec<u8>, RecorderError> {
         self.recording.store(false, Ordering::SeqCst);
 
         // Wait for the recording thread to finish.
@@ -126,26 +127,30 @@ impl PulseRecorder {
                 } else {
                     "unknown panic".to_string()
                 };
-                return Err(anyhow::anyhow!("recording thread panicked: {}", msg));
+                return Err(RecorderError::StopFailed(format!(
+                    "recording thread panicked: {}",
+                    msg
+                )));
             }
         }
 
         let pcm_data = self.shared_buffer.read_all();
         if pcm_data.is_empty() {
-            return Err(anyhow::anyhow!("no audio data recorded"));
+            return Err(RecorderError::EmptyRecording);
         }
 
-        let wav_data = audio::encode_wav(&pcm_data, self.sample_rate, self.channels as u16, 16)?;
+        let wav_data = audio::encode_wav(&pcm_data, self.sample_rate, self.channels as u16, 16)
+            .map_err(|e| RecorderError::CaptureFailed(e.to_string()))?;
         Ok(wav_data)
     }
 }
 
 impl Recorder for PulseRecorder {
-    fn start_recording(&mut self) -> Result<()> {
+    fn start_recording(&mut self) -> Result<(), RecorderError> {
         self.start()
     }
 
-    fn stop_recording(&self) -> Result<Vec<u8>> {
+    fn stop_recording(&self) -> Result<Vec<u8>, RecorderError> {
         self.stop()
     }
 
