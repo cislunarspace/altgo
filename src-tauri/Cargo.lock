@@ -60,6 +60,7 @@ version = "2.4.2"
 dependencies = [
  "anyhow",
  "arboard",
+ "async-trait",
  "clap",
  "console",
  "cpal",

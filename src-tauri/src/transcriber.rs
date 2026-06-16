@@ -1,18 +1,21 @@
 //! 语音识别模块。
 //!
-//! 提供两种语音识别后端：
+//! `Transcriber` trait 抽象所有后端：
 //!
 //! - `WhisperApi`：通过 HTTP multipart 请求调用兼容 OpenAI 的 Whisper API
 //! - `LocalWhisper`：通过子进程调用本地 `whisper-cli` 二进制文件
+//! - `ResidentWhisper`：常驻 whisper-server + whisper-cli 回退
 //!
-//! 两种后端均返回 `TranscribeResult`，包含识别文本和语言信息。
+//! 所有实现都返回 `TranscribeResult`（文本 + 语言信息），进度通过闭包回调上报。
 
 use crate::error::TranscriberError;
 use crate::resource::expand_tilde;
 use anyhow::Context;
+use async_trait::async_trait;
 use regex::Regex;
 use reqwest::Client;
 use serde::Deserialize;
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
 use tokio::sync::mpsc::UnboundedSender;
@@ -421,28 +424,81 @@ fn which_binary(name: &str) -> Result<std::path::PathBuf, TranscriberError> {
 }
 
 /// Unified transcription backend — dispatches between API, resident server, and one-shot local engines.
-#[derive(Clone, Debug)]
-pub enum Transcriber {
-    Api(WhisperApi),
-    Local(LocalWhisper),
-    Resident(crate::whisper_server::ResidentWhisper),
+///
+/// Progress is reported through the `on_progress` callback (a function pointer
+/// pointing to a closure the caller controls); the trait surface stays free of
+/// channel types so new backends can be plugged in without touching the trait.
+#[async_trait]
+pub trait Transcriber: Send + Sync {
+    /// Transcribe WAV audio data.
+    ///
+    /// `on_progress` receives 0.0–1.0 fractions as the backend makes progress;
+    /// backends without streaming progress should still call it once with `1.0`
+    /// upon success so the UI gets a final tick.
+    async fn transcribe(
+        &self,
+        audio: &[u8],
+        on_progress: Arc<dyn Fn(f32) + Send + Sync>,
+    ) -> Result<TranscribeResult, TranscriberError>;
 }
 
-impl Transcriber {
-    /// Transcribe audio data using the selected backend.
-    pub async fn transcribe(
+#[async_trait]
+impl Transcriber for WhisperApi {
+    async fn transcribe(
         &self,
-        wav_data: &[u8],
-        progress: Option<UnboundedSender<f32>>,
+        audio: &[u8],
+        _on_progress: Arc<dyn Fn(f32) + Send + Sync>,
     ) -> Result<TranscribeResult, TranscriberError> {
-        match self {
-            Transcriber::Api(api) => {
-                let _ = progress;
-                api.transcribe(wav_data).await
+        WhisperApi::transcribe(self, audio).await
+    }
+}
+
+#[async_trait]
+impl Transcriber for LocalWhisper {
+    async fn transcribe(
+        &self,
+        audio: &[u8],
+        on_progress: Arc<dyn Fn(f32) + Send + Sync>,
+    ) -> Result<TranscribeResult, TranscriberError> {
+        // Bridge the callback back into the channel the inner implementation
+        // still consumes. One unbounded sender; one forwarder task per call.
+        let cb = Arc::clone(&on_progress);
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<f32>();
+        let forward = tokio::spawn(async move {
+            while let Some(fr) = rx.recv().await {
+                (cb)(fr);
             }
-            Transcriber::Local(lw) => lw.transcribe(wav_data, progress).await,
-            Transcriber::Resident(rw) => rw.transcribe(wav_data, progress).await,
+        });
+        let result = LocalWhisper::transcribe(self, audio, Some(tx)).await;
+        let _ = forward.await;
+        if result.is_ok() {
+            (on_progress)(1.0);
         }
+        result
+    }
+}
+
+#[async_trait]
+impl Transcriber for crate::whisper_server::ResidentWhisper {
+    async fn transcribe(
+        &self,
+        audio: &[u8],
+        on_progress: Arc<dyn Fn(f32) + Send + Sync>,
+    ) -> Result<TranscribeResult, TranscriberError> {
+        let cb = Arc::clone(&on_progress);
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<f32>();
+        let forward = tokio::spawn(async move {
+            while let Some(fr) = rx.recv().await {
+                (cb)(fr);
+            }
+        });
+        let result =
+            crate::whisper_server::ResidentWhisper::transcribe(self, audio, Some(tx)).await;
+        let _ = forward.await;
+        if result.is_ok() {
+            (on_progress)(1.0);
+        }
+        result
     }
 }
 
