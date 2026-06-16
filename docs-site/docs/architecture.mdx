@@ -30,18 +30,21 @@ src-tauri/src/
 ├── history.rs         # 转写历史 persistence（history.json）
 ├── state_machine.rs   # 按键状态机
 ├── audio.rs           # WAV 编解码，线程安全 Buffer
-├── transcriber.rs     # Whisper API + 本地 whisper.cpp
+├── transcriber.rs     # Transcriber trait + Whisper API / whisper.cpp 实现
 ├── polisher.rs        # LLM 文本润色
 ├── pipeline.rs        # 音频处理核心（转写 + 润色）
 ├── key_listener/      # 按键监听
-│   ├── mod.rs         # 公共接口 + 去抖逻辑
-│   └── linux.rs       # xinput test-xi2
+│   ├── mod.rs         # 公共 trait + 去抖逻辑 + PlatformListener
+│   ├── linux.rs       # xinput test-xi2（X11）
+│   └── windows.rs     # WH_KEYBOARD_LL 全局钩子
 ├── recorder/          # 音频录制
-│   ├── mod.rs         # 公共接口
-│   └── linux.rs       # parecord
+│   ├── mod.rs         # 公共 trait + PlatformRecorder
+│   ├── linux.rs       # parecord（PulseAudio）
+│   └── windows.rs     # cpal（WASAPI）+ rubato 重采样
 └── output/            # 剪贴板 + 通知
-    ├── mod.rs         # 公共接口
-    └── linux.rs       # xclip / xsel / wl-copy + notify-send
+    ├── mod.rs         # 公共 trait + PlatformOutput
+    ├── linux.rs       # xclip / xsel / wl-copy + notify-send
+    └── windows.rs     # arboard 剪贴板
 ```
 
 ## 按键状态机
@@ -67,14 +70,19 @@ src-tauri/src/
 
 ## 平台策略
 
-所有平台交互通过 **子进程调用** CLI 工具（如 `parecord`、`xclip`、`xinput`），而非 FFI，简化了构建和依赖管理。
+**Linux**：通过子进程调用 CLI 工具（`parecord`、`xclip`、`xinput`），简化构建和依赖管理。
+
+**Windows**：使用 Win32 API crate（`windows` 0.61）和跨平台 crate（`cpal` WASAPI、`arboard` 剪贴板）。键盘监听通过 `WH_KEYBOARD_LL` 全局钩子实现，音频通过 WASAPI 捕获。
+
+每个平台模块通过 `#[cfg(target_os)]` 选择实现，暴露统一 trait（`KeyListener`、`Recorder`、`Output`），管道消费 `Box<dyn Trait>` 实现与平台解耦。
 
 ## 转写引擎
 
-通过 `Transcriber` 枚举分派：
+通过 `Transcriber` trait 分派（`async_trait`）：
 
 - `WhisperApi` — HTTP multipart 上传到 OpenAI 兼容端点
 - `LocalWhisper` — 子进程调用 `whisper-cli` 二进制
+- `ResidentWhisper` — 常驻 whisper-server + whisper-cli 回退
 
 ## 润色引擎
 

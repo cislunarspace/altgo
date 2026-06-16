@@ -19,7 +19,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**altgo** is a Linux-only desktop voice-to-text tool written in Rust (Ubuntu 20.04+ tested). Hold the right Alt key to record speech, release to transcribe with **local whisper.cpp**, optionally polish via any **OpenAI-compatible LLM** API, then **write the result to the system clipboard** and show it in a **floating overlay** (overlay copy is a fallback if clipboard tools fail). Successful transcriptions (raw + displayed text) are **persisted as text-only history** in a local JSON file (`~/.config/altgo/history.json`); audio is never stored. Code may still include optional HTTP Whisper API paths for advanced use.
+**altgo** is a desktop voice-to-text tool written in Rust, supporting **Linux** (Ubuntu 20.04+) and **Windows** (MSI via GitHub Releases). Hold the right Alt key to record speech, release to transcribe with **local whisper.cpp**, optionally polish via any **OpenAI-compatible LLM** API, then **write the result to the system clipboard** and show it in a **floating overlay** (overlay copy is a fallback if clipboard tools fail). Successful transcriptions (raw + displayed text) are **persisted as text-only history** in a local JSON file (`~/.config/altgo/history.json`); audio is never stored. Code may still include optional HTTP Whisper API paths for advanced use.
 
 ## Build & Test Commands
 
@@ -38,6 +38,20 @@ cargo tauri build            # Production GUI build
 # cargo tauri build, then copies target/deps/bin/* into src-tauri/target/release/bin/
 make build
 make install                  # After build: altgo -> /usr/local/bin, deps -> /usr/lib/altgo/bin, config -> /etc/altgo/
+```
+
+### Windows Build
+
+```powershell
+# Equivalent of `make build` on Windows (downloads deps + cargo tauri build --bundles msi)
+.\build.ps1
+# or: pwsh packaging/scripts/build.ps1
+# or: build.cmd (shim for systems without pwsh on PATH)
+
+# Test/lint commands are the same as Linux
+cargo test --manifest-path=src-tauri/Cargo.toml
+cargo fmt --manifest-path=src-tauri/Cargo.toml -- --check
+cargo clippy --manifest-path=src-tauri/Cargo.toml -- -D warnings
 ```
 
 ## Architecture
@@ -69,10 +83,10 @@ Key Listener → State Machine → Recorder → Transcriber → Polisher → Out
 - **`model.rs`** — whisper.cpp GGML model management (download, switch, storage in `~/.config/altgo/models/`).
 - **`tray.rs`** — System tray configuration (show window, quit menu).
 - **`resource.rs`** — Resource file management.
-- **`key_capture.rs`** — One-shot activation key capture for Settings (Linux evdev).
-- **`key_listener/`** — Key detection via `xinput test-xi2` (XInput2).
-- **`recorder/`** — Audio capture via `parecord` (PulseAudio).
-- **`output/`** — Clipboard (`xclip`/`xsel`/`wl-copy`) + notifications (`notify-send`).
+- **`key_capture.rs`** — One-shot activation key capture for Settings (Linux evdev; Windows WH_KEYBOARD_LL).
+- **`key_listener/`** — Key detection (Linux: `xinput test-xi2` / Windows: `WH_KEYBOARD_LL` via `SetWindowsHookExW` on a dedicated message-pump thread).
+- **`recorder/`** — Audio capture (Linux: `parecord` PulseAudio / Windows: `cpal` WASAPI; outputs 16kHz mono WAV; resamples via rubato if device rate differs).
+- **`output/`** — Clipboard + notifications (Linux: `xclip`/`xsel`/`wl-copy` + `notify-send` / Windows: `arboard` clipboard + no-op notify; overlay handles display on Windows).
 
 ### Frontend Structure (`frontend/src/`)
 
@@ -105,7 +119,11 @@ Key Listener → State Machine → Recorder → Transcriber → Polisher → Out
 
 ### Key Patterns
 
-**Subprocess-based system interaction** — All platform integration shells out to CLI tools rather than using FFI. This simplifies building and avoids native dependency complexity.
+**Subprocess-based system interaction (Linux)** — Platform integration on Linux shells out to CLI tools (`xinput`, `parecord`, `xclip`). This simplifies building and avoids native dependency complexity.
+
+**Win32 API bindings (Windows)** — Windows uses the `windows` crate (0.61) for keyboard hooks (`WH_KEYBOARD_LL`) and monitor geometry (`GetMonitorInfoW`), `cpal` (0.17) for WASAPI audio capture, and `arboard` (3) for clipboard. These are `cfg(windows)`-only dependencies in `Cargo.toml`.
+
+**Platform abstraction via `cfg` + traits** — Each platform module (`key_listener/`, `recorder/`, `output/`) uses `#[cfg(target_os)]` to select the concrete implementation. A `Platform*` type alias provides the default, and each module exposes a trait (`KeyListener`, `Recorder`, `Output`) so the pipeline can consume `Box<dyn Trait>` for testability.
 
 **Async channel pipeline** — `tokio::sync::mpsc` channels decouple stages. Key events flow via unbounded channel, commands via bounded (capacity 16). Processing spawned as independent `tokio::spawn` tasks.
 
@@ -115,7 +133,23 @@ Key Listener → State Machine → Recorder → Transcriber → Polisher → Out
 
 ### System Requirements
 
-- `xinput`, `xmodmap`, `parecord`, `xclip`/`xsel`/`wl-copy`, `notify-send`
+**Linux**: `xinput`, `xmodmap`, `parecord`, `xclip`/`xsel`/`wl-copy`, `notify-send`
+
+**Windows**: WebView2 Runtime (auto-installed by MSI if missing), microphone (WASAPI default device). No CLI tool dependencies — all platform integration uses Win32 APIs or bundled crates.
+
+### Platform-specific Dependencies (Cargo.toml)
+
+```toml
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.61", features = [
+    "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging",
+    "Win32_Foundation", "Win32_System_Threading", "Win32_Graphics_Gdi",
+] }
+cpal = "0.17"
+arboard = { version = "3", default-features = false }
+```
+
+Note: `cpal` 0.17 is pinned (not 0.18) to avoid breaking `windows-core` version conflicts with tao/tauri 2.10. See memory file `windows-cargo-version-pin`.
 
 ### Tauri GUI Development
 
@@ -130,6 +164,7 @@ cd frontend && npm install
 - `config.rs`, `audio.rs`, `model.rs`, and `history.rs` have comprehensive tests.
 - `transcriber.rs` and `polisher.rs` use `mockito` for HTTP-level mocking.
 - Platform-specific modules have minimal tests (construction/smoke tests only).
+- **Windows code is not tested in CI** (Linux-only CI runner). Windows-specific code paths are verified manually on a Windows machine. The release workflow builds MSI but does not run `cargo test` on Windows.
 
 ## Agent skills
 

@@ -1,12 +1,12 @@
 # altgo
 
-**无需打字，言出法随** — Linux 语音转文字桌面工具
+**无需打字，言出法随** — 语音转文字桌面工具（Linux + Windows）
 
 按住右 Alt 键说话，松开后在本地用 **whisper.cpp** 转写，可选通过 **OpenAI 兼容 API 或 Anthropic Messages API** 调用 LLM 润色；成功后**会尝试将结果写入系统剪贴板**，并在**悬浮窗**中展示，便于核对；也可在悬浮窗内再次点击复制（例如剪贴板工具不可用或需二次确认时）。所有转写文本（原始 + 润色后）会自动保存到本地**历史记录**，随时可查、可复制、可再次润色。
 
 **在线文档**：[https://cislunarspace.github.io/altgo/](https://cislunarspace.github.io/altgo/)（与 [`docs-site/`](docs-site/) 同源，由 GitHub Pages 部署）。
 
-本仓库**仅支持 Linux**（Ubuntu 20.04+）。**不提供 Windows 或 macOS 构建或发布**（历史设计文档见 [`docs/superpowers/`](docs/superpowers/)）。
+本仓库支持 **Linux**（Ubuntu 20.04+）和 **Windows**（MSI 安装包，由 GitHub Releases 提供）。不支持 macOS。
 
 ![APP首页](figures/app_front_image.png)
 
@@ -35,6 +35,12 @@
   ```
 
 - **其余系统组件**（如与桌面、音频、通知相关的库）由 **`.deb` 的依赖关系** 或发行说明处理：缺什么按安装器提示补装即可，不必手工对照长清单。
+
+### 系统要求（Windows）
+
+- **运行时**：需要 **WebView2 运行时**（MSI 安装包已内嵌引导，会自动安装；Windows 10 1803+ 和 Windows 11 通常已预装）。
+- **音频**：使用系统默认麦克风，无需额外配置。若应用无法识别录音设备，检查系统声音设置中是否有可用输入设备。
+- **无额外依赖**：`ffmpeg`、`whisper-cli` 等已随 MSI 一并打包，无需单独安装。
 
 ## 系统托盘
 
@@ -71,6 +77,14 @@
 4. 启动应用，在 **[设置](#首次使用应用内设置)** 里完成转写模型与可选润色等；**不要**一上来编辑配置文件。
 
 **预编译包与捆绑内容**：官方构建会把 **ffmpeg**、**whisper-cli** 等与程序一起打进 **deb / AppImage**，目标是 **安装后开箱即用**，无需再为录音与转写去单独安装这些二进制。
+
+#### Windows
+
+1. 前往 [Releases](../../releases) 下载 **`.msi`** 安装包。
+2. 双击运行 MSI，按向导完成安装。首次安装时若系统缺少 **WebView2 运行时**，安装程序会自动下载并安装（需联网）。
+3. 启动应用，在 **[设置](#首次使用应用内设置)** 里完成转写模型与可选润色等。
+
+**MSI 已内嵌** `ffmpeg`、`whisper-cli` 等二进制，无需单独安装。
 
 ### 给开发者（从本仓库构建）
 
@@ -143,8 +157,9 @@ cd frontend; npm install; cd ..
 
 1. **默认触发键是右侧 Alt**。优先在 **设置 → 录音 / 触发键** 里用「按下以设置」或预设；一般不必改配置文件。
 2. **Linux：是否已加入 `input` 组并重新登录？** 未满足则 Wayland/X11 下按键设备常无法读取。
-3. 查看主窗口是否报错：模型缺失、`xinput`/`evtest` 不可用等会导致管道无法就绪。
-4. 调试：`RUST_LOG=altgo=debug altgo`。
+3. **Windows：确认 altgo 窗口在前台或未被最小化**。`WH_KEYBOARD_LL` 钩子依赖消息循环；某些安全软件可能拦截全局钩子。
+4. 查看主窗口是否报错：模型缺失、`xinput`/`evtest` 不可用等会导致管道无法就绪。
+5. 调试：`RUST_LOG=altgo=debug altgo`（Linux）或在 PowerShell 中 `$env:RUST_LOG="altgo=debug"; altgo`（Windows）。
 
 ### 历史记录查询
 
@@ -169,10 +184,11 @@ altgo 基于 **Tauri**，前端 **React**，核心逻辑 **Rust**。关键模块
 | 模块 | 职责 |
 |------|------|
 | `state_machine` | 按键状态管理（单击 / 长按 / 双击 / 连续录音） |
-| `recorder` | 音频采集（`parecord`） |
+| `key_listener` | 按键监听（Linux: XInput2 / Windows: WH_KEYBOARD_LL） |
+| `recorder` | 音频采集（Linux: parecord / Windows: cpal-WASAPI） |
 | `transcriber` | 本地 `whisper-cli` 或 OpenAI 兼容 API 转写 |
 | `polisher` | OpenAI 兼容 API 或 Anthropic Messages API 润色 |
-| `output` | 剪贴板写入、桌面通知 |
+| `output` | 剪贴板写入（Linux: xclip/xsel/wl-copy / Windows: arboard）、桌面通知 |
 | `history` | 本地 `history.json` 的追加 / 列表 / 删除 / 更新 |
 | `model` | GGML 模型下载与管理 |
 
@@ -183,6 +199,7 @@ altgo 基于 **Tauri**，前端 **React**，核心逻辑 **Rust**。关键模块
 - Rust stable（建议 **1.80+**，见 [Tauri 2 前置条件](https://tauri.app/start/prerequisites/)）
 - **Node.js 18+**（建议 20+）
 - Tauri CLI：`cargo install tauri-cli --version "^2"`
+- **Windows 额外**：MSVC 工具链（通过 `rustup` 安装 `x86_64-pc-windows-msvc`）、PowerShell 7+（`pwsh`）
 
 ### Ubuntu 20.04 上打包依赖示例
 
@@ -198,12 +215,19 @@ sudo apt install build-essential curl wget file \
 
 ```bash
 cd frontend && npm install
-make deps-linux && make build     # 推荐：与发布一致
+make deps-linux && make build     # Linux：推荐，与发布一致
 
 cargo fmt --manifest-path=src-tauri/Cargo.toml -- --check
 cargo clippy --manifest-path=src-tauri/Cargo.toml -- -D warnings
 cargo test --manifest-path=src-tauri/Cargo.toml
 cd frontend && npm run build
+```
+
+```powershell
+# Windows 构建（与 make build 等价）
+.\build.ps1
+# 或: pwsh packaging/scripts/build.ps1
+# 或: build.cmd
 ```
 
 ### Makefile 摘要
@@ -215,6 +239,8 @@ cd frontend && npm run build
 | `make install` | 安装可执行文件与 `/etc/altgo` 配置（通常需 `sudo`） |
 | `make run` | 构建后直接运行 |
 | `make test` / `make fmt` / `make lint` | 测试、格式化、Clippy 检查 |
+
+**Windows**：用 `.\build.ps1` 或 `build.cmd` 替代 `make build`（下载依赖 + `cargo tauri build --bundles msi`）。
 
 ## 相关文档
 

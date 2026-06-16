@@ -5,7 +5,7 @@ title: 快速开始
 
 # 快速开始
 
-本软件**仅支持 Linux**，目前仅在 **Ubuntu 20.04** 上做过测试与部署验证；其他发行版可能可用但未保证。
+本软件支持 **Linux**（Ubuntu 20.04+）和 **Windows**。Linux 目前仅在 **Ubuntu 20.04** 上做过测试与部署验证；其他发行版可能可用但未保证。Windows 通过 MSI 安装包提供。
 
 **官方预编译包**（deb / AppImage）会尽量把 **ffmpeg**、**whisper-cli** 等与程序一并打包，安装后**开箱即用**，无需再为录音、转写单独安装这些二进制。
 
@@ -21,6 +21,8 @@ sudo usermod -aG input "$USER"
 
 ## 最终用户：装好后在「设置」里完成一切
 
+### Linux
+
 1. 从 [Releases](https://github.com/cislunarspace/altgo/releases) 安装 **`.deb`** 或使用 **AppImage**（`chmod +x` 后运行）。
 2. 完成上文 **input 组**。
 3. 启动应用，打开 **设置**：
@@ -28,6 +30,17 @@ sudo usermod -aG input "$USER"
    - 按需配置 **润色**、**外观**、**触发键**（可用「按下以设置」）；
    - 点击 **保存**。
 4. 识别结果会**写入剪贴板**并在**悬浮窗**中展示；需要时可在悬浮窗内再次复制。
+
+### Windows
+
+1. 从 [Releases](https://github.com/cislunarspace/altgo/releases) 下载 **`.msi`** 安装包，双击运行按向导安装。首次安装若系统缺少 WebView2 运行时，安装程序会自动下载。
+2. 启动应用，打开 **设置**：
+   - 在 **转写** 中选用 **本地** 或 **API**（若需要），下载并启用模型，或填写高级路径；
+   - 按需配置 **润色**、**外观**、**触发键**（可用「按下以设置」）；
+   - 点击 **保存**。
+3. 识别结果会**写入剪贴板**并在**悬浮窗**中展示；需要时可在悬浮窗内再次复制。
+
+**Windows 无需** input 组步骤——键盘监听通过全局钩子实现，不依赖 `/dev/input`。
 
 **不要**把「先复制 `configs/altgo.toml` 再手改」当作默认路径——那是高级用法。日常用户只使用界面即可。
 
@@ -44,6 +57,8 @@ make build
 ```
 
 若需快速改前端 UI，可临时使用 `cargo tauri dev`；完整链路仍以 `make build` 为准。
+
+**Windows**：用 `.\build.ps1` 或 `build.cmd` 替代 `make build`（自动下载 whisper-cli、ffmpeg 后 `cargo tauri build --bundles msi`）。需已安装 Rust（MSVC 工具链）、Node.js、PowerShell 7+。
 
 ## 高级：仅当你要手改配置文件时
 

@@ -70,7 +70,9 @@ cd frontend && npm install && cd ..
 cargo tauri dev
 ```
 
-完整发布链路（含捆绑 `ffmpeg` / `whisper-cli`）请以仓库根目录的 **`make build`** 为准，与 CI 一致。
+完整发布链路（含捆绑 `ffmpeg` / `whisper-cli`）：
+- **Linux**：以仓库根目录的 **`make build`** 为准，与 CI 一致。
+- **Windows**：以 **`.\build.ps1`**（或 `build.cmd`）为准。
 
 ## 命令行（若已安装 `altgo` 可执行文件）
 

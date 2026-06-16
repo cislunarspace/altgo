@@ -2,17 +2,18 @@
 
 感谢你对 altgo 的关注！
 
-本项目**仅支持 Linux**；维护者目前仅在 **Ubuntu 20.04** 上做过完整验证。合并前请尽量在该环境或兼容配置下自测。
+本项目支持 **Linux** 和 **Windows**。维护者目前在 **Ubuntu 20.04** 上做过完整验证；Windows 支持通过 CI 构建 MSI 和手动验证。合并前请尽量在相关平台自测。
 
 ## 开发环境
 
 - Rust **1.80+**（推荐最新稳定版，需满足 [Tauri 2 前置条件](https://tauri.app/start/prerequisites/)）
 - **Node.js 18+**（建议 20+；前端使用 npm）
-- Linux（Ubuntu 20.04+）
+- Linux（Ubuntu 20.04+）或 Windows（MSVC 工具链）
 
 ### 平台特定依赖
 
 - **Linux**：`xinput`、`xmodmap`、`parecord`、`xclip` 或 `wl-copy`、`notify-send`；Wayland 下按键监听还需 `evtest`，且需能读取 `/dev/input/event*`（常见：`sudo usermod -aG input $USER` 后重新登录）。完整 GUI 构建需 GTK/WebKit 等开发库，见 [README.md](README.md)「开发」。
+- **Windows**：MSVC 工具链（`rustup default stable-x86_64-pc-windows-msvc`）、PowerShell 7+（`pwsh`，推荐）。音频、键盘、剪贴板均通过 Win32 API 或 `cpal`/`arboard` crate 实现，无需额外 CLI 工具。WebView2 运行时由 Tauri 安装程序自动处理。
 
 ## 开发流程
 
@@ -55,13 +56,15 @@ type: 简短描述
 
 ## 平台相关开发
 
-- 尽可能使用子进程调用系统工具，避免 FFI
+- 尽可能使用子进程调用系统工具（Linux），避免 FFI
+- Windows 使用 Win32 API crate（`windows` 0.61）和跨平台 crate（`cpal`、`arboard`），无需子进程调用
 - 新增系统工具调用时，确保有合理的错误处理和用户提示
+- 平台特定代码通过 `#[cfg(target_os)]` 隔离；每个平台模块实现对应 trait（`KeyListener`、`Recorder`、`Output`），使管道可测试
 
 ## CI、Release 与 GitHub Pages
 
-- **CI**（`.github/workflows/ci.yml`）：向 `master` 推送或开 PR 时运行 `fmt` / `clippy` / `test`，下载 `packaging/scripts/download-deps.sh` 中的捆绑二进制后构建 **deb**，与发布流程一致。
-- **Release**（`.github/workflows/release.yml`）：推送符合 `v*` 的 **tag**（例如 `v1.5.0`）时构建 **Linux deb**，生成 `checksums.txt` 并创建 GitHub Release。发版前请将 `src-tauri/Cargo.toml` / `tauri.conf.json` 中版本与 tag 对齐。
+- **CI**（`.github/workflows/ci.yml`）：向 `master` 推送或开 PR 时运行 `fmt` / `clippy` / `test`，下载 `packaging/scripts/download-deps.sh` 中的捆绑二进制后构建 **deb**，与发布流程一致。Windows 代码路径在 CI 中不测试（仅编译于 `cfg(windows)`），靠 Windows 手动验证。
+- **Release**（`.github/workflows/release.yml`）：推送符合 `v*` 的 **tag**（例如 `v1.5.0`）时构建 **Linux deb / rpm / Flatpak** 和 **Windows MSI**，生成 `checksums.txt` 并创建 GitHub Release。MSI 构建在 `windows-latest` runner 上执行 `pwsh packaging/scripts/download-deps-windows.ps1` + `cargo tauri build --bundles msi`。发版前请将 `src-tauri/Cargo.toml` / `tauri.conf.json` 中版本与 tag 对齐。
 - **文档站**（`.github/workflows/deploy-docs.yml`）：向 `master` 推送时构建 Docusaurus 并部署到 **GitHub Pages**。首次需在仓库 **Settings → Pages** 中将 **Build and deployment** 的 Source 设为 **GitHub Actions**（勿选 branch 静态目录）。文档地址见 `docs-site/docusaurus.config.ts` 中的 `url` / `baseUrl`（例如 `https://<org>.github.io/altgo/`）。也可在 Actions 中手动 **Run workflow** 触发部署。
 - **AppImage**（`.github/workflows/appimage.yml`）：仅 **workflow_dispatch**，需传入与 `Cargo.toml` 一致的版本号。
 
