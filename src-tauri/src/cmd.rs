@@ -35,7 +35,7 @@ pub(crate) fn spawn_pipeline_thread(
             .build()
             .expect("failed to build tokio runtime");
         let sink = TauriPipelineSink::new(app_handle, pipeline_status, cfg_clone);
-        rt.block_on(crate::pipeline_orchestrator::run(cfg, stop_rx, sink));
+        rt.block_on(crate::voice_pipeline::run(cfg, stop_rx, sink));
     });
     crate::PipelineHandle { stop_tx }
 }
