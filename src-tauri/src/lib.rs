@@ -40,6 +40,30 @@ pub struct PipelineHandle {
     pub stop_tx: tokio::sync::oneshot::Sender<()>,
 }
 
+/// Build the Tauri pipeline sink and spawn the voice pipeline on a dedicated
+/// OS thread. Returns a stop handle the caller can use to terminate the loop.
+///
+/// Centralised here so `cmd.rs` only exposes `#[tauri::command]` functions
+/// and never has to thread the sink/lifecycle construction through IPC.
+pub(crate) fn spawn_pipeline_thread(
+    app: &tauri::AppHandle,
+    cfg: Arc<config::Config>,
+    pipeline_status: Arc<std::sync::RwLock<crate::pipeline_controller::PipelineStatus>>,
+) -> PipelineHandle {
+    let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
+    let app_handle = app.clone();
+    let cfg_clone = cfg.clone();
+    std::thread::spawn(move || {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("failed to build tokio runtime");
+        let sink = tauri_sink::TauriPipelineSink::new(app_handle, pipeline_status, cfg_clone);
+        rt.block_on(voice_pipeline::run(cfg, stop_rx, sink));
+    });
+    PipelineHandle { stop_tx }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -81,7 +105,7 @@ pub fn run() {
             let controller = app.state::<pipeline_controller::PipelineController>();
             let status_arc = controller.status_arc();
             controller.start_with_blocking(|| {
-                cmd::spawn_pipeline_thread(app.handle(), cfg, status_arc)
+                spawn_pipeline_thread(app.handle(), cfg, status_arc)
             })?;
 
             Ok(())

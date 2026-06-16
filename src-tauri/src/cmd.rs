@@ -6,7 +6,6 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 
 use crate::{
-    config,
     config::ConfigPatch,
     config_store::ConfigStore,
     history,
@@ -16,29 +15,7 @@ use crate::{
     pipeline_controller::{PipelineController, PipelineStatus},
     polisher,
     tauri_overlay_window::TauriOverlayWindow,
-    tauri_sink::TauriPipelineSink,
 };
-
-/// Spawn a new pipeline OS thread. Returns the stop handle.
-/// Exposed as `pub(crate)` so `lib.rs` and `PipelineController` callers can use it.
-pub(crate) fn spawn_pipeline_thread(
-    app: &AppHandle,
-    cfg: Arc<config::Config>,
-    pipeline_status: Arc<std::sync::RwLock<PipelineStatus>>,
-) -> crate::PipelineHandle {
-    let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
-    let app_handle = app.clone();
-    let cfg_clone = cfg.clone();
-    std::thread::spawn(move || {
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("failed to build tokio runtime");
-        let sink = TauriPipelineSink::new(app_handle, pipeline_status, cfg_clone);
-        rt.block_on(crate::voice_pipeline::run(cfg, stop_rx, sink));
-    });
-    crate::PipelineHandle { stop_tx }
-}
 
 async fn restart_pipeline(
     app: AppHandle,
@@ -49,7 +26,7 @@ async fn restart_pipeline(
     cfg.validate().map_err(|e| e.to_string())?;
     let status_arc = controller.status_arc();
     controller
-        .restart_with(|| spawn_pipeline_thread(&app, cfg, status_arc))
+        .restart_with(|| crate::spawn_pipeline_thread(&app, cfg, status_arc))
         .await
 }
 
@@ -123,7 +100,7 @@ pub async fn start_pipeline(
     let cfg = Arc::new(config_store.snapshot().await);
     let status_arc = controller.status_arc();
     controller
-        .start_with(|| spawn_pipeline_thread(&app, cfg, status_arc))
+        .start_with(|| crate::spawn_pipeline_thread(&app, cfg, status_arc))
         .await
 }
 
