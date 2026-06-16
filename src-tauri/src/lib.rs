@@ -104,9 +104,8 @@ pub fn run() {
 
             let controller = app.state::<pipeline_controller::PipelineController>();
             let status_arc = controller.status_arc();
-            controller.start_with_blocking(|| {
-                spawn_pipeline_thread(app.handle(), cfg, status_arc)
-            })?;
+            controller
+                .start_with_blocking(|| spawn_pipeline_thread(app.handle(), cfg, status_arc))?;
 
             Ok(())
         })

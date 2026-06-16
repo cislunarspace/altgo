@@ -112,10 +112,9 @@ impl WhisperApi {
         prompt: String,
         timeout: Duration,
     ) -> Result<Self, TranscriberError> {
-        let client = Client::builder()
-            .timeout(timeout)
-            .build()
-            .map_err(|e| TranscriberError::HttpError(format!("failed to build HTTP client: {}", e)))?;
+        let client = Client::builder().timeout(timeout).build().map_err(|e| {
+            TranscriberError::HttpError(format!("failed to build HTTP client: {}", e))
+        })?;
         Ok(Self {
             api_key,
             api_base_url,

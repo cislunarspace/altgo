@@ -66,4 +66,3 @@ mod tests {
         assert!(matches!(err, RecorderError::EmptyRecording));
     }
 }
-

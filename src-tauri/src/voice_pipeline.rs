@@ -102,8 +102,8 @@ impl PipelineBuilder {
     /// Returns error if protocol is unknown or HTTP client fails to initialize.
     pub fn build_polisher(&self) -> Result<LLMFormatter, PipelineError> {
         let polisher_cfg = crate::polisher::PolisherConfig::from(&*self.cfg);
-        let formatter = LLMFormatter::from_config(&polisher_cfg)
-            .map_err(PipelineError::fatal_polisher)?;
+        let formatter =
+            LLMFormatter::from_config(&polisher_cfg).map_err(PipelineError::fatal_polisher)?;
 
         // Build prompt source chain: PromptStore → Custom → Hardcoded
         let mut sources: Vec<Box<dyn crate::polisher::SystemPromptSource>> = Vec::new();
@@ -148,9 +148,7 @@ impl PipelineBuilder {
     /// Build key listener from config.
     ///
     /// Returns a boxed trait object for platform-independent use in the pipeline.
-    pub fn build_key_listener(
-        &self,
-    ) -> Result<Box<dyn KeyListener>, PipelineError> {
+    pub fn build_key_listener(&self) -> Result<Box<dyn KeyListener>, PipelineError> {
         let listener =
             crate::key_listener::PlatformListener::new(&self.cfg.key_listener).map_err(|e| {
                 PipelineError::Fatal(FatalError::KeyListenerFailed {
@@ -212,11 +210,7 @@ pub struct PipelineContext {
 
 impl PipelineContext {
     /// Run the pipeline event loop until `stop_rx` fires.
-    pub async fn run(
-        self,
-        stop_rx: tokio::sync::oneshot::Receiver<()>,
-        sink: impl PipelineSink,
-    ) {
+    pub async fn run(self, stop_rx: tokio::sync::oneshot::Receiver<()>, sink: impl PipelineSink) {
         // Extract fields we need before the async loop borrows self mutably.
         let poll_running = self.poll_running.clone();
         let poll_interval_ms = self.poll_interval_ms;
@@ -563,15 +557,18 @@ mod tests {
     fn make_context(listener: Option<Box<dyn KeyListener>>) -> PipelineContext {
         PipelineContext {
             recorder: Box::new(PlatformRecorder::new(16000, 1)),
-            transcriber: Box::new(crate::transcriber::WhisperApi::new(
-                "test-key".to_string(),
-                "http://localhost".to_string(),
-                "test-model".to_string(),
-                "en".to_string(),
-                0.0,
-                String::new(),
-                std::time::Duration::from_secs(10),
-            ).unwrap()),
+            transcriber: Box::new(
+                crate::transcriber::WhisperApi::new(
+                    "test-key".to_string(),
+                    "http://localhost".to_string(),
+                    "test-model".to_string(),
+                    "en".to_string(),
+                    0.0,
+                    String::new(),
+                    std::time::Duration::from_secs(10),
+                )
+                .unwrap(),
+            ),
             formatter: LLMFormatter::from_config(&test_polisher_config()).unwrap(),
             polish_level: PolishLevel::None,
             poll_running: Arc::new(AtomicBool::new(true)),
@@ -671,11 +668,13 @@ mod tests {
 
     impl Recorder for FakeRecorder {
         fn start_recording(&mut self) -> Result<(), crate::error::RecorderError> {
-            self.recording.store(true, std::sync::atomic::Ordering::SeqCst);
+            self.recording
+                .store(true, std::sync::atomic::Ordering::SeqCst);
             Ok(())
         }
         fn stop_recording(&self) -> Result<Vec<u8>, crate::error::RecorderError> {
-            self.recording.store(false, std::sync::atomic::Ordering::SeqCst);
+            self.recording
+                .store(false, std::sync::atomic::Ordering::SeqCst);
             Ok(self.audio.clone())
         }
         fn is_recording(&self) -> bool {
@@ -747,7 +746,9 @@ mod tests {
         let mut cfg = test_config();
         cfg.polisher.protocol = "unknown".to_string();
         let errors = Arc::new(Mutex::new(Vec::new()));
-        let sink = ErrorSink { errors: Arc::clone(&errors) };
+        let sink = ErrorSink {
+            errors: Arc::clone(&errors),
+        };
         let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
         drop(stop_tx);
         run(Arc::new(cfg), stop_rx, sink).await;
