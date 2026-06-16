@@ -15,7 +15,7 @@ use windows::Win32::System::Threading::GetCurrentThreadId;
 use windows::Win32::UI::WindowsAndMessaging::{
     CallNextHookEx, DispatchMessageW, GetMessageW, PostThreadMessageW, SetWindowsHookExW,
     TranslateMessage, UnhookWindowsHookEx, KBDLLHOOKSTRUCT, MSG, WH_KEYBOARD_LL, WM_KEYDOWN,
-    WM_KEYUP, WM_QUIT,
+    WM_KEYUP, WM_QUIT, WM_SYSKEYDOWN, WM_SYSKEYUP,
 };
 
 const BACKEND_NAME: &str = "wh_keyboard_ll";
@@ -199,6 +199,14 @@ impl KeyListener for WindowsListener {
     }
 }
 
+fn key_event_from_hook_message(message: u32) -> Option<bool> {
+    match message {
+        WM_KEYDOWN | WM_SYSKEYDOWN => Some(true),
+        WM_KEYUP | WM_SYSKEYUP => Some(false),
+        _ => None,
+    }
+}
+
 unsafe extern "system" fn low_level_keyboard_proc(
     n_code: i32,
     w_param: WPARAM,
@@ -212,10 +220,8 @@ unsafe extern "system" fn low_level_keyboard_proc(
             let vk = info.vkCode as i32;
 
             if state.should_forward(vk) {
-                match w_param.0 as u32 {
-                    WM_KEYDOWN => state.send(true),
-                    WM_KEYUP => state.send(false),
-                    _ => {}
+                if let Some(pressed) = key_event_from_hook_message(w_param.0 as u32) {
+                    state.send(pressed);
                 }
             }
         }
@@ -240,6 +246,19 @@ mod tests {
             poll_interval_ms: 30,
             min_press_duration_ms: 100,
         }
+    }
+
+    #[test]
+    fn key_event_from_hook_message_accepts_regular_and_system_key_events() {
+        assert_eq!(key_event_from_hook_message(WM_KEYDOWN), Some(true));
+        assert_eq!(key_event_from_hook_message(WM_SYSKEYDOWN), Some(true));
+        assert_eq!(key_event_from_hook_message(WM_KEYUP), Some(false));
+        assert_eq!(key_event_from_hook_message(WM_SYSKEYUP), Some(false));
+    }
+
+    #[test]
+    fn key_event_from_hook_message_ignores_unrelated_messages() {
+        assert_eq!(key_event_from_hook_message(WM_QUIT), None);
     }
 
     #[test]

@@ -16,7 +16,7 @@ $Whisper = Join-Path $BinDeps "whisper-cli.exe"
 if (-not (Test-Path $Ffmpeg) -or -not (Test-Path $Whisper)) {
     Write-Host "[INFO] Missing ffmpeg.exe or whisper-cli.exe under target/deps/bin — running download-deps.ps1" `
         -ForegroundColor Cyan
-    & (Join-Path $ScriptDir "download-deps.ps1")
+    & (Join-Path $ScriptDir "download-deps-windows.ps1")
 }
 
 Write-Host "[INFO] cargo tauri build ..." -ForegroundColor Cyan
@@ -50,13 +50,13 @@ Get-ChildItem -Path $BinDeps -File -ErrorAction SilentlyContinue | ForEach-Objec
 }
 
 if (-not $any) {
-    Write-Error "No files to bundle from $BinDeps (only placeholder? run download-deps.ps1)"
+    Write-Error "No files to bundle from $BinDeps (only placeholder? run download-deps-windows.ps1)"
     exit 1
 }
 
 $whisperRelease = Join-Path $ReleaseBin "whisper-cli.exe"
 if (-not (Test-Path $whisperRelease)) {
-    Write-Error "whisper-cli.exe missing in $ReleaseBin — run packaging/scripts/download-deps.ps1"
+    Write-Error "whisper-cli.exe missing in $ReleaseBin — run packaging/scripts/download-deps-windows.ps1"
     exit 1
 }
 
