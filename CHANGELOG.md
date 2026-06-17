@@ -1,5 +1,27 @@
 # Changelog
 
+## v2.4.3 (2026-06-17)
+
+### Features — Windows 平台支持
+
+- **Windows 正式支持**：altgo 现可通过 MSI 安装运行于 Windows。录音用 cpal（WASAPI），剪贴板用 arboard，按键监听用 `WH_KEYBOARD_LL` 低级钩子，显示器几何用 `GetMonitorInfoW`。
+- **MSI 打包与发布流水线**：`build.ps1` 等价于 Linux 的 `make build`；CI 在 tag 推送时自动构建 MSI 并发布到 GitHub Releases。
+- **激活键捕获**：Windows 端 `key_capture` 通过 `WH_KEYBOARD_LL` 捕获激活键，与 Linux evdev 路径对齐。
+
+### Refactor — 架构重构
+
+- **Voice Pipeline 模块合并**（#46）：将 pipeline_orchestrator / context / command_handler / event_handler 合并为单一深模块 `voice_pipeline`，保留 `PipelineSink` 接缝。一条录音→转写流程现在集中在一个模块内。
+- **HistoryStore 成为唯一接口**（#50）：游离的 `append_entry` 等函数收进 `HistoryStore`，新增 `count()` 领域方法。调用方不再直接处理文件路径。
+- **trait 化注入点统一**：`KeyListener`、`Recorder`、`Output`、`Transcriber`、`Polisher` 均定义为 trait，pipeline 通过 `Box<dyn Trait>` 消费，测试可注入 fake。
+- **ConfigPatch 移入 config.rs**：补丁应用逻辑与字段定义共处一处，新增配置字段只改一个文件。
+- **Settings 拆分 hooks**：配置表单与模型管理逻辑分别抽到 `useConfigForm`、`useModelManager`。
+- **错误边界类型化**：移除 `From<anyhow::Error>` 回退，各子系统边界返回类型化错误。
+
+### Docs
+
+- CLAUDE.md 与 `docs/agents` 文档翻译为中文，要求中文交流。
+- 新增 Windows 支持的 ADR 与实现计划。
+
 ## v2.4.2 (2026-06-12)
 
 ### Fixes
@@ -38,8 +60,6 @@
 
 - **OverlayManager**：悬浮窗物理管理（尺寸/位置/显隐）从 `TauriPipelineSink` 中剥离为独立模块，接口从 3 个窗口方法缩减为 `set_state(OverlayState)` 单一意图调用。
 - **CI 修复**：ffmpeg 下载源 `johnvansickle.com` 对 GitHub Actions 返回 415，新增 BtbN GitHub 镜像回退。
-
-## Unreleased
 
 ## v2.3.1 (2026-04-23)
 
