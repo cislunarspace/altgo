@@ -25,7 +25,7 @@ pub type PlatformOutput = windows::WindowsOutput;
 
 /// 剪切板写入和桌面通知的抽象接口。
 ///
-/// 由 `PipelineEventHandler` 持有，使输出行为可在测试中替换。
+/// 由 `voice_pipeline::process_transcription_result` 持有，使输出行为可在测试中替换。
 pub trait Output: Send + Sync {
     /// 将文本写入系统剪切板。
     fn write_clipboard(&self, text: &str) -> anyhow::Result<()>;

@@ -15,10 +15,7 @@ pub mod model;
 pub mod output;
 pub mod overlay_manager;
 pub mod overlay_window;
-pub mod pipeline;
 pub mod pipeline_controller;
-pub mod pipeline_event_handler;
-pub mod pipeline_sink;
 pub mod polisher;
 pub mod prompt_store;
 pub mod recorder;
@@ -31,7 +28,7 @@ pub mod tray;
 pub mod voice_pipeline;
 pub mod whisper_server;
 
-pub use pipeline::PipelineOutput;
+pub use voice_pipeline::PipelineOutput;
 
 use std::sync::Arc;
 use tauri::Manager;

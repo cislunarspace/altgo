@@ -505,11 +505,11 @@ mod tests {
             key_name: "Alt_R".to_string(),
             linux_evdev_code: None,
             windows_vk: None,
-            long_press_threshold: Duration::from_millis(400),
-            double_click_interval: Duration::from_millis(200),
-            debounce_window: Duration::from_millis(30),
+            long_press_threshold_ms: 400,
+            double_click_interval_ms: 200,
+            debounce_window_ms: 30,
             poll_interval_ms: 10,
-            min_press_duration: Duration::from_millis(80),
+            min_press_duration_ms: 80,
         }
     }
 

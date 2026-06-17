@@ -18,7 +18,8 @@
 
 - **长按触发**：长按右 Alt 键进入录音模式，松开自动停止并处理
 - **双击切换**：双击右 Alt 键进入连续录音模式，再次单击停止
-- **本地 ASR**：以 **whisper.cpp** 为主；`whisper-cli` 与 **ffmpeg** 等随 **官方预编译包** 一并提供，一般无需自行安装；模型可在**设置**里下载并选用
+- **本地 ASR**：以 **whisper.cpp** 为主；模型可在**设置**里下载并选用，`whisper-cli` 与 **ffmpeg** 等随 **官方预编译包** 一并提供，一般无需自行安装
+- **常驻转写提速**：本地模式下自动拉起常驻 **whisper-server**，模型只载入内存一次，之后每句话走本地 HTTP 转写，省去逐句重载模型的冷启动开销；若 whisper-server 不可用，自动回退到一次性 `whisper-cli`
 - **LLM 润色（可选）**：通过 **OpenAI 兼容 API** 或 **Anthropic Messages API** 调用任意厂商或本地部署的 LLM（如云端 API、Ollama、vLLM 等），对转写文本做 light / medium / heavy 等档位润色
 - **悬浮窗与剪贴板**：处理完成后写入剪贴板并弹出悬浮窗；可在悬浮窗内再次复制
 - **桌面通知**：处理完成时可伴随通知提示（依配置）
@@ -60,7 +61,7 @@
      sudo apt install /path/to/altgo_*_amd64.deb
      ```
 
-     将路径换成你保存 deb 的**实际位置**（例如 `~/Downloads/altgo_2.2.2_amd64.deb`）；在 deb 所在目录时也可写 `sudo apt install ./altgo_*.deb`。
+     将路径换成你保存 deb 的**实际位置**；在 deb 所在目录时也可写 `sudo apt install ./altgo_*.deb`。
    - **不建议只用** `sudo dpkg -i …`：dpkg 不会拉取依赖。若本机缺少任一依赖，常见报错为 *dependency problems – leaving unconfigured*，**软件包会处于未配置（unconfigured）状态**，主程序可能仍不可用或包管理器会提示有未完成配置。
    - **已经用 dpkg 装到一半失败时**：
      - 执行 `sudo apt install -f`（或同义的 `sudo apt -f install`），让 apt **补全依赖**并完成 `altgo` 的配置；或
@@ -186,7 +187,7 @@ altgo 基于 **Tauri**，前端 **React**，核心逻辑 **Rust**。关键模块
 | `state_machine` | 按键状态管理（单击 / 长按 / 双击 / 连续录音） |
 | `key_listener` | 按键监听（Linux: XInput2 / Windows: WH_KEYBOARD_LL） |
 | `recorder` | 音频采集（Linux: parecord / Windows: cpal-WASAPI） |
-| `transcriber` | 本地 `whisper-cli` 或 OpenAI 兼容 API 转写 |
+| `transcriber` | 本地常驻 whisper-server（回退 `whisper-cli`）或 OpenAI 兼容 API 转写 |
 | `polisher` | OpenAI 兼容 API 或 Anthropic Messages API 润色 |
 | `output` | 剪贴板写入（Linux: xclip/xsel/wl-copy / Windows: arboard）、桌面通知 |
 | `history` | 本地 `history.json` 的追加 / 列表 / 删除 / 更新 |
