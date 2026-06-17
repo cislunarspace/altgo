@@ -67,15 +67,21 @@ Key Listener → State Machine → Recorder → Transcriber → Polisher → Out
 
 ### 模块（位于 `src-tauri/src/`）
 
-- **`lib.rs`** —— Tauri 应用入口，`AppState` 结构体（`config_path`、**`history_path`**、pipeline 句柄、pipeline 状态）、运行循环设置。
+- **`lib.rs`** —— Tauri 应用入口：`run()` 运行循环、`AppState`（`config_path`、**`history_path`**、pipeline 句柄与状态），以及 `spawn_pipeline_thread`（在独立 OS 线程的 tokio 运行时上拉起 `voice_pipeline::run`）。
 - **`cmd.rs`** —— 通过 IPC 暴露给前端的 Tauri 命令：配置（`get_config`、`save_config`、`capture_activation_key`）、pipeline（`start_pipeline`、`stop_pipeline`、`get_status`）、浮窗（`copy_text`、`hide_overlay`）、模型（`list_models`、`download_model`、`delete_model`、`resolve_model`）、**历史记录**（`list_history`、`delete_history_entries`、`clear_history`、`polish_history_entry`）。语音流水线（`run_pipeline`）在 `raw_text` 非空时追加一行，写入成功后发出 `history-updated` 事件，并优先在润色后文本经 trim 后非空时展示润色文本。
-- **`history.rs`** —— 对 `history.json` 的追加/列出/删除/清空/更新（camelCase JSON，文件 I/O 使用 `Mutex`）。不保存音频。
-- **`config.rs`** —— 使用 `serde(default)` 加载每个字段的 TOML 配置。API 密钥可通过环境变量覆盖（例如 `ALTGO_POLISHER_API_KEY`；若使用 API 引擎，则转写器密钥同样可覆盖）。
+- **`history.rs`** —— `HistoryStore`：对 `history.json` 的追加/列出/删除/清空/更新/计数（camelCase JSON，文件 I/O 使用 `Mutex`）。`HistoryStore` 是唯一对外接口，调用方不直接接触文件路径或内部辅助函数。不保存音频。
+- **`config.rs`** —— 使用 `serde(default)` 加载每个字段的 TOML 配置；`ConfigPatch` 补丁逻辑与字段定义共处一处。API 密钥可通过环境变量覆盖（例如 `ALTGO_POLISHER_API_KEY`；若使用 API 引擎，则转写器密钥同样可覆盖）。
+- **`config_store.rs`** —— `Config` 的持久化封装；所有变更经 `apply_patch` 原子校验并写盘。
 - **`state_machine.rs`** —— 5 状态枚举（`Idle`、`PotentialPress`、`Recording`、`WaitSecondClick`、`ContinuousRecording`）。长按录音，双击进入连续模式。使用 `tokio::select!` 让按键事件与超时竞争。
 - **`audio.rs`** —— 线程安全的 PCM 缓冲区（`Mutex<Vec<u8>>`），WAV 编码/解码（44 字节头 + PCM）。
-- **`transcriber.rs`** —— `WhisperApi`（HTTP multipart 上传至兼容 OpenAI 的端点）和 `LocalWhisper`（通过子进程调用 `whisper-cli` 二进制文件）。
-- **`polisher.rs`** —— 使用 LLM 对文本进行 4 档润色（`none`/`light`/`medium`/`heavy`）。指数退避重试（3 次）。使用兼容 OpenAI 的聊天 API。
-- **`pipeline.rs`** —— 核心处理流水线（转写 + 润色）。调用方负责输出（浮窗 UI、可选的剪贴板注入、通知）。
+- **`error.rs`** —— 类型化管道错误（`PipelineError`），区分致命（停管道）与可恢复（降级），中英双语消息。
+- **`transcriber.rs`** —— 转写后端 trait 与实现：`WhisperApi`（HTTP multipart 上传至兼容 OpenAI 的端点）、`LocalWhisper`（一次性 `whisper-cli` 子进程）。本地默认走常驻后端（见 `whisper_server.rs`）。
+- **`whisper_server.rs`** —— 常驻 whisper-server 管理（`ResidentWhisper`）：管道启动时拉起一次，模型常驻内存，逐句走本地 HTTP；二进制缺失、端口冲突、就绪超时或运行期崩溃均自动回退到一次性 `LocalWhisper`。
+- **`polisher.rs`** —— 使用 LLM 对文本进行 4 档润色（`none`/`light`/`medium`/`heavy`），支持 OpenAI 兼容聊天 API 与 Anthropic Messages API 两种协议。指数退避重试（3 次）。
+- **`prompt_store.rs`** —— 润色 prompt 模板管理：从 `resources/prompts/` 组合 `base.txt` + 各档后缀，文件变动时热重载（去抖 500ms）。
+- **`voice_pipeline.rs`** —— 核心处理流水线（录音→转写→润色）的单一深模块。定义 `PipelineSink` 接缝（状态变更、错误、结果、进度、按键后端通知）与 `PipelineOutput`；剪贴板注入与历史写入集中在 `process_transcription_result`。
+- **`pipeline_controller.rs`** —— 流水线生命周期与状态跟踪（`PipelineStatus`：Idle/Recording/Processing 等），对应 `start`/`stop`/`get_status`。
+- **`tauri_sink.rs`** —— `PipelineSink` 的 Tauri 适配器：把管道事件转成前端事件与剪贴板写入，并把悬浮窗操作委托给 `OverlayManager`。
 - **`model.rs`** —— whisper.cpp GGML 模型管理（下载、切换、存储在 `~/.config/altgo/models/`）。
 - **`tray.rs`** —— 系统托盘配置（显示窗口、退出菜单）。
 - **`resource.rs`** —— 资源文件管理。
@@ -83,6 +89,7 @@ Key Listener → State Machine → Recorder → Transcriber → Polisher → Out
 - **`key_listener/`** —— 按键检测（Linux：`xinput test-xi2` / Windows：通过 `SetWindowsHookExW` 在独立消息泵线程上挂接 `WH_KEYBOARD_LL`）。
 - **`recorder/`** —— 音频捕获（Linux：`parecord` PulseAudio / Windows：`cpal` WASAPI；输出 16kHz 单声道 WAV；如果设备采样率不同，则通过 rubato 重采样）。
 - **`output/`** —— 剪贴板 + 通知（Linux：`xclip`/`xsel`/`wl-copy` + `notify-send` / Windows：`arboard` 剪贴板 + 空操作通知；Windows 由浮窗负责显示）。
+- **悬浮窗（`overlay_window.rs` / `overlay_manager.rs` / `tauri_overlay_window.rs`）** —— 状态意图与窗口操作分离：`overlay_window.rs` 定义 `OverlayWindow` seam，`overlay_manager.rs` 按状态意图算尺寸/位置，`tauri_overlay_window.rs` 是 Tauri 适配器（用 `GetMonitorInfoW` 取显示器几何）。
 
 ### 前端结构（`frontend/src/`）
 
