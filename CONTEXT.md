@@ -27,7 +27,7 @@ A partial update to the config: all fields optional, absent fields left unchange
 ## History
 
 **HistoryStore**
-Wraps the history JSON file and exposes named operations: `list`, `append`, `delete`, `clear`, `get`, `update_text`. Callers never handle the file path. Lives in `history.rs`. Each instance is cheap to clone (it contains only a `PathBuf`).
+Wraps the history JSON file and exposes named operations: `list`, `count`, `append`, `delete`, `clear`, `get`, `update_text`. Callers never handle the file path or module-private helpers. Lives in `history.rs`. Each instance is cheap to clone (it contains only a `PathBuf`).
 
 **HistoryEntry**
 A single transcription record: `id`, `createdAtMs`, `rawText` (Whisper output), `text` (polished or same as raw). Audio is never stored.

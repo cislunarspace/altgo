@@ -1,10 +1,12 @@
 //! 转写文本历史（持久化 JSON，不含录音）。
+//!
+//! 历史通过 `HistoryStore` 访问：调用方不直接处理文件路径，
+//! 也不调用模块私有 helper。所有路径 I/O 与并发互斥都由 store 内部完成。
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Mutex;
 use uuid::Uuid;
 
@@ -34,7 +36,7 @@ struct HistoryFile {
     entries: Vec<HistoryEntry>,
 }
 
-fn load_raw(path: &Path) -> Result<HistoryFile> {
+fn load_raw(path: &std::path::Path) -> Result<HistoryFile> {
     if !path.exists() {
         return Ok(HistoryFile::default());
     }
@@ -45,7 +47,7 @@ fn load_raw(path: &Path) -> Result<HistoryFile> {
     serde_json::from_str(&s).context("parse history json")
 }
 
-fn save_raw(path: &Path, data: &HistoryFile) -> Result<()> {
+fn save_raw(path: &std::path::Path, data: &HistoryFile) -> Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).context("create history directory")?;
     }
@@ -62,112 +64,92 @@ fn save_raw(path: &Path, data: &HistoryFile) -> Result<()> {
     Ok(())
 }
 
-/// 追加一条记录（最新在前）。
-pub fn append_entry(path: &Path, raw_text: String, text: String) -> Result<HistoryEntry> {
-    let _g = HISTORY_IO_LOCK
-        .lock()
-        .map_err(|_| anyhow::anyhow!("history lock poisoned"))?;
-    let mut file = load_raw(path)?;
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64;
-    let entry = HistoryEntry {
-        id: Uuid::new_v4().to_string(),
-        created_at_ms: now,
-        raw_text,
-        text,
-    };
-    file.entries.insert(0, entry.clone());
-    save_raw(path, &file)?;
-    Ok(entry)
-}
-
-pub fn list_entries(path: &Path) -> Result<Vec<HistoryEntry>> {
-    let _g = HISTORY_IO_LOCK
-        .lock()
-        .map_err(|_| anyhow::anyhow!("history lock poisoned"))?;
-    let file = load_raw(path)?;
-    Ok(file.entries)
-}
-
-pub fn delete_entries(path: &Path, ids: &[String]) -> Result<usize> {
-    let _g = HISTORY_IO_LOCK
-        .lock()
-        .map_err(|_| anyhow::anyhow!("history lock poisoned"))?;
-    let mut file = load_raw(path)?;
-    let before = file.entries.len();
-    let id_set: HashSet<&str> = ids.iter().map(|s| s.as_str()).collect();
-    file.entries.retain(|e| !id_set.contains(e.id.as_str()));
-    save_raw(path, &file)?;
-    Ok(before - file.entries.len())
-}
-
-pub fn clear_all(path: &Path) -> Result<()> {
-    let _g = HISTORY_IO_LOCK
-        .lock()
-        .map_err(|_| anyhow::anyhow!("history lock poisoned"))?;
-    save_raw(path, &HistoryFile::default())
-}
-
-pub fn update_entry_text(path: &Path, id: &str, new_text: String) -> Result<HistoryEntry> {
-    let _g = HISTORY_IO_LOCK
-        .lock()
-        .map_err(|_| anyhow::anyhow!("history lock poisoned"))?;
-    let mut file = load_raw(path)?;
-    for e in &mut file.entries {
-        if e.id == id {
-            e.text = new_text;
-            let out = e.clone();
-            save_raw(path, &file)?;
-            return Ok(out);
-        }
-    }
-    anyhow::bail!("history entry not found: {}", id)
-}
-
-pub fn get_entry(path: &Path, id: &str) -> Result<Option<HistoryEntry>> {
-    let _g = HISTORY_IO_LOCK
-        .lock()
-        .map_err(|_| anyhow::anyhow!("history lock poisoned"))?;
-    let file = load_raw(path)?;
-    Ok(file.entries.iter().find(|e| e.id == id).cloned())
-}
-
 /// Holds the history file path and exposes named operations.
-/// Callers never handle the path directly.
+/// Callers never handle the path directly — all I/O goes through the store.
 #[derive(Clone)]
 pub struct HistoryStore {
     path: std::path::PathBuf,
 }
 
 impl HistoryStore {
-    pub fn new(path: std::path::PathBuf) -> Self {
+    pub fn new(path: PathBuf) -> Self {
         Self { path }
     }
 
     pub fn list(&self) -> Result<Vec<HistoryEntry>> {
-        list_entries(&self.path)
+        let _g = HISTORY_IO_LOCK
+            .lock()
+            .map_err(|_| anyhow::anyhow!("history lock poisoned"))?;
+        let file = load_raw(&self.path)?;
+        Ok(file.entries)
+    }
+
+    /// Number of entries currently stored.
+    pub fn count(&self) -> Result<usize> {
+        Ok(self.list()?.len())
     }
 
     pub fn append(&self, raw_text: String, text: String) -> Result<HistoryEntry> {
-        append_entry(&self.path, raw_text, text)
+        let _g = HISTORY_IO_LOCK
+            .lock()
+            .map_err(|_| anyhow::anyhow!("history lock poisoned"))?;
+        let mut file = load_raw(&self.path)?;
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+        let entry = HistoryEntry {
+            id: Uuid::new_v4().to_string(),
+            created_at_ms: now,
+            raw_text,
+            text,
+        };
+        file.entries.insert(0, entry.clone());
+        save_raw(&self.path, &file)?;
+        Ok(entry)
     }
 
     pub fn delete(&self, ids: &[String]) -> Result<usize> {
-        delete_entries(&self.path, ids)
+        let _g = HISTORY_IO_LOCK
+            .lock()
+            .map_err(|_| anyhow::anyhow!("history lock poisoned"))?;
+        let mut file = load_raw(&self.path)?;
+        let before = file.entries.len();
+        let id_set: std::collections::HashSet<&str> = ids.iter().map(|s| s.as_str()).collect();
+        file.entries.retain(|e| !id_set.contains(e.id.as_str()));
+        save_raw(&self.path, &file)?;
+        Ok(before - file.entries.len())
     }
 
     pub fn clear(&self) -> Result<()> {
-        clear_all(&self.path)
+        let _g = HISTORY_IO_LOCK
+            .lock()
+            .map_err(|_| anyhow::anyhow!("history lock poisoned"))?;
+        save_raw(&self.path, &HistoryFile::default())
     }
 
     pub fn get(&self, id: &str) -> Result<Option<HistoryEntry>> {
-        get_entry(&self.path, id)
+        let _g = HISTORY_IO_LOCK
+            .lock()
+            .map_err(|_| anyhow::anyhow!("history lock poisoned"))?;
+        let file = load_raw(&self.path)?;
+        Ok(file.entries.iter().find(|e| e.id == id).cloned())
     }
 
     pub fn update_text(&self, id: &str, new_text: String) -> Result<HistoryEntry> {
-        update_entry_text(&self.path, id, new_text)
+        let _g = HISTORY_IO_LOCK
+            .lock()
+            .map_err(|_| anyhow::anyhow!("history lock poisoned"))?;
+        let mut file = load_raw(&self.path)?;
+        for e in &mut file.entries {
+            if e.id == id {
+                e.text = new_text;
+                let out = e.clone();
+                save_raw(&self.path, &file)?;
+                return Ok(out);
+            }
+        }
+        anyhow::bail!("history entry not found: {}", id)
     }
 }
 
@@ -176,13 +158,18 @@ mod tests {
     use super::*;
     use tempfile::tempdir;
 
+    fn make_store() -> (tempfile::TempDir, HistoryStore) {
+        let dir = tempdir().unwrap();
+        let store = HistoryStore::new(dir.path().join("history.json"));
+        (dir, store)
+    }
+
     #[test]
     fn append_and_list() {
-        let dir = tempdir().unwrap();
-        let path = dir.path().join("history.json");
-        let e1 = append_entry(&path, "raw one".into(), "one".into()).unwrap();
-        let e2 = append_entry(&path, "raw two".into(), "two".into()).unwrap();
-        let list = list_entries(&path).unwrap();
+        let (_dir, store) = make_store();
+        let e1 = store.append("raw one".into(), "one".into()).unwrap();
+        let e2 = store.append("raw two".into(), "two".into()).unwrap();
+        let list = store.list().unwrap();
         assert_eq!(list.len(), 2);
         assert_eq!(list[0].id, e2.id);
         assert_eq!(list[1].id, e1.id);
@@ -190,23 +177,55 @@ mod tests {
 
     #[test]
     fn delete_and_clear() {
-        let dir = tempdir().unwrap();
-        let path = dir.path().join("history.json");
-        let e = append_entry(&path, "r".into(), "t".into()).unwrap();
-        delete_entries(&path, &[e.id.clone()]).unwrap();
-        assert!(list_entries(&path).unwrap().is_empty());
-        append_entry(&path, "a".into(), "b".into()).unwrap();
-        clear_all(&path).unwrap();
-        assert!(list_entries(&path).unwrap().is_empty());
+        let (_dir, store) = make_store();
+        let e = store.append("r".into(), "t".into()).unwrap();
+        store.delete(&[e.id.clone()]).unwrap();
+        assert!(store.list().unwrap().is_empty());
+        store.append("a".into(), "b".into()).unwrap();
+        store.clear().unwrap();
+        assert!(store.list().unwrap().is_empty());
     }
 
     #[test]
     fn update_text() {
-        let dir = tempdir().unwrap();
-        let path = dir.path().join("history.json");
-        let e = append_entry(&path, "raw".into(), "old".into()).unwrap();
-        let updated = update_entry_text(&path, &e.id, "new".into()).unwrap();
+        let (_dir, store) = make_store();
+        let e = store.append("raw".into(), "old".into()).unwrap();
+        let updated = store.update_text(&e.id, "new".into()).unwrap();
         assert_eq!(updated.text, "new");
         assert_eq!(updated.raw_text, "raw");
+    }
+
+    #[test]
+    fn count_starts_at_zero() {
+        let (_dir, store) = make_store();
+        assert_eq!(store.count().unwrap(), 0);
+    }
+
+    #[test]
+    fn count_reflects_appends_and_deletes() {
+        let (_dir, store) = make_store();
+        assert_eq!(store.count().unwrap(), 0);
+        let e1 = store.append("a".into(), "a".into()).unwrap();
+        let e2 = store.append("b".into(), "b".into()).unwrap();
+        assert_eq!(store.count().unwrap(), 2);
+        store.delete(&[e1.id]).unwrap();
+        assert_eq!(store.count().unwrap(), 1);
+        store.clear().unwrap();
+        assert_eq!(store.count().unwrap(), 0);
+        let _ = e2;
+    }
+
+    #[test]
+    fn get_returns_entry_by_id() {
+        let (_dir, store) = make_store();
+        let e = store.append("raw".into(), "text".into()).unwrap();
+        let fetched = store.get(&e.id).unwrap();
+        assert_eq!(fetched, Some(e));
+    }
+
+    #[test]
+    fn get_returns_none_for_missing_id() {
+        let (_dir, store) = make_store();
+        assert!(store.get("nonexistent").unwrap().is_none());
     }
 }
