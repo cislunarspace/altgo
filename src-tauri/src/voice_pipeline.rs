@@ -15,12 +15,50 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use crate::error::{FatalError, PipelineError};
+use crate::history::HistoryStore;
 use crate::key_listener::{KeyListener, KeyListenerConfig};
-use crate::pipeline_sink::PipelineSink;
+use crate::output::Output;
 use crate::polisher::{LLMFormatter, PolishLevel};
 use crate::recorder::Recorder;
 use crate::state_machine::{Command, Machine};
 use crate::transcriber::Transcriber;
+
+// ---------------------------------------------------------------------------
+// Shared types and sink seam
+// ---------------------------------------------------------------------------
+
+/// 管道处理结果。
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct PipelineOutput {
+    /// 处理后的文本（润色成功时为润色文本，否则为原始转写文本）
+    pub text: String,
+    /// 原始转写文本（润色前）
+    pub raw_text: String,
+    /// 润色是否失败
+    pub polish_failed: bool,
+}
+
+/// 管道事件接收器。
+///
+/// 所有方法均为同步——实现方内部处理异步操作（如 `tokio::spawn`）。
+/// 实现方必须是 `Send + Sync + 'static`，以支持跨线程使用。
+pub trait PipelineSink: Send + Sync + 'static {
+    /// 管道状态变化（idle / recording / processing / done / stopped）。
+    fn on_status_change(&self, status: &str);
+
+    /// 管道错误。
+    fn on_error(&self, message: &str);
+
+    /// 转写+润色完成，输出结果。
+    fn on_transcription_result(&self, output: &PipelineOutput);
+
+    /// 转写/润色进度更新。`phase` 为 `"transcribe"` / `"polish"` / `"done"`，
+    /// `fraction` 为 0–1 或 `None`（不确定进度）。
+    fn on_progress(&self, phase: &str, fraction: Option<f32>);
+
+    /// 按键监听后端已启动（如 `"xinput"` / `"evtest"`）。
+    fn on_key_listener_backend(&self, backend: &str);
+}
 
 // ---------------------------------------------------------------------------
 // PipelineBuilder — component construction from config
@@ -102,8 +140,8 @@ impl PipelineBuilder {
     /// Returns error if protocol is unknown or HTTP client fails to initialize.
     pub fn build_polisher(&self) -> Result<LLMFormatter, PipelineError> {
         let polisher_cfg = crate::polisher::PolisherConfig::from(&*self.cfg);
-        let formatter = LLMFormatter::from_config(&polisher_cfg)
-            .map_err(PipelineError::fatal_polisher)?;
+        let formatter =
+            LLMFormatter::from_config(&polisher_cfg).map_err(PipelineError::fatal_polisher)?;
 
         // Build prompt source chain: PromptStore → Custom → Hardcoded
         let mut sources: Vec<Box<dyn crate::polisher::SystemPromptSource>> = Vec::new();
@@ -148,9 +186,7 @@ impl PipelineBuilder {
     /// Build key listener from config.
     ///
     /// Returns a boxed trait object for platform-independent use in the pipeline.
-    pub fn build_key_listener(
-        &self,
-    ) -> Result<Box<dyn KeyListener>, PipelineError> {
+    pub fn build_key_listener(&self) -> Result<Box<dyn KeyListener>, PipelineError> {
         let listener =
             crate::key_listener::PlatformListener::new(&self.cfg.key_listener).map_err(|e| {
                 PipelineError::Fatal(FatalError::KeyListenerFailed {
@@ -212,11 +248,7 @@ pub struct PipelineContext {
 
 impl PipelineContext {
     /// Run the pipeline event loop until `stop_rx` fires.
-    pub async fn run(
-        self,
-        stop_rx: tokio::sync::oneshot::Receiver<()>,
-        sink: impl PipelineSink,
-    ) {
+    pub async fn run(self, stop_rx: tokio::sync::oneshot::Receiver<()>, sink: impl PipelineSink) {
         // Extract fields we need before the async loop borrows self mutably.
         let poll_running = self.poll_running.clone();
         let poll_interval_ms = self.poll_interval_ms;
@@ -393,7 +425,7 @@ pub async fn handle_stop_record(
     if result.text.is_empty() {
         tracing::warn!("empty transcription, skipping");
         sink.on_progress("done", Some(1.0));
-        sink.on_transcription_result(&crate::pipeline::PipelineOutput {
+        sink.on_transcription_result(&PipelineOutput {
             text: String::new(),
             raw_text: String::new(),
             polish_failed: false,
@@ -418,12 +450,82 @@ pub async fn handle_stop_record(
 
     sink.on_progress("done", Some(1.0));
 
-    let output = crate::pipeline::PipelineOutput {
+    let output = PipelineOutput {
         text: polished,
         raw_text,
         polish_failed,
     };
     sink.on_transcription_result(&output);
+}
+
+// ---------------------------------------------------------------------------
+// Result processing — text selection, clipboard, history
+// ---------------------------------------------------------------------------
+
+/// Result of processing a transcription event.
+#[derive(Debug, Clone)]
+pub struct ProcessedResult {
+    /// Text that was written to clipboard and should be shown.
+    pub text: String,
+    /// Whether history was appended successfully.
+    pub history_appended: bool,
+}
+
+/// Select which text to use based on preferences and polish status.
+pub fn select_text(prefer_polished: bool, output: &PipelineOutput) -> String {
+    if prefer_polished && !output.polish_failed && !output.text.trim().is_empty() {
+        output.text.clone()
+    } else {
+        output.raw_text.clone()
+    }
+}
+
+/// Process a transcription result: select text, write clipboard, append history.
+///
+/// Returns `None` if the transcription was empty (no action taken).
+pub async fn process_transcription_result(
+    output: &PipelineOutput,
+    prefer_polished: bool,
+    output_adapter: &dyn Output,
+    history_store: &HistoryStore,
+) -> Option<ProcessedResult> {
+    if output.raw_text.is_empty() {
+        return None;
+    }
+
+    let text_to_use = select_text(prefer_polished, output);
+
+    // Write to clipboard (blocking I/O; caller is already in an async context)
+    let text_clone = text_to_use.clone();
+    let output_handle = output_adapter.clone_box();
+    let clipboard_ok =
+        tokio::task::spawn_blocking(move || output_handle.write_clipboard(&text_clone))
+            .await
+            .ok()
+            .and_then(|r| r.ok())
+            .is_some();
+    if !clipboard_ok {
+        tracing::warn!("failed to write clipboard");
+    }
+
+    // Append to history
+    let raw = output.raw_text.clone();
+    let display = text_to_use.clone();
+    let store = history_store.clone();
+    let history_appended = tokio::task::spawn_blocking(move || store.append(raw, display))
+        .await
+        .ok()
+        .and_then(|r| r.ok())
+        .is_some();
+
+    if !history_appended {
+        tracing::warn!("failed to append transcription history");
+    }
+
+    Some(ProcessedResult {
+        text: text_to_use,
+        history_appended,
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -460,7 +562,6 @@ pub async fn run(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::pipeline::PipelineOutput;
     use crate::polisher::PolisherConfig;
     use crate::recorder::PlatformRecorder;
     use std::sync::{Arc, Mutex};
@@ -563,15 +664,18 @@ mod tests {
     fn make_context(listener: Option<Box<dyn KeyListener>>) -> PipelineContext {
         PipelineContext {
             recorder: Box::new(PlatformRecorder::new(16000, 1)),
-            transcriber: Box::new(crate::transcriber::WhisperApi::new(
-                "test-key".to_string(),
-                "http://localhost".to_string(),
-                "test-model".to_string(),
-                "en".to_string(),
-                0.0,
-                String::new(),
-                std::time::Duration::from_secs(10),
-            ).unwrap()),
+            transcriber: Box::new(
+                crate::transcriber::WhisperApi::new(
+                    "test-key".to_string(),
+                    "http://localhost".to_string(),
+                    "test-model".to_string(),
+                    "en".to_string(),
+                    0.0,
+                    String::new(),
+                    std::time::Duration::from_secs(10),
+                )
+                .unwrap(),
+            ),
             formatter: LLMFormatter::from_config(&test_polisher_config()).unwrap(),
             polish_level: PolishLevel::None,
             poll_running: Arc::new(AtomicBool::new(true)),
@@ -671,11 +775,13 @@ mod tests {
 
     impl Recorder for FakeRecorder {
         fn start_recording(&mut self) -> Result<(), crate::error::RecorderError> {
-            self.recording.store(true, std::sync::atomic::Ordering::SeqCst);
+            self.recording
+                .store(true, std::sync::atomic::Ordering::SeqCst);
             Ok(())
         }
         fn stop_recording(&self) -> Result<Vec<u8>, crate::error::RecorderError> {
-            self.recording.store(false, std::sync::atomic::Ordering::SeqCst);
+            self.recording
+                .store(false, std::sync::atomic::Ordering::SeqCst);
             Ok(self.audio.clone())
         }
         fn is_recording(&self) -> bool {
@@ -726,6 +832,127 @@ mod tests {
         .await;
     }
 
+    // -- Result processing tests ---------------------------------------------
+
+    struct FakeOutput {
+        clipboard_writes: Arc<Mutex<Vec<String>>>,
+    }
+
+    impl FakeOutput {
+        fn new() -> (Self, Arc<Mutex<Vec<String>>>) {
+            let writes = Arc::new(Mutex::new(Vec::new()));
+            (
+                Self {
+                    clipboard_writes: Arc::clone(&writes),
+                },
+                writes,
+            )
+        }
+    }
+
+    impl Output for FakeOutput {
+        fn write_clipboard(&self, text: &str) -> anyhow::Result<()> {
+            self.clipboard_writes.lock().unwrap().push(text.to_string());
+            Ok(())
+        }
+
+        fn notify(&self, _title: &str, _body: &str) -> anyhow::Result<()> {
+            Ok(())
+        }
+
+        fn clone_box(&self) -> Box<dyn Output> {
+            Box::new(FakeOutput {
+                clipboard_writes: Arc::clone(&self.clipboard_writes),
+            })
+        }
+    }
+
+    fn test_output(raw: &str, polished: &str, polish_failed: bool) -> PipelineOutput {
+        PipelineOutput {
+            raw_text: raw.to_string(),
+            text: polished.to_string(),
+            polish_failed,
+        }
+    }
+
+    #[test]
+    fn test_select_text_prefer_polished_success() {
+        let output = test_output("raw text", "polished text", false);
+        assert_eq!(select_text(true, &output), "polished text");
+    }
+
+    #[test]
+    fn test_select_text_prefer_polished_failed() {
+        let output = test_output("raw text", "", true);
+        assert_eq!(select_text(true, &output), "raw text");
+    }
+
+    #[test]
+    fn test_select_text_prefer_polished_empty() {
+        let output = test_output("raw text", "  ", false);
+        assert_eq!(select_text(true, &output), "raw text");
+    }
+
+    #[test]
+    fn test_select_text_prefer_raw() {
+        let output = test_output("raw text", "polished text", false);
+        assert_eq!(select_text(false, &output), "raw text");
+    }
+
+    #[tokio::test]
+    async fn test_process_transcription_result_empty() {
+        let output = test_output("", "", false);
+        let (output_adapter, _) = FakeOutput::new();
+        let temp_dir = tempfile::tempdir().unwrap();
+        let history_store = HistoryStore::new(temp_dir.path().join("history.json"));
+
+        let result =
+            process_transcription_result(&output, true, &output_adapter, &history_store).await;
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_process_transcription_result_success() {
+        let output = test_output("raw text", "polished text", false);
+        let (output_adapter, writes) = FakeOutput::new();
+        let temp_dir = tempfile::tempdir().unwrap();
+        let history_store = HistoryStore::new(temp_dir.path().join("history.json"));
+
+        let result =
+            process_transcription_result(&output, true, &output_adapter, &history_store).await;
+        assert!(result.is_some());
+        let result = result.unwrap();
+        assert_eq!(result.text, "polished text");
+        assert!(result.history_appended);
+        assert_eq!(writes.lock().unwrap().len(), 1);
+        assert_eq!(writes.lock().unwrap()[0], "polished text");
+    }
+
+    #[tokio::test]
+    async fn test_process_transcription_result_clipboard_failure_still_returns_result() {
+        struct FailingOutput;
+        impl Output for FailingOutput {
+            fn write_clipboard(&self, _text: &str) -> anyhow::Result<()> {
+                Err(anyhow::anyhow!("no clipboard"))
+            }
+            fn notify(&self, _: &str, _: &str) -> anyhow::Result<()> {
+                Ok(())
+            }
+            fn clone_box(&self) -> Box<dyn Output> {
+                Box::new(FailingOutput)
+            }
+        }
+
+        let output = test_output("raw text", "polished text", false);
+        let temp_dir = tempfile::tempdir().unwrap();
+        let history_store = HistoryStore::new(temp_dir.path().join("history.json"));
+
+        let result =
+            process_transcription_result(&output, true, &FailingOutput, &history_store).await;
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().text, "polished text");
+    }
+
     // -- Pipeline orchestrator entry-point test ----------------------------
 
     #[tokio::test]
@@ -747,7 +974,9 @@ mod tests {
         let mut cfg = test_config();
         cfg.polisher.protocol = "unknown".to_string();
         let errors = Arc::new(Mutex::new(Vec::new()));
-        let sink = ErrorSink { errors: Arc::clone(&errors) };
+        let sink = ErrorSink {
+            errors: Arc::clone(&errors),
+        };
         let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
         drop(stop_tx);
         run(Arc::new(cfg), stop_rx, sink).await;

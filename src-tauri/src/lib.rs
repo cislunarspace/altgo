@@ -15,10 +15,7 @@ pub mod model;
 pub mod output;
 pub mod overlay_manager;
 pub mod overlay_window;
-pub mod pipeline;
 pub mod pipeline_controller;
-pub mod pipeline_event_handler;
-pub mod pipeline_sink;
 pub mod polisher;
 pub mod prompt_store;
 pub mod recorder;
@@ -31,7 +28,7 @@ pub mod tray;
 pub mod voice_pipeline;
 pub mod whisper_server;
 
-pub use pipeline::PipelineOutput;
+pub use voice_pipeline::PipelineOutput;
 
 use std::sync::Arc;
 use tauri::Manager;
@@ -104,9 +101,8 @@ pub fn run() {
 
             let controller = app.state::<pipeline_controller::PipelineController>();
             let status_arc = controller.status_arc();
-            controller.start_with_blocking(|| {
-                spawn_pipeline_thread(app.handle(), cfg, status_arc)
-            })?;
+            controller
+                .start_with_blocking(|| spawn_pipeline_thread(app.handle(), cfg, status_arc))?;
 
             Ok(())
         })

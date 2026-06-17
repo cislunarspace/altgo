@@ -51,6 +51,7 @@ impl From<&crate::config::Config> for RecorderConfig {
 mod tests {
     use super::PulseRecorder;
     use crate::error::RecorderError;
+    use crate::recorder::Recorder;
 
     /// Verify the typed error variants surface at the trait boundary —
     /// the `from anyhow::Error` escape hatch was removed (issue #45), so
@@ -66,4 +67,3 @@ mod tests {
         assert!(matches!(err, RecorderError::EmptyRecording));
     }
 }
-

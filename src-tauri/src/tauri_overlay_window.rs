@@ -194,6 +194,7 @@ fn parse_xrandr_geometry(output: &str) -> Vec<(i32, i32, i32, i32, bool)> {
 /// Extracts `(x, y, width, height)` from a work-area rect, regardless of how
 /// the platform struct names it. Shared by tests so geometry extraction is
 /// exercised on every platform.
+#[allow(dead_code)]
 fn geometry_from_work_rect(left: i32, top: i32, right: i32, bottom: i32) -> (i32, i32, i32, i32) {
     (left, top, right - left, bottom - top)
 }
