@@ -1,143 +1,139 @@
-# CLAUDE.md
+## 交流语言
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
-
-## Communication Language
-
-始终使用中文与用户交流。代码、commit message、PR 描述等技术输出保持英文。
+始终使用中文与用户交流。代码、commit message、PR 描述等技术输出也用中文。
 
 ## 写作要求
 
-所有面向人读的文本——CONTEXT.md、ADR、issue 评论、PR 描述、agent brief、triage notes、Sphinx 文档——遵守以下原则（原话引用）：
+所有面向人读的文本——CONTEXT.md、ADR、issue 评论、PR 描述、agent brief、triage notes、Sphinx 文档——遵守以下原则：
 
 - **善于总结材料**：材料弄全弄准，去粗取精、去伪存真、由此及彼、由表及里，反映事物本质；不堆砌细节、不拼凑清单。
 - **不用夸大的修饰词**：不写"权威""强大""完整""单一事实来源"之类的修饰，它们减损力量。
-- **注意词语的逻辑界限**：相邻概念要划清（如"配置"与"运行规格"、"力模型"与"力模型聚合"），不混用、不模糊。
+- **注意词语的逻辑界限**：相邻概念要划清，不混用、不模糊。
 - **废话应当尽量除去**。
 - **通俗、亲切，由小讲到大，由近讲到远，引人入胜**：先讲读者已知／当前的事物，再推到陌生／抽象的；忌一上来就宏大叙事或先搬死人、外国人。
 - **与读者完全平等**：靠分析说服，不要装腔作势来吓人；老老实实办事。
 
-## Project Overview
+## 项目概览
 
-**altgo** is a desktop voice-to-text tool written in Rust, supporting **Linux** (Ubuntu 20.04+) and **Windows** (MSI via GitHub Releases). Hold the right Alt key to record speech, release to transcribe with **local whisper.cpp**, optionally polish via any **OpenAI-compatible LLM** API, then **write the result to the system clipboard** and show it in a **floating overlay** (overlay copy is a fallback if clipboard tools fail). Successful transcriptions (raw + displayed text) are **persisted as text-only history** in a local JSON file (`~/.config/altgo/history.json`); audio is never stored. Code may still include optional HTTP Whisper API paths for advanced use.
+**altgo** 是用 Rust 编写的桌面语音转文字工具，支持 **Linux**（Ubuntu 20.04+）和 **Windows**（通过 GitHub Releases 提供 MSI）。按住右 Alt 键录音，松开后使用 **本地 whisper.cpp** 进行转写，可选择通过任意 **兼容 OpenAI 的 LLM** API 进行润色，然后将结果写入系统剪贴板，并在悬浮浮窗中显示（如果剪贴板工具失败，则使用浮窗副本作为回退）。成功的转写结果（原始文本 + 显示文本）以纯文本历史记录的形式持久化保存在本地 JSON 文件（`~/.config/altgo/history.json`）中；音频不会被保存。代码中可能仍包含可选的 HTTP Whisper API 路径，以供高级用途。
 
-## Build & Test Commands
+## 构建与测试命令
 
 ```bash
-# Rust only (no GUI)
+# 仅 Rust（无 GUI）
 cargo build --release --manifest-path=src-tauri/Cargo.toml
 cargo test --manifest-path=src-tauri/Cargo.toml
 cargo fmt --manifest-path=src-tauri/Cargo.toml -- --check
 cargo clippy --manifest-path=src-tauri/Cargo.toml -- -D warnings
 
-# Tauri GUI mode
-cargo tauri dev               # Dev mode (frontend dev server + desktop window)
-cargo tauri build            # Production GUI build
+# Tauri GUI 模式
+cargo tauri dev               # 开发模式（前端开发服务器 + 桌面窗口）
+cargo tauri build            # 生产环境 GUI 构建
 
-# make build: runs ensure-binary-deps (deps-linux), then
-# cargo tauri build, then copies target/deps/bin/* into src-tauri/target/release/bin/
+# make build：先运行 ensure-binary-deps（deps-linux），
+# 然后执行 cargo tauri build，再把 target/deps/bin/* 复制到 src-tauri/target/release/bin/
 make build
-make install                  # After build: altgo -> /usr/local/bin, deps -> /usr/lib/altgo/bin, config -> /etc/altgo/
+make install                  # 构建后：altgo -> /usr/local/bin，deps -> /usr/lib/altgo/bin，config -> /etc/altgo/
 ```
 
-### Windows Build
+### Windows 构建
 
 ```powershell
-# Equivalent of `make build` on Windows (downloads deps + cargo tauri build --bundles msi)
+# Windows 上等价于 `make build`（下载依赖 + cargo tauri build --bundles msi）
 .\build.ps1
-# or: pwsh packaging/scripts/build.ps1
-# or: build.cmd (shim for systems without pwsh on PATH)
+# 或：pwsh packaging/scripts/build.ps1
+# 或：build.cmd（未将 pwsh 加入 PATH 的系统使用的包装脚本）
 
-# Test/lint commands are the same as Linux
+# 测试/lint 命令与 Linux 相同
 cargo test --manifest-path=src-tauri/Cargo.toml
 cargo fmt --manifest-path=src-tauri/Cargo.toml -- --check
 cargo clippy --manifest-path=src-tauri/Cargo.toml -- -D warnings
 ```
 
-## Architecture
+## 架构
 
-Tauri desktop app with core logic in `src-tauri/src/`:
+基于 Tauri 的桌面应用，核心逻辑位于 `src-tauri/src/`：
 
-| Component | Path |
+| 组件 | 路径 |
 |-----------|------|
 | **Tauri GUI** | `src-tauri/` + `frontend/` |
-| **Core modules** | `src-tauri/src/` |
+| **核心模块** | `src-tauri/src/` |
 
-Core pipeline driven by keyboard events:
+由键盘事件驱动的核心流水线：
 
 ```
 Key Listener → State Machine → Recorder → Transcriber → Polisher → Output (+ History JSON)
 ```
 
-### Modules (in `src-tauri/src/`)
+### 模块（位于 `src-tauri/src/`）
 
-- **`lib.rs`** — Tauri app entry point, `AppState` struct (`config_path`, **`history_path`**, pipeline handle, pipeline status), run loop setup.
-- **`cmd.rs`** — Tauri commands exposed to frontend via IPC: config (`get_config`, `save_config`, `capture_activation_key`), pipeline (`start_pipeline`, `stop_pipeline`, `get_status`), overlay (`copy_text`, `hide_overlay`), models (`list_models`, `download_model`, `delete_model`, `resolve_model`), **history** (`list_history`, `delete_history_entries`, `clear_history`, `polish_history_entry`). The voice pipeline (`run_pipeline`) appends a row when `raw_text` is non-empty, emits `history-updated` after a successful write, and prefers showing polished text only when it is non-empty after trim.
-- **`history.rs`** — Append/list/delete/clear/update for `history.json` (camelCase JSON, `Mutex` for file I/O). Does not store audio.
-- **`config.rs`** — TOML config loading with `serde(default)` for every field. API keys overridable via env vars (e.g. `ALTGO_POLISHER_API_KEY`; transcriber key if API engine used).
-- **`state_machine.rs`** — 5-state enum (`Idle`, `PotentialPress`, `Recording`, `WaitSecondClick`, `ContinuousRecording`). Long-press records, double-click enters continuous mode. Uses `tokio::select!` to race key events vs timeouts.
-- **`audio.rs`** — Thread-safe PCM buffer (`Mutex<Vec<u8>>`), WAV encode/decode (44-byte header + PCM).
-- **`transcriber.rs`** — `WhisperApi` (HTTP multipart to OpenAI-compatible endpoint) and `LocalWhisper` (subprocess to `whisper-cli` binary).
-- **`polisher.rs`** — LLM text polishing with 4 levels (`none`/`light`/`medium`/`heavy`). Retries with exponential backoff (3 attempts). Uses OpenAI-compatible chat API.
-- **`pipeline.rs`** — Core processing pipeline (transcribe + polish). Caller handles output (overlay UI, optional clipboard inject, notifications).
-- **`model.rs`** — whisper.cpp GGML model management (download, switch, storage in `~/.config/altgo/models/`).
-- **`tray.rs`** — System tray configuration (show window, quit menu).
-- **`resource.rs`** — Resource file management.
-- **`key_capture.rs`** — One-shot activation key capture for Settings (Linux evdev; Windows WH_KEYBOARD_LL).
-- **`key_listener/`** — Key detection (Linux: `xinput test-xi2` / Windows: `WH_KEYBOARD_LL` via `SetWindowsHookExW` on a dedicated message-pump thread).
-- **`recorder/`** — Audio capture (Linux: `parecord` PulseAudio / Windows: `cpal` WASAPI; outputs 16kHz mono WAV; resamples via rubato if device rate differs).
-- **`output/`** — Clipboard + notifications (Linux: `xclip`/`xsel`/`wl-copy` + `notify-send` / Windows: `arboard` clipboard + no-op notify; overlay handles display on Windows).
+- **`lib.rs`** —— Tauri 应用入口，`AppState` 结构体（`config_path`、**`history_path`**、pipeline 句柄、pipeline 状态）、运行循环设置。
+- **`cmd.rs`** —— 通过 IPC 暴露给前端的 Tauri 命令：配置（`get_config`、`save_config`、`capture_activation_key`）、pipeline（`start_pipeline`、`stop_pipeline`、`get_status`）、浮窗（`copy_text`、`hide_overlay`）、模型（`list_models`、`download_model`、`delete_model`、`resolve_model`）、**历史记录**（`list_history`、`delete_history_entries`、`clear_history`、`polish_history_entry`）。语音流水线（`run_pipeline`）在 `raw_text` 非空时追加一行，写入成功后发出 `history-updated` 事件，并优先在润色后文本经 trim 后非空时展示润色文本。
+- **`history.rs`** —— 对 `history.json` 的追加/列出/删除/清空/更新（camelCase JSON，文件 I/O 使用 `Mutex`）。不保存音频。
+- **`config.rs`** —— 使用 `serde(default)` 加载每个字段的 TOML 配置。API 密钥可通过环境变量覆盖（例如 `ALTGO_POLISHER_API_KEY`；若使用 API 引擎，则转写器密钥同样可覆盖）。
+- **`state_machine.rs`** —— 5 状态枚举（`Idle`、`PotentialPress`、`Recording`、`WaitSecondClick`、`ContinuousRecording`）。长按录音，双击进入连续模式。使用 `tokio::select!` 让按键事件与超时竞争。
+- **`audio.rs`** —— 线程安全的 PCM 缓冲区（`Mutex<Vec<u8>>`），WAV 编码/解码（44 字节头 + PCM）。
+- **`transcriber.rs`** —— `WhisperApi`（HTTP multipart 上传至兼容 OpenAI 的端点）和 `LocalWhisper`（通过子进程调用 `whisper-cli` 二进制文件）。
+- **`polisher.rs`** —— 使用 LLM 对文本进行 4 档润色（`none`/`light`/`medium`/`heavy`）。指数退避重试（3 次）。使用兼容 OpenAI 的聊天 API。
+- **`pipeline.rs`** —— 核心处理流水线（转写 + 润色）。调用方负责输出（浮窗 UI、可选的剪贴板注入、通知）。
+- **`model.rs`** —— whisper.cpp GGML 模型管理（下载、切换、存储在 `~/.config/altgo/models/`）。
+- **`tray.rs`** —— 系统托盘配置（显示窗口、退出菜单）。
+- **`resource.rs`** —— 资源文件管理。
+- **`key_capture.rs`** —— 设置中的一次性激活键捕获（Linux evdev；Windows WH_KEYBOARD_LL）。
+- **`key_listener/`** —— 按键检测（Linux：`xinput test-xi2` / Windows：通过 `SetWindowsHookExW` 在独立消息泵线程上挂接 `WH_KEYBOARD_LL`）。
+- **`recorder/`** —— 音频捕获（Linux：`parecord` PulseAudio / Windows：`cpal` WASAPI；输出 16kHz 单声道 WAV；如果设备采样率不同，则通过 rubato 重采样）。
+- **`output/`** —— 剪贴板 + 通知（Linux：`xclip`/`xsel`/`wl-copy` + `notify-send` / Windows：`arboard` 剪贴板 + 空操作通知；Windows 由浮窗负责显示）。
 
-### Frontend Structure (`frontend/src/`)
+### 前端结构（`frontend/src/`）
 
 ```
-├── App.tsx                 # App entry
-├── main.tsx                # React render entry
-├── ThemeContext.tsx        # Theme provider
-├── theme.ts                # Theme tokens / persistence
-├── overlay.tsx             # Floating window component
-├── overlay.css             # Overlay styles (imports overlay-base, motion)
+├── App.tsx                 # 应用入口
+├── main.tsx                # React 渲染入口
+├── ThemeContext.tsx        # 主题 Provider
+├── theme.ts                # 主题 token / 持久化
+├── overlay.tsx             # 悬浮窗口组件
+├── overlay.css             # 浮窗样式（引入 overlay-base、motion）
 ├── components/
-│   ├── ui/                 # Base UI components (Input, Button, Card)
-│   ├── Layout.tsx          # Layout component
-│   └── StatusIndicator.tsx # Status indicator
+│   ├── ui/                 # 基础 UI 组件（Input、Button、Card）
+│   ├── Layout.tsx          # 布局组件
+│   └── StatusIndicator.tsx # 状态指示器
 ├── pages/
-│   ├── Home.tsx            # Home page
-│   ├── History.tsx         # Transcription history (select / delete / clear / copy / polish one row)
-│   └── Settings.tsx        # Settings page
+│   ├── Home.tsx            # 首页
+│   ├── History.tsx         # 转写历史（选择 / 删除 / 清空 / 复制 / 润色单行）
+│   └── Settings.tsx        # 设置页
 ├── hooks/
-│   └── useTauri.ts         # Tauri integration hook
-├── i18n/                   # Internationalization
+│   └── useTauri.ts         # Tauri 集成 hook
+├── i18n/                   # 国际化
 └── styles/
     ├── global.css
     ├── components.css
     ├── design-system.css
-    ├── design-tokens.css   # Design tokens
-    ├── motion.css          # Motion / transitions
-    └── overlay-base.css    # Shared overlay layout
+    ├── design-tokens.css   # 设计 token
+    ├── motion.css          # 动效 / 过渡
+    └── overlay-base.css    # 共享浮窗布局
 ```
 
-### Key Patterns
+### 关键模式
 
-**Subprocess-based system interaction (Linux)** — Platform integration on Linux shells out to CLI tools (`xinput`, `parecord`, `xclip`). This simplifies building and avoids native dependency complexity.
+**基于子进程的系统交互（Linux）** —— Linux 上的平台集成通过调用 CLI 工具（`xinput`、`parecord`、`xclip`）完成。这简化了构建，避免了原生依赖的复杂性。
 
-**Win32 API bindings (Windows)** — Windows uses the `windows` crate (0.61) for keyboard hooks (`WH_KEYBOARD_LL`) and monitor geometry (`GetMonitorInfoW`), `cpal` (0.17) for WASAPI audio capture, and `arboard` (3) for clipboard. These are `cfg(windows)`-only dependencies in `Cargo.toml`.
+**Win32 API 绑定（Windows）** —— Windows 使用 `windows` crate（0.61）实现键盘钩子（`WH_KEYBOARD_LL`）和显示器几何信息（`GetMonitorInfoW`），使用 `cpal`（0.17）进行 WASAPI 音频捕获，使用 `arboard`（3）操作剪贴板。这些在 `Cargo.toml` 中都是仅限 `cfg(windows)` 的依赖。
 
-**Platform abstraction via `cfg` + traits** — Each platform module (`key_listener/`, `recorder/`, `output/`) uses `#[cfg(target_os)]` to select the concrete implementation. A `Platform*` type alias provides the default, and each module exposes a trait (`KeyListener`, `Recorder`, `Output`) so the pipeline can consume `Box<dyn Trait>` for testability.
+**通过 `cfg` + trait 实现平台抽象** —— 每个平台模块（`key_listener/`、`recorder/`、`output/`）使用 `#[cfg(target_os)]` 选择具体实现。`Platform*` 类型别名提供默认实现，每个模块暴露一个 trait（`KeyListener`、`Recorder`、`Output`），以便流水线可以使用 `Box<dyn Trait>`，提升可测试性。
 
-**Async channel pipeline** — `tokio::sync::mpsc` channels decouple stages. Key events flow via unbounded channel, commands via bounded (capacity 16). Processing spawned as independent `tokio::spawn` tasks.
+**异步通道流水线** —— `tokio::sync::mpsc` 通道解耦各阶段。按键事件通过无界通道流动，命令通过有界通道（容量 16）。处理任务作为独立的 `tokio::spawn` 任务启动。
 
-**Config** — Lives at `~/.config/altgo/altgo.toml`. Template at `configs/altgo.toml`. All fields have serde defaults so a partial config works.
+**配置** —— 位于 `~/.config/altgo/altgo.toml`。模板在 `configs/altgo.toml`。所有字段都有 serde 默认值，因此部分配置也能工作。
 
-**Transcription history** — `~/.config/altgo/history.json` (same directory as config). Entries: `id`, `createdAtMs`, `rawText`, `text`. The floating window and frontend listen for the **`history-updated`** event to refresh lists.
+**转写历史** —— `~/.config/altgo/history.json`（与配置同目录）。条目：`id`、`createdAtMs`、`rawText`、`text`。浮窗和前端监听 **`history-updated`** 事件以刷新列表。
 
-### System Requirements
+### 系统要求
 
-**Linux**: `xinput`, `xmodmap`, `parecord`, `xclip`/`xsel`/`wl-copy`, `notify-send`
+**Linux**：`xinput`、`xmodmap`、`parecord`、`xclip`/`xsel`/`wl-copy`、`notify-send`
 
-**Windows**: WebView2 Runtime (auto-installed by MSI if missing), microphone (WASAPI default device). No CLI tool dependencies — all platform integration uses Win32 APIs or bundled crates.
+**Windows**：WebView2 Runtime（若缺失，MSI 会自动安装）、麦克风（WASAPI 默认设备）。不依赖 CLI 工具 —— 所有平台集成均使用 Win32 API 或内置 crate。
 
-### Platform-specific Dependencies (Cargo.toml)
+### 平台特定依赖（Cargo.toml）
 
 ```toml
 [target.'cfg(windows)'.dependencies]
@@ -149,33 +145,33 @@ cpal = "0.17"
 arboard = { version = "3", default-features = false }
 ```
 
-Note: `cpal` 0.17 is pinned (not 0.18) to avoid breaking `windows-core` version conflicts with tao/tauri 2.10. See memory file `windows-cargo-version-pin`.
+注意：`cpal` 0.17 被固定（而非 0.18），以避免与 tao/tauri 2.10 的 `windows-core` 版本冲突。参见 memory 文件 `windows-cargo-version-pin`。
 
-### Tauri GUI Development
+### Tauri GUI 开发
 
-Before first run, install frontend dependencies:
+首次运行前，安装前端依赖：
 ```bash
 cd frontend && npm install
 ```
 
-## Testing Notes
+## 测试说明
 
-- Unit tests live in `#[cfg(test)]` modules within each source file.
-- `config.rs`, `audio.rs`, `model.rs`, and `history.rs` have comprehensive tests.
-- `transcriber.rs` and `polisher.rs` use `mockito` for HTTP-level mocking.
-- Platform-specific modules have minimal tests (construction/smoke tests only).
-- **Windows code is not tested in CI** (Linux-only CI runner). Windows-specific code paths are verified manually on a Windows machine. The release workflow builds MSI but does not run `cargo test` on Windows.
+- 单元测试位于每个源文件的 `#[cfg(test)]` 模块内。
+- `config.rs`、`audio.rs`、`model.rs` 和 `history.rs` 有全面的测试。
+- `transcriber.rs` 和 `polisher.rs` 使用 `mockito` 进行 HTTP 级别的模拟。
+- 平台特定模块只有少量测试（仅构造/冒烟测试）。
+- **Windows 代码不在 CI 中测试**（仅 Linux CI 运行器）。Windows 特定代码路径在 Windows 机器上手动验证。发布工作流会构建 MSI，但不会在 Windows 上运行 `cargo test`。
 
-## Agent skills
+## Agent 技能
 
 ### Issue tracker
 
-Issues live in GitHub Issues (`cislunarspace/altgo`). Uses `gh` CLI. See `docs/agents/issue-tracker.md`.
+Issue 位于 GitHub Issues（`cislunarspace/altgo`）。使用 `gh` CLI。参见 `docs/agents/issue-tracker.md`。
 
 ### Triage labels
 
-Five canonical triage labels with default names. See `docs/agents/triage-labels.md`.
+五个标准 triage 标签，使用默认名称。参见 `docs/agents/triage-labels.md`。
 
 ### Domain docs
 
-Single-context layout (`CONTEXT.md` + `docs/adr/` at repo root). See `docs/agents/domain.md`.
+单上下文布局（仓库根目录的 `CONTEXT.md` + `docs/adr/`）。参见 `docs/agents/domain.md`。
