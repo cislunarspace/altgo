@@ -48,8 +48,6 @@ pub struct KeyListenerConfig {
     pub long_press_threshold_ms: u64,
     /// 双击间隔（毫秒），两次点击在此时间窗口内视为双击
     pub double_click_interval_ms: u64,
-    /// 防抖窗口（毫秒），过滤输入法导致的按键抖动
-    pub debounce_window_ms: u64,
     /// 最短按下时长（毫秒），过滤 IME 导致的瞬时分合
     pub min_press_duration_ms: u64,
 }
@@ -63,11 +61,6 @@ impl KeyListenerConfig {
     /// 将双击间隔转换为 `Duration`。
     pub fn double_click_interval(&self) -> Duration {
         Duration::from_millis(self.double_click_interval_ms)
-    }
-
-    /// 将防抖窗口转换为 `Duration`。
-    pub fn debounce_window(&self) -> Duration {
-        Duration::from_millis(self.debounce_window_ms)
     }
 
     /// 将最短按下时长转换为 `Duration`。
@@ -84,7 +77,6 @@ impl Default for KeyListenerConfig {
             windows_vk: None,
             long_press_threshold_ms: 200,
             double_click_interval_ms: 300,
-            debounce_window_ms: 100,
             min_press_duration_ms: 100,
         }
     }
@@ -483,7 +475,6 @@ mod tests {
         assert!(cfg.key_listener.linux_evdev_code.is_none());
         assert!(cfg.key_listener.windows_vk.is_none());
         assert_eq!(cfg.key_listener.long_press_threshold_ms, 200);
-        assert_eq!(cfg.key_listener.debounce_window_ms, 100);
         assert_eq!(cfg.key_listener.min_press_duration_ms, 100);
         assert_eq!(cfg.recorder.sample_rate, 16000);
         assert_eq!(cfg.transcriber.engine, "local");
@@ -591,10 +582,6 @@ level = "debug"
         assert_eq!(
             cfg.key_listener.double_click_interval(),
             Duration::from_millis(300)
-        );
-        assert_eq!(
-            cfg.key_listener.debounce_window(),
-            Duration::from_millis(100)
         );
         assert_eq!(
             cfg.key_listener.min_press_duration(),

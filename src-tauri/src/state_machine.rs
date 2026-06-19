@@ -8,8 +8,8 @@
 //! - `WaitSecondClick`（等待第二次点击）→ 短按松开后等待双击
 //! - `ContinuousRecording`（连续录音）→ 双击触发，再按一次停止；按住第二次时忽略系统按键连发直至松开
 //!
-//! 状态机通过 `tokio::select!` 同时监听按键事件和超时计时器，
-//! 以实现长按阈值和双击间隔的精确控制。
+//! 状态机提供同步接口（`process`、`poll_timeout`、`next_deadline`），
+//! 由调用方（`voice_pipeline::PipelineContext`）在 `tokio::select!` 主循环中驱动。
 
 use crate::key_listener::KeyEvent;
 use std::time::{Duration, Instant};
@@ -102,8 +102,9 @@ impl Machine {
                     if let Some(pt) = self.press_time {
                         if Instant::now().duration_since(pt) < self.min_press_duration {
                             // Too quick — treat as spurious IME release.
-                            // Reset press_time so poll_timeout won't fire a stale
-                            // long-press timer for a key that is no longer held.
+                            // Reset to Idle so a subsequent spurious release
+                            // won't advance to WaitSecondClick without a real press.
+                            self.state = State::Idle;
                             self.press_time = None;
                             return None;
                         }
@@ -330,10 +331,15 @@ mod tests {
         assert_eq!(sm.process(press()), None);
 
         assert_eq!(sm.process(release()), None);
-        assert_eq!(sm.state, State::PotentialPress);
+        // State must return to Idle, not stay in PotentialPress.
+        assert_eq!(sm.state, State::Idle);
 
         assert!(sm.press_time.is_none());
 
         assert_eq!(sm.poll_timeout(), None);
+
+        // A subsequent spurious release must not advance to WaitSecondClick.
+        assert_eq!(sm.process(release()), None);
+        assert_eq!(sm.state, State::Idle);
     }
 }

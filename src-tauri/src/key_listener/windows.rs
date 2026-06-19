@@ -242,7 +242,6 @@ mod tests {
             windows_vk: None,
             long_press_threshold_ms: 200,
             double_click_interval_ms: 300,
-            debounce_window_ms: 100,
             min_press_duration_ms: 100,
         }
     }

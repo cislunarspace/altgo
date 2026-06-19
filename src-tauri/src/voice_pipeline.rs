@@ -290,57 +290,44 @@ impl PipelineContext {
 
         let mut stop_rx = stop_rx;
         loop {
-            tokio::select! {
+            let cmd = tokio::select! {
                 // 按键事件
-                Some(event) = key_events.recv() => {
-                    if let Some(cmd) = machine.process(event) {
-                        match cmd {
-                            Command::StartRecord => {
-                                let _ = handle_start_record(&mut *recorder, &*sink);
-                            }
-                            Command::StopRecord => {
-                                handle_stop_record(
-                                    &mut *recorder,
-                                    &*transcriber,
-                                    &formatter,
-                                    polish_level,
-                                    sink.clone(),
-                                )
-                                .await;
-                            }
-                        }
+                event = key_events.recv() => match event {
+                    Some(ev) => machine.process(ev),
+                    None => {
+                        tracing::warn!("key event channel closed, stopping pipeline");
+                        break;
                     }
-                    // 更新截止时间
-                    deadline = machine.next_deadline().map(|d| d.into());
-                }
+                },
                 // 超时事件
                 _ = async { tokio::time::sleep_until(deadline.unwrap()).await }, if deadline.is_some() => {
-                    if let Some(cmd) = machine.poll_timeout() {
-                        match cmd {
-                            Command::StartRecord => {
-                                let _ = handle_start_record(&mut *recorder, &*sink);
-                            }
-                            Command::StopRecord => {
-                                handle_stop_record(
-                                    &mut *recorder,
-                                    &*transcriber,
-                                    &formatter,
-                                    polish_level,
-                                    sink.clone(),
-                                )
-                                .await;
-                            }
-                        }
-                    }
-                    // 更新截止时间
-                    deadline = machine.next_deadline().map(|d| d.into());
+                    machine.poll_timeout()
                 }
                 // 停止信号
                 _ = &mut stop_rx => {
                     tracing::info!("pipeline stop requested");
                     break;
                 }
+            };
+
+            if let Some(cmd) = cmd {
+                match cmd {
+                    Command::StartRecord => {
+                        let _ = handle_start_record(&mut *recorder, &*sink);
+                    }
+                    Command::StopRecord => {
+                        handle_stop_record(
+                            &mut *recorder,
+                            &*transcriber,
+                            &formatter,
+                            polish_level,
+                            sink.clone(),
+                        )
+                        .await;
+                    }
+                }
             }
+            deadline = machine.next_deadline().map(|d| d.into());
         }
 
         sink.on_status_change("stopped");
@@ -411,6 +398,7 @@ pub async fn handle_stop_record(
         Err(e) => {
             tracing::error!(error = %e, "transcription failed");
             sink.on_error(&format!("transcription: {}", e));
+            sink.on_status_change("idle");
             return;
         }
     };

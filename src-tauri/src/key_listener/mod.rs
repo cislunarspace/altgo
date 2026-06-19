@@ -25,7 +25,6 @@ pub struct KeyListenerConfig {
     pub windows_vk: Option<i32>,
     pub long_press_threshold: std::time::Duration,
     pub double_click_interval: std::time::Duration,
-    pub debounce_window: std::time::Duration,
     pub min_press_duration: std::time::Duration,
 }
 
@@ -37,7 +36,6 @@ impl From<&crate::config::Config> for KeyListenerConfig {
             windows_vk: cfg.key_listener.windows_vk,
             long_press_threshold: cfg.key_listener.long_press_threshold(),
             double_click_interval: cfg.key_listener.double_click_interval(),
-            debounce_window: cfg.key_listener.debounce_window(),
             min_press_duration: cfg.key_listener.min_press_duration(),
         }
     }
