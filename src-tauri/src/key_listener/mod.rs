@@ -17,30 +17,6 @@ pub type PlatformListener = X11Listener;
 #[cfg(target_os = "windows")]
 pub type PlatformListener = WindowsListener;
 
-/// KeyListener configuration subset.
-#[derive(Debug, Clone)]
-pub struct KeyListenerConfig {
-    pub key_name: String,
-    pub linux_evdev_code: Option<u16>,
-    pub windows_vk: Option<i32>,
-    pub long_press_threshold: std::time::Duration,
-    pub double_click_interval: std::time::Duration,
-    pub min_press_duration: std::time::Duration,
-}
-
-impl From<&crate::config::Config> for KeyListenerConfig {
-    fn from(cfg: &crate::config::Config) -> Self {
-        Self {
-            key_name: cfg.key_listener.key_name.clone(),
-            linux_evdev_code: cfg.key_listener.linux_evdev_code,
-            windows_vk: cfg.key_listener.windows_vk,
-            long_press_threshold: cfg.key_listener.long_press_threshold(),
-            double_click_interval: cfg.key_listener.double_click_interval(),
-            min_press_duration: cfg.key_listener.min_press_duration(),
-        }
-    }
-}
-
 /// 按键事件。
 #[derive(Debug)]
 pub struct KeyEvent {

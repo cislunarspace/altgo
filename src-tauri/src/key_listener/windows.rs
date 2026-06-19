@@ -240,9 +240,9 @@ mod tests {
             key_name: "Alt_R".to_string(),
             linux_evdev_code: None,
             windows_vk: None,
-            long_press_threshold_ms: 200,
-            double_click_interval_ms: 300,
-            min_press_duration_ms: 100,
+            long_press_threshold: std::time::Duration::from_millis(200),
+            double_click_interval: std::time::Duration::from_millis(300),
+            min_press_duration: std::time::Duration::from_millis(100),
         }
     }
 

@@ -16,7 +16,7 @@ use std::sync::Mutex;
 
 use crate::error::{FatalError, PipelineError};
 use crate::history::HistoryStore;
-use crate::key_listener::{KeyListener, KeyListenerConfig};
+use crate::key_listener::KeyListener;
 use crate::output::Output;
 use crate::polisher::{LLMFormatter, PolishLevel};
 use crate::recorder::Recorder;
@@ -76,10 +76,9 @@ impl PipelineBuilder {
 
     /// Build recorder from config.
     pub fn build_recorder(&self) -> Box<dyn Recorder> {
-        let recorder_cfg = crate::recorder::RecorderConfig::from(&*self.cfg);
         Box::new(crate::recorder::PlatformRecorder::new(
-            recorder_cfg.sample_rate,
-            recorder_cfg.channels,
+            self.cfg.recorder.sample_rate,
+            self.cfg.recorder.channels,
         ))
     }
 
@@ -87,45 +86,41 @@ impl PipelineBuilder {
     ///
     /// Returns error if model not found (local engine) or API initialization fails.
     pub fn build_transcriber(&self) -> Result<Box<dyn Transcriber>, PipelineError> {
-        let transcriber_cfg = crate::transcriber::TranscriberConfig::from(&*self.cfg);
+        let cfg = &self.cfg.transcriber;
 
-        let model_path = if transcriber_cfg.engine == "local" {
-            match crate::model::resolve_model_path(&transcriber_cfg.model) {
+        let model_path = if cfg.engine == "local" {
+            match crate::model::resolve_model_path(&cfg.model) {
                 Some(p) => p.to_string_lossy().to_string(),
                 None => {
                     return Err(PipelineError::Fatal(FatalError::ModelNotFound {
-                        model: transcriber_cfg.model.clone(),
+                        model: cfg.model.clone(),
                         searched: vec![dirs::config_dir().unwrap_or_default().join("altgo/models")],
                     }));
                 }
             }
         } else {
-            transcriber_cfg.model.clone()
+            cfg.model.clone()
         };
 
-        let transcriber: Box<dyn Transcriber> = match transcriber_cfg.engine.as_str() {
-            "local" => {
-                // 常驻 whisper-server：模型一次性载入内存，之后每句话只发本地 HTTP，
-                // 省掉「每次重载模型」的成本。spawn 失败时内部自动回退到一次性 whisper-cli。
-                Box::new(crate::whisper_server::ResidentWhisper::new(
-                    model_path,
-                    transcriber_cfg.language.clone(),
-                    transcriber_cfg.whisper_path.clone(),
-                    transcriber_cfg.temperature,
-                    transcriber_cfg.threads,
-                    transcriber_cfg.beam_size,
-                    transcriber_cfg.timeout,
-                ))
-            }
+        let transcriber: Box<dyn Transcriber> = match cfg.engine.as_str() {
+            "local" => Box::new(crate::whisper_server::ResidentWhisper::new(
+                model_path,
+                cfg.language.clone(),
+                cfg.whisper_path.clone(),
+                cfg.temperature,
+                cfg.threads,
+                cfg.beam_size,
+                cfg.timeout,
+            )),
             _ => {
                 let api = crate::transcriber::WhisperApi::new(
-                    transcriber_cfg.api_key.clone(),
-                    transcriber_cfg.api_base_url.clone(),
-                    transcriber_cfg.model.clone(),
-                    transcriber_cfg.language.clone(),
-                    transcriber_cfg.temperature,
-                    transcriber_cfg.prompt.clone(),
-                    transcriber_cfg.timeout,
+                    cfg.api_key.clone(),
+                    cfg.api_base_url.clone(),
+                    cfg.model.clone(),
+                    cfg.language.clone(),
+                    cfg.temperature,
+                    cfg.prompt.clone(),
+                    cfg.timeout,
                 )
                 .map_err(PipelineError::fatal_transcriber)?;
                 Box::new(api)
@@ -139,9 +134,9 @@ impl PipelineBuilder {
     ///
     /// Returns error if protocol is unknown or HTTP client fails to initialize.
     pub fn build_polisher(&self) -> Result<LLMFormatter, PipelineError> {
-        let polisher_cfg = crate::polisher::PolisherConfig::from(&*self.cfg);
         let formatter =
-            LLMFormatter::from_config(&polisher_cfg).map_err(PipelineError::fatal_polisher)?;
+            LLMFormatter::from_config(&self.cfg.polisher, &self.cfg.transcriber.language)
+                .map_err(PipelineError::fatal_polisher)?;
 
         // Build prompt source chain: PromptStore → Custom → Hardcoded
         let mut sources: Vec<Box<dyn crate::polisher::SystemPromptSource>> = Vec::new();
@@ -172,7 +167,7 @@ impl PipelineBuilder {
         }
 
         let fallback = Box::new(crate::polisher::HardcodedPromptSource::new(
-            polisher_cfg.language.clone(),
+            self.cfg.transcriber.language.clone(),
         ));
         let prompt_source: Box<dyn crate::polisher::SystemPromptSource> = if sources.is_empty() {
             fallback
@@ -202,18 +197,12 @@ impl PipelineBuilder {
         PolishLevel::effective(&self.cfg.polisher.level)
     }
 
-    /// Get key listener config for state machine setup.
-    pub fn key_listener_config(&self) -> KeyListenerConfig {
-        KeyListenerConfig::from(&*self.cfg)
-    }
-
     /// Build the full pipeline context from configuration.
     pub fn build_context(&self) -> Result<PipelineContext, PipelineError> {
         let recorder = self.build_recorder();
         let transcriber = self.build_transcriber()?;
         let formatter = self.build_polisher()?;
         let polish_level = self.polish_level();
-        let key_listener_config = self.key_listener_config();
         let listener = self.build_key_listener()?;
 
         Ok(PipelineContext {
@@ -222,9 +211,9 @@ impl PipelineBuilder {
             formatter,
             polish_level,
             listener: Mutex::new(Some(listener)),
-            long_press_threshold: key_listener_config.long_press_threshold,
-            double_click_interval: key_listener_config.double_click_interval,
-            min_press_duration: key_listener_config.min_press_duration,
+            long_press_threshold: self.cfg.key_listener.long_press_threshold,
+            double_click_interval: self.cfg.key_listener.double_click_interval,
+            min_press_duration: self.cfg.key_listener.min_press_duration,
         })
     }
 }
@@ -545,7 +534,6 @@ pub async fn run(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::polisher::PolisherConfig;
     use crate::recorder::PlatformRecorder;
     use std::sync::{Arc, Mutex};
     use tokio::sync::mpsc;
@@ -629,8 +617,8 @@ mod tests {
         }
     }
 
-    fn test_polisher_config() -> PolisherConfig {
-        PolisherConfig {
+    fn test_polisher_config() -> crate::config::PolisherConfig {
+        crate::config::PolisherConfig {
             api_key: "test-key".to_string(),
             api_base_url: "http://localhost".to_string(),
             model: "test-model".to_string(),
@@ -640,7 +628,6 @@ mod tests {
             system_prompt: String::new(),
             timeout: std::time::Duration::from_secs(10),
             level: "none".to_string(),
-            language: "en".to_string(),
         }
     }
 
@@ -659,7 +646,7 @@ mod tests {
                 )
                 .unwrap(),
             ),
-            formatter: LLMFormatter::from_config(&test_polisher_config()).unwrap(),
+            formatter: LLMFormatter::from_config(&test_polisher_config(), "en").unwrap(),
             polish_level: PolishLevel::None,
             listener: Mutex::new(listener),
             long_press_threshold: std::time::Duration::from_millis(400),

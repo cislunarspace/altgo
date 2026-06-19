@@ -14,6 +14,36 @@ use serde::Deserialize;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+/// serde 辅助模块：TOML 中为 `u64` 毫秒，Rust 侧为 `Duration`。
+mod duration_ms {
+    use serde::{Deserialize, Deserializer, Serializer};
+    use std::time::Duration;
+
+    pub fn serialize<S: Serializer>(dur: &Duration, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_u64(dur.as_millis() as u64)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Duration, D::Error> {
+        let ms = u64::deserialize(d)?;
+        Ok(Duration::from_millis(ms))
+    }
+}
+
+/// serde 辅助模块：TOML 中为 `u64` 秒，Rust 侧为 `Duration`。
+mod duration_secs {
+    use serde::{Deserialize, Deserializer, Serializer};
+    use std::time::Duration;
+
+    pub fn serialize<S: Serializer>(dur: &Duration, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_u64(dur.as_secs())
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Duration, D::Error> {
+        let secs = u64::deserialize(d)?;
+        Ok(Duration::from_secs(secs))
+    }
+}
+
 /// altgo 主配置结构体，包含所有子系统的配置。
 #[derive(Debug, Default, Deserialize, Clone, serde::Serialize)]
 #[serde(default)]
@@ -45,28 +75,14 @@ pub struct KeyListenerConfig {
     /// Windows low-level keyboard hook virtual-key code captured from Settings.
     pub windows_vk: Option<i32>,
     /// 长按阈值（毫秒），超过此时间视为长按录音
-    pub long_press_threshold_ms: u64,
+    #[serde(with = "duration_ms", alias = "long_press_threshold_ms")]
+    pub long_press_threshold: Duration,
     /// 双击间隔（毫秒），两次点击在此时间窗口内视为双击
-    pub double_click_interval_ms: u64,
+    #[serde(with = "duration_ms", alias = "double_click_interval_ms")]
+    pub double_click_interval: Duration,
     /// 最短按下时长（毫秒），过滤 IME 导致的瞬时分合
-    pub min_press_duration_ms: u64,
-}
-
-impl KeyListenerConfig {
-    /// 将长按阈值转换为 `Duration`。
-    pub fn long_press_threshold(&self) -> Duration {
-        Duration::from_millis(self.long_press_threshold_ms)
-    }
-
-    /// 将双击间隔转换为 `Duration`。
-    pub fn double_click_interval(&self) -> Duration {
-        Duration::from_millis(self.double_click_interval_ms)
-    }
-
-    /// 将最短按下时长转换为 `Duration`。
-    pub fn min_press_duration(&self) -> Duration {
-        Duration::from_millis(self.min_press_duration_ms)
-    }
+    #[serde(with = "duration_ms", alias = "min_press_duration_ms")]
+    pub min_press_duration: Duration,
 }
 
 impl Default for KeyListenerConfig {
@@ -75,9 +91,9 @@ impl Default for KeyListenerConfig {
             key_name: "Alt_R".to_string(),
             linux_evdev_code: None,
             windows_vk: None,
-            long_press_threshold_ms: 200,
-            double_click_interval_ms: 300,
-            min_press_duration_ms: 100,
+            long_press_threshold: Duration::from_millis(200),
+            double_click_interval: Duration::from_millis(300),
+            min_press_duration: Duration::from_millis(100),
         }
     }
 }
@@ -118,7 +134,8 @@ pub struct TranscriberConfig {
     /// whisper-cli 二进制文件路径（为空时自动在 PATH 中查找）
     pub whisper_path: String,
     /// 请求超时时间（秒）
-    pub timeout_seconds: u64,
+    #[serde(with = "duration_secs", alias = "timeout_seconds")]
+    pub timeout: Duration,
     /// Whisper API temperature（0.0 - 1.0），越低越确定性，默认 0
     pub temperature: f32,
     /// Whisper API prompt，提供上下文/词汇提示以提升识别准确率
@@ -127,13 +144,6 @@ pub struct TranscriberConfig {
     pub threads: u32,
     /// 本地引擎 beam search 宽度；`<= 1` 时走贪心解码（最快），默认 0
     pub beam_size: u32,
-}
-
-impl TranscriberConfig {
-    /// 将超时秒数转换为 `Duration`。
-    pub fn timeout(&self) -> Duration {
-        Duration::from_secs(self.timeout_seconds)
-    }
 }
 
 impl Default for TranscriberConfig {
@@ -145,7 +155,7 @@ impl Default for TranscriberConfig {
             model: String::new(),
             language: "zh".to_string(),
             whisper_path: String::new(),
-            timeout_seconds: 30,
+            timeout: Duration::from_secs(30),
             temperature: 0.0,
             prompt: String::new(),
             threads: 0,
@@ -169,20 +179,14 @@ pub struct PolisherConfig {
     /// 润色级别：`"none"`、`"light"`、`"medium"`、`"heavy"`
     pub level: String,
     /// 请求超时时间（秒）
-    pub timeout_seconds: u64,
+    #[serde(with = "duration_secs", alias = "timeout_seconds")]
+    pub timeout: Duration,
     /// 最大生成 token 数
     pub max_tokens: u32,
     /// LLM temperature（0.0 - 2.0），默认 0.3
     pub temperature: f32,
     /// 自定义 system prompt，为空时使用内置 prompt
     pub system_prompt: String,
-}
-
-impl PolisherConfig {
-    /// 将超时秒数转换为 `Duration`。
-    pub fn timeout(&self) -> Duration {
-        Duration::from_secs(self.timeout_seconds)
-    }
 }
 
 impl Default for PolisherConfig {
@@ -193,7 +197,7 @@ impl Default for PolisherConfig {
             api_base_url: String::new(),
             model: String::new(),
             level: "none".to_string(),
-            timeout_seconds: 60,
+            timeout: Duration::from_secs(60),
             max_tokens: 1024,
             temperature: 0.3,
             system_prompt: String::new(),
@@ -474,8 +478,14 @@ mod tests {
         assert_eq!(cfg.key_listener.key_name, "Alt_R");
         assert!(cfg.key_listener.linux_evdev_code.is_none());
         assert!(cfg.key_listener.windows_vk.is_none());
-        assert_eq!(cfg.key_listener.long_press_threshold_ms, 200);
-        assert_eq!(cfg.key_listener.min_press_duration_ms, 100);
+        assert_eq!(
+            cfg.key_listener.long_press_threshold,
+            Duration::from_millis(200)
+        );
+        assert_eq!(
+            cfg.key_listener.min_press_duration,
+            Duration::from_millis(100)
+        );
         assert_eq!(cfg.recorder.sample_rate, 16000);
         assert_eq!(cfg.transcriber.engine, "local");
         assert_eq!(cfg.transcriber.temperature, 0.0);
@@ -571,20 +581,20 @@ level = "debug"
     }
 
     #[test]
-    fn test_timeout_helpers() {
+    fn test_duration_fields() {
         let cfg = Config::default();
-        assert_eq!(cfg.transcriber.timeout(), Duration::from_secs(30));
-        assert_eq!(cfg.polisher.timeout(), Duration::from_secs(60));
+        assert_eq!(cfg.transcriber.timeout, Duration::from_secs(30));
+        assert_eq!(cfg.polisher.timeout, Duration::from_secs(60));
         assert_eq!(
-            cfg.key_listener.long_press_threshold(),
+            cfg.key_listener.long_press_threshold,
             Duration::from_millis(200)
         );
         assert_eq!(
-            cfg.key_listener.double_click_interval(),
+            cfg.key_listener.double_click_interval,
             Duration::from_millis(300)
         );
         assert_eq!(
-            cfg.key_listener.min_press_duration(),
+            cfg.key_listener.min_press_duration,
             Duration::from_millis(100)
         );
     }

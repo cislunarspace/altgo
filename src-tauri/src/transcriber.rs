@@ -19,40 +19,6 @@ use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
 use tokio::sync::mpsc::UnboundedSender;
 
-/// Transcriber configuration subset.
-#[derive(Debug, Clone)]
-pub struct TranscriberConfig {
-    pub engine: String,
-    pub model: String,
-    pub language: String,
-    pub whisper_path: String,
-    pub api_key: String,
-    pub api_base_url: String,
-    pub temperature: f32,
-    pub prompt: String,
-    pub timeout: Duration,
-    pub threads: u32,
-    pub beam_size: u32,
-}
-
-impl From<&crate::config::Config> for TranscriberConfig {
-    fn from(cfg: &crate::config::Config) -> Self {
-        Self {
-            engine: cfg.transcriber.engine.clone(),
-            model: cfg.transcriber.model.clone(),
-            language: cfg.transcriber.language.clone(),
-            whisper_path: cfg.transcriber.whisper_path.clone(),
-            api_key: cfg.transcriber.api_key.clone(),
-            api_base_url: cfg.transcriber.api_base_url.clone(),
-            temperature: cfg.transcriber.temperature,
-            prompt: cfg.transcriber.prompt.clone(),
-            timeout: cfg.transcriber.timeout(),
-            threads: cfg.transcriber.threads,
-            beam_size: cfg.transcriber.beam_size,
-        }
-    }
-}
-
 /// Expand tilde in path to home directory.
 fn stderr_fraction(line: &str, re_percent: &Regex, re_ratio: &Regex) -> Option<f32> {
     if let Some(c) = re_percent.captures(line) {
