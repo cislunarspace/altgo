@@ -390,7 +390,40 @@ where
     }
 }
 
+/// 三态反序列化：JSON 字段缺失 = 不修改；`null` = 清除；数值 = 设置。
+///
+/// 紧靠 `KeyListenerConfig.windows_vk` 字段定义。
+fn deserialize_opt_patch_i32<'de, D>(deserializer: D) -> Result<Option<Option<i32>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let v = serde_json::Value::deserialize(deserializer)?;
+    match v {
+        serde_json::Value::Null => Ok(Some(None)),
+        serde_json::Value::Number(n) => {
+            let i = n
+                .as_i64()
+                .ok_or_else(|| serde::de::Error::custom("windows_vk: expected number"))?;
+            if i < i32::MIN as i64 || i > i32::MAX as i64 {
+                return Err(serde::de::Error::custom("windows_vk out of range"));
+            }
+            Ok(Some(Some(i as i32)))
+        }
+        _ => Err(serde::de::Error::custom(
+            "windows_vk: expected null or number",
+        )),
+    }
+}
+
 fn apply_nested_opt_u16(target: &mut Option<u16>, patch: Option<Option<u16>>) {
+    match patch {
+        None => {}
+        Some(None) => *target = None,
+        Some(Some(v)) => *target = Some(v),
+    }
+}
+
+fn apply_nested_opt_i32(target: &mut Option<i32>, patch: Option<Option<i32>>) {
     match patch {
         None => {}
         Some(None) => *target = None,
@@ -408,7 +441,10 @@ pub struct ConfigPatch {
     /// `Some(Some(v))` = set to v.
     #[serde(default, deserialize_with = "deserialize_opt_patch_u16")]
     pub linux_evdev_code: Option<Option<u16>>,
-    pub windows_vk: Option<i32>,
+    /// `None` = field absent (no change); `Some(None)` = JSON `null` (clear);
+    /// `Some(Some(v))` = set to v.
+    #[serde(default, deserialize_with = "deserialize_opt_patch_i32")]
+    pub windows_vk: Option<Option<i32>>,
     pub language: Option<String>,
     pub engine: Option<String>,
     pub model: Option<String>,
@@ -431,9 +467,7 @@ impl ConfigPatch {
             &mut cfg.key_listener.linux_evdev_code,
             self.linux_evdev_code,
         );
-        if let Some(v) = self.windows_vk {
-            cfg.key_listener.windows_vk = Some(v);
-        }
+        apply_nested_opt_i32(&mut cfg.key_listener.windows_vk, self.windows_vk);
         if let Some(ref v) = self.language {
             cfg.transcriber.language = v.clone();
         }
@@ -676,6 +710,27 @@ level = "debug"
         let j = r#"{"linuxEvdevCode":100}"#;
         let p: ConfigPatch = serde_json::from_str(j).unwrap();
         assert_eq!(p.linux_evdev_code, Some(Some(100)));
+    }
+
+    #[test]
+    fn windows_vk_json_null_clears() {
+        let j = r#"{"windowsVk":null}"#;
+        let p: ConfigPatch = serde_json::from_str(j).unwrap();
+        assert_eq!(p.windows_vk, Some(None));
+    }
+
+    #[test]
+    fn windows_vk_missing_field_means_no_patch() {
+        let j = r#"{}"#;
+        let p: ConfigPatch = serde_json::from_str(j).unwrap();
+        assert!(p.windows_vk.is_none());
+    }
+
+    #[test]
+    fn windows_vk_number_sets() {
+        let j = r#"{"windowsVk":165}"#;
+        let p: ConfigPatch = serde_json::from_str(j).unwrap();
+        assert_eq!(p.windows_vk, Some(Some(165)));
     }
 
     #[test]
