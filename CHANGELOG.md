@@ -1,5 +1,27 @@
 # Changelog
 
+## v2.4.4 (2026-06-19)
+
+### Fixes
+
+- **状态机回归修复**：按键事件路径重构后，`key_events` 通道关闭时管道循环不再永久挂起——现在会打印 `tracing::warn` 并干净退出。
+- **PotentialPress 状态残留**：短按被 `min_press_duration` 拒绝后状态未回退到 Idle，后续系统重复 release 事件会让状态机从未真正按下就进入等待双击状态。现回退到 Idle。
+- **转写失败状态卡死**：`transcriber.transcribe()` 返回错误时只调用 `on_error` 不恢复状态，前端状态指示器卡在 processing。现补充 `on_status_change("idle")`。
+- **windows_vk 三态不一致**：`windows_vk` 与 `linux_evdev_code` 对齐，支持 JSON `null` 清除（之前 `{"windowsVk": null}` 被静默忽略）。
+- **失效的 debounce_window 配置**：`debounce_task` 移除后 `debounce_window_ms` 成为死字段，现从配置和模板中彻底移除。
+
+### Refactor — 深化模块（架构审查 5 项全部落地）
+
+- **内联状态机**（#3）：按键事件路径从 4 层（thread → debounce_task → `Machine::run` → select）简化为 2 层（`key_events` → select 内联状态机），净减 139 行。
+- **配置镜像结构体消除**（#1）：`config.rs` 直接存储 `Duration`（配合 serde `duration_ms`/`duration_secs` 辅助模块，TOML `_ms`/`_seconds` 字段名通过 alias 保持向后兼容）。移除 4 个模块的镜像 Config 结构体和 53 行机械复制的 `From` 实现。
+- **TauriPipelineSink 解耦**（#2）：`HistoryStore` 改为构造时注入，`on_transcription_result` 不再运行时调用 `app.state()`。
+- **voice_pipeline 拆分**（#5）：946 行单体文件拆为 5 个聚焦子模块（`sink`/`builder`/`context`/`handlers`/`mod`），公共接口通过 re-export 保持向后兼容。
+
+### Tests
+
+- 新增 `ConfigStore` 集成测试（7 个），覆盖 patch-validate-save 完整周期、windows_vk/linux_evdev_code 三态清除、无效配置拒绝。
+- 测试总数从 146 提升到 156。
+
 ## v2.4.3 (2026-06-17)
 
 ### Features — Windows 平台支持
