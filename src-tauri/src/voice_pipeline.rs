@@ -11,8 +11,8 @@
 //! - `PipelineBuilder` — construct components individually (testable)
 //! - `PipelineContext` — owns components, exposes `run(stop_rx, sink)`
 
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use std::sync::Mutex;
 
 use crate::error::{FatalError, PipelineError};
 use crate::history::HistoryStore;
@@ -214,7 +214,6 @@ impl PipelineBuilder {
         let formatter = self.build_polisher()?;
         let polish_level = self.polish_level();
         let key_listener_config = self.key_listener_config();
-        let poll_interval_ms = key_listener_config.poll_interval_ms;
         let listener = self.build_key_listener()?;
 
         Ok(PipelineContext {
@@ -222,10 +221,10 @@ impl PipelineBuilder {
             transcriber,
             formatter,
             polish_level,
-            poll_running: Arc::new(AtomicBool::new(true)),
-            key_listener_config,
-            poll_interval_ms,
             listener: Mutex::new(Some(listener)),
+            long_press_threshold: key_listener_config.long_press_threshold,
+            double_click_interval: key_listener_config.double_click_interval,
+            min_press_duration: key_listener_config.min_press_duration,
         })
     }
 }
@@ -240,19 +239,16 @@ pub struct PipelineContext {
     transcriber: Box<dyn Transcriber>,
     formatter: LLMFormatter,
     polish_level: PolishLevel,
-    poll_running: Arc<AtomicBool>,
-    key_listener_config: KeyListenerConfig,
-    poll_interval_ms: u64,
     listener: Mutex<Option<Box<dyn KeyListener>>>,
+    // 状态机参数
+    long_press_threshold: std::time::Duration,
+    double_click_interval: std::time::Duration,
+    min_press_duration: std::time::Duration,
 }
 
 impl PipelineContext {
     /// Run the pipeline event loop until `stop_rx` fires.
     pub async fn run(self, stop_rx: tokio::sync::oneshot::Receiver<()>, sink: impl PipelineSink) {
-        // Extract fields we need before the async loop borrows self mutably.
-        let poll_running = self.poll_running.clone();
-        let poll_interval_ms = self.poll_interval_ms;
-        let key_listener_config = self.key_listener_config.clone();
         let mut recorder = self.recorder;
         let transcriber = self.transcriber;
         let formatter = self.formatter;
@@ -281,68 +277,67 @@ impl PipelineContext {
         };
         tracing::info!(backend = key_backend, "key listener active");
         sink.on_key_listener_backend(key_backend);
-        let (raw_key_tx, raw_key_rx) = tokio::sync::mpsc::unbounded_channel();
-        let poll_running_for_thread = poll_running.clone();
 
-        std::thread::spawn(move || {
-            use tokio::sync::mpsc::error::TryRecvError;
-            while poll_running_for_thread.load(Ordering::SeqCst) {
-                match key_events.try_recv() {
-                    Ok(ev) => {
-                        if raw_key_tx.send(ev).is_err() {
-                            break;
-                        }
-                    }
-                    Err(TryRecvError::Empty) => {
-                        std::thread::sleep(std::time::Duration::from_millis(poll_interval_ms));
-                    }
-                    Err(TryRecvError::Disconnected) => {
-                        tracing::error!("key listener channel closed unexpectedly");
-                        break;
-                    }
-                }
-            }
-        });
-
-        let (key_tx, key_rx) = tokio::sync::mpsc::unbounded_channel();
-        tokio::spawn(crate::key_listener::debounce_task(
-            raw_key_rx,
-            key_tx.clone(),
-        ));
-
-        let sm = Machine::new(
-            key_listener_config.long_press_threshold,
-            key_listener_config.double_click_interval,
-            key_listener_config.min_press_duration,
+        // 创建状态机，直接集成到主循环
+        let mut machine = Machine::new(
+            self.long_press_threshold,
+            self.double_click_interval,
+            self.min_press_duration,
         );
-        let mut commands = sm.run(key_rx);
+        let mut deadline: Option<tokio::time::Instant> = None;
 
         sink.on_status_change("idle");
 
         let mut stop_rx = stop_rx;
         loop {
             tokio::select! {
-                cmd = commands.recv() => {
-                    match cmd {
-                        Some(Command::StartRecord) => {
-                            let _ = handle_start_record(&mut *recorder, &*sink);
+                // 按键事件
+                Some(event) = key_events.recv() => {
+                    if let Some(cmd) = machine.process(event) {
+                        match cmd {
+                            Command::StartRecord => {
+                                let _ = handle_start_record(&mut *recorder, &*sink);
+                            }
+                            Command::StopRecord => {
+                                handle_stop_record(
+                                    &mut *recorder,
+                                    &*transcriber,
+                                    &formatter,
+                                    polish_level,
+                                    sink.clone(),
+                                )
+                                .await;
+                            }
                         }
-                        Some(Command::StopRecord) => {
-                            handle_stop_record(
-                                &mut *recorder,
-                                &*transcriber,
-                                &formatter,
-                                polish_level,
-                                sink.clone(),
-                            )
-                            .await;
-                        }
-                        None => break,
                     }
+                    // 更新截止时间
+                    deadline = machine.next_deadline().map(|d| d.into());
                 }
+                // 超时事件
+                _ = async { tokio::time::sleep_until(deadline.unwrap()).await }, if deadline.is_some() => {
+                    if let Some(cmd) = machine.poll_timeout() {
+                        match cmd {
+                            Command::StartRecord => {
+                                let _ = handle_start_record(&mut *recorder, &*sink);
+                            }
+                            Command::StopRecord => {
+                                handle_stop_record(
+                                    &mut *recorder,
+                                    &*transcriber,
+                                    &formatter,
+                                    polish_level,
+                                    sink.clone(),
+                                )
+                                .await;
+                            }
+                        }
+                    }
+                    // 更新截止时间
+                    deadline = machine.next_deadline().map(|d| d.into());
+                }
+                // 停止信号
                 _ = &mut stop_rx => {
                     tracing::info!("pipeline stop requested");
-                    poll_running.store(false, Ordering::SeqCst);
                     break;
                 }
             }
@@ -678,19 +673,10 @@ mod tests {
             ),
             formatter: LLMFormatter::from_config(&test_polisher_config()).unwrap(),
             polish_level: PolishLevel::None,
-            poll_running: Arc::new(AtomicBool::new(true)),
-            key_listener_config: KeyListenerConfig {
-                key_name: "Alt_R".to_string(),
-                linux_evdev_code: None,
-                windows_vk: None,
-                long_press_threshold: std::time::Duration::from_millis(400),
-                double_click_interval: std::time::Duration::from_millis(200),
-                debounce_window: std::time::Duration::from_millis(30),
-                poll_interval_ms: 10,
-                min_press_duration: std::time::Duration::from_millis(80),
-            },
-            poll_interval_ms: 10,
             listener: Mutex::new(listener),
+            long_press_threshold: std::time::Duration::from_millis(400),
+            double_click_interval: std::time::Duration::from_millis(200),
+            min_press_duration: std::time::Duration::from_millis(80),
         }
     }
 

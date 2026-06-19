@@ -50,8 +50,6 @@ pub struct KeyListenerConfig {
     pub double_click_interval_ms: u64,
     /// 防抖窗口（毫秒），过滤输入法导致的按键抖动
     pub debounce_window_ms: u64,
-    /// 轮询间隔（毫秒）
-    pub poll_interval_ms: u64,
     /// 最短按下时长（毫秒），过滤 IME 导致的瞬时分合
     pub min_press_duration_ms: u64,
 }
@@ -87,7 +85,6 @@ impl Default for KeyListenerConfig {
             long_press_threshold_ms: 200,
             double_click_interval_ms: 300,
             debounce_window_ms: 100,
-            poll_interval_ms: 30,
             min_press_duration_ms: 100,
         }
     }
@@ -487,7 +484,6 @@ mod tests {
         assert!(cfg.key_listener.windows_vk.is_none());
         assert_eq!(cfg.key_listener.long_press_threshold_ms, 200);
         assert_eq!(cfg.key_listener.debounce_window_ms, 100);
-        assert_eq!(cfg.key_listener.poll_interval_ms, 30);
         assert_eq!(cfg.key_listener.min_press_duration_ms, 100);
         assert_eq!(cfg.recorder.sample_rate, 16000);
         assert_eq!(cfg.transcriber.engine, "local");

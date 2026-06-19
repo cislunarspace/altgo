@@ -508,7 +508,6 @@ mod tests {
             long_press_threshold_ms: 400,
             double_click_interval_ms: 200,
             debounce_window_ms: 30,
-            poll_interval_ms: 10,
             min_press_duration_ms: 80,
         }
     }

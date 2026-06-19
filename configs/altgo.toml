@@ -11,7 +11,6 @@ key_name = "Alt_R"
 long_press_threshold_ms = 200       # 长按/短按区分阈值（毫秒）
 double_click_interval_ms = 300      # 双击判定间隔（毫秒）
 min_press_duration_ms = 100         # 最短按下时长（毫秒），过滤 IME 抖动
-poll_interval_ms = 30               # Windows 轮询间隔（毫秒），越小响应越快
 
 [recorder]
 sample_rate = 16000
