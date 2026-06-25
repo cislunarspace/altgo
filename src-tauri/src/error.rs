@@ -37,11 +37,6 @@ impl PipelineError {
         Self::Fatal(FatalError::PolisherInitFailed(e))
     }
 
-    /// Wrap a `RecorderError` as a fatal `RecorderInitFailed`.
-    pub fn fatal_recorder(e: RecorderError) -> Self {
-        Self::Fatal(FatalError::RecorderInitFailed(e))
-    }
-
     /// Returns a user-facing error message in the specified language.
     pub fn message(&self, lang: &str) -> String {
         match self {
@@ -75,8 +70,6 @@ pub enum FatalError {
     #[error("Recorder initialization failed: {0}")]
     RecorderInitFailed(#[from] RecorderError),
 
-    #[error("Configuration error: {0}")]
-    ConfigError(String),
 }
 
 impl FatalError {
@@ -118,13 +111,6 @@ impl FatalError {
             Self::TranscriberInitFailed(e) => e.message(lang),
             Self::PolisherInitFailed(e) => e.message(lang),
             Self::RecorderInitFailed(e) => e.message(lang),
-            Self::ConfigError(msg) => {
-                if lang == "zh" {
-                    format!("配置错误: {}", msg)
-                } else {
-                    format!("Configuration error: {}", msg)
-                }
-            }
         }
     }
 }

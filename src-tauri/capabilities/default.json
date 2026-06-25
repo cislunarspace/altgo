@@ -6,7 +6,6 @@
   "permissions": [
     "core:default",
     "dialog:default",
-    "opener:default",
     "core:window:default",
     "core:window:allow-close",
     "core:window:allow-hide",

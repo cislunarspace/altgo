@@ -20,7 +20,7 @@ echo "Downloading dependencies for ${ARCH}..."
 mkdir -p "${BIN_DIR}"
 
 # ─── ffmpeg (static build) ────────────────────────────────────────────────────
-FFMPEG_VERSION="7.1.1"
+FFMPEG_VERSION="${FFMPEG_VERSION:-7.1.1}"
 FFMPEG_TARGET="${BIN_DIR}/ffmpeg"
 
 if [[ -f "${FFMPEG_TARGET}" ]]; then

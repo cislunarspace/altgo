@@ -1,27 +1,5 @@
 /* Shared motion — imported by main app (global.css) and overlay */
 
-@keyframes island-in {
-  from {
-    transform: translateY(8px);
-    opacity: 0;
-  }
-  to {
-    transform: translateY(0);
-    opacity: 1;
-  }
-}
-
-@keyframes island-result-in {
-  from {
-    transform: translateY(8px);
-    opacity: 0;
-  }
-  to {
-    transform: translateY(0);
-    opacity: 1;
-  }
-}
-
 @keyframes island-exit {
   from {
     opacity: 1;

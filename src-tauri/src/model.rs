@@ -4,10 +4,7 @@
 //! 模型存储在 altgo 配置目录的 `models/` 子目录下。
 
 use anyhow::{Context, Result};
-use console::style;
-use dialoguer::{Confirm, Select};
 use futures_util::StreamExt;
-use indicatif::{ProgressBar, ProgressStyle};
 use reqwest::Client;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
@@ -108,14 +105,6 @@ pub fn models_dir() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("."))
         .join("altgo")
         .join("models")
-}
-
-/// 列出所有已知模型信息。
-pub fn list_available() -> Vec<(&'static str, &'static str, u64)> {
-    MODELS
-        .iter()
-        .map(|m| (m.name, m.description, m.size_bytes))
-        .collect()
 }
 
 /// 扫描已下载的模型，返回存在的模型名称列表。
@@ -277,168 +266,8 @@ where
     Ok(())
 }
 
-/// 下载指定模型，带进度条显示。
-pub async fn download(name: &str) -> Result<PathBuf> {
-    let info = MODELS
-        .iter()
-        .find(|m| m.name == name)
-        .ok_or_else(|| anyhow::anyhow!("未知模型: {}", name))?;
-
-    let dir = models_dir();
-    std::fs::create_dir_all(&dir)
-        .with_context(|| format!("创建模型目录失败: {}", dir.display()))?;
-
-    let dest = dir.join(info.filename);
-
-    // Already downloaded.
-    if dest.exists() {
-        println!("{} 模型已存在: {}", style("✓").green(), dest.display());
-        return Ok(dest);
-    }
-
-    println!(
-        "{} 正在下载模型 {} ({})...",
-        style("↓").cyan(),
-        style(info.name).bold(),
-        format_size(info.size_bytes)
-    );
-
-    let pb = ProgressBar::new(info.size_bytes);
-    pb.set_style(
-        ProgressStyle::with_template(
-            "{spinner:.green} [{bar:40.cyan/blue}] {bytes}/{total_bytes} ({eta})",
-        )
-        .unwrap()
-        .progress_chars("█▓░"),
-    );
-
-    let mut last_total = info.size_bytes;
-    let path = download_with_progress(name, |downloaded, total| {
-        if total != last_total {
-            last_total = total;
-            pb.set_length(std::cmp::max(total, 1));
-        }
-        pb.set_position(downloaded);
-    })
-    .await?;
-
-    pb.finish_and_clear();
-
-    println!(
-        "{} 模型 {} 下载完成: {}",
-        style("✓").green(),
-        style(info.name).bold(),
-        path.display()
-    );
-
-    Ok(path)
-}
-
-/// 交互式模型选择与下载菜单。
-///
-/// 如果已有模型，提供切换选项。如果无模型，引导下载。
-/// 返回选中的模型文件路径。
-pub async fn interactive_prompt() -> Result<PathBuf> {
-    let downloaded = list_downloaded();
-
-    println!();
-    println!("{}", style("Whisper 模型管理").bold().dim());
-    println!();
-
-    if !downloaded.is_empty() {
-        // Build menu: existing models + download new + cancel.
-        let mut items: Vec<String> = downloaded
-            .iter()
-            .map(|n| {
-                let info = MODELS.iter().find(|m| m.name == n.as_str());
-                match info {
-                    Some(i) => format!("{} — {} [已下载]", n, i.description),
-                    None => format!("{} [已下载]", n),
-                }
-            })
-            .collect();
-        items.push("下载新模型...".to_string());
-        items.push("取消".to_string());
-
-        let selection = Select::new()
-            .with_prompt("选择要使用的模型")
-            .items(&items)
-            .default(0)
-            .interact()?;
-
-        if selection == items.len() - 1 {
-            // Cancel.
-            anyhow::bail!("未选择模型，退出");
-        }
-
-        if selection == items.len() - 2 {
-            // Download new model.
-            return download_menu().await;
-        }
-
-        // Use an existing model.
-        let name = &downloaded[selection];
-        let info = MODELS.iter().find(|m| m.name == name.as_str()).unwrap();
-        let path = models_dir().join(info.filename);
-        println!("{} 已选择模型: {}", style("✓").green(), name);
-        return Ok(path);
-    }
-
-    // No models downloaded — guide user to download.
-    println!(
-        "{}",
-        style("未检测到 whisper 模型，需要下载一个才能使用本地语音识别。").yellow()
-    );
-    println!();
-
-    download_menu().await
-}
-
-/// Show model download selection menu.
-async fn download_menu() -> Result<PathBuf> {
-    let items: Vec<String> = MODELS
-        .iter()
-        .map(|m| {
-            let status = if is_downloaded(m.name) {
-                "[已下载]"
-            } else {
-                ""
-            };
-            format!(
-                "{} ({}) — {} {}",
-                m.name,
-                format_size(m.size_bytes),
-                m.description,
-                status
-            )
-        })
-        .collect();
-
-    let selection = Select::new()
-        .with_prompt("选择要下载的模型")
-        .items(&items)
-        .default(1) // Default to "base"
-        .interact()?;
-
-    let chosen = &MODELS[selection];
-
-    let confirm = Confirm::new()
-        .with_prompt(format!(
-            "确认下载 {} ({}) ?",
-            chosen.name,
-            format_size(chosen.size_bytes)
-        ))
-        .default(true)
-        .interact()?;
-
-    if !confirm {
-        anyhow::bail!("取消下载");
-    }
-
-    download(chosen.name).await
-}
-
 /// Format bytes as human-readable size.
+#[cfg(test)]
 fn format_size(bytes: u64) -> String {
     const KB: u64 = 1024;
     const MB: u64 = 1024 * KB;
@@ -464,14 +293,6 @@ mod tests {
         assert_eq!(format_size(1500 * 1024 * 1024), "1.5 GB");
         assert_eq!(format_size(2900 * 1024 * 1024), "2.8 GB");
         assert_eq!(format_size(500 * 1024), "500 KB");
-    }
-
-    #[test]
-    fn test_list_available() {
-        let available = list_available();
-        assert_eq!(available.len(), 5);
-        assert_eq!(available[0].0, "tiny");
-        assert_eq!(available[1].0, "base");
     }
 
     #[test]

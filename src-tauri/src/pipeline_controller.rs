@@ -1,7 +1,6 @@
 //! Pipeline lifecycle management and status tracking.
 
 use std::sync::Arc;
-use std::time::Duration;
 use tokio::sync::Mutex;
 
 use crate::PipelineHandle;
@@ -77,30 +76,34 @@ impl PipelineController {
     }
 
     pub async fn stop(&self) {
-        let mut guard = self.handle.lock().await;
-        if let Some(h) = guard.take() {
+        let handle = {
+            let mut guard = self.handle.lock().await;
+            (*guard).take()
+        };
+        if let Some(h) = handle {
             let _ = h.stop_tx.send(());
+            // 等待旧 pipeline 线程完全退出，释放 OS 资源（子进程、设备节点、hook）。
+            // 不阻塞 tokio 运行时——把阻塞的 join 移到专用线程池。
+            let _ = tokio::task::spawn_blocking(move || {
+                let _ = h.thread_handle.join();
+            })
+            .await;
         }
         if let Ok(mut s) = self.status.write() {
             *s = PipelineStatus::Idle;
         }
     }
 
-    /// Stop, wait for wind-down, then start with a new spawn closure.
-    pub async fn restart_with<F: FnOnce() -> PipelineHandle>(
-        &self,
-        spawn: F,
-    ) -> Result<(), String> {
-        self.stop().await;
-        tokio::time::sleep(Duration::from_millis(320)).await;
-        self.start_with(spawn).await
-    }
-
     /// Blocking variant for use in the ExitRequested handler.
+    /// 等待旧 pipeline 线程完全退出后再返回。
     pub fn stop_blocking(&self) {
-        let mut guard = self.handle.blocking_lock();
-        if let Some(h) = guard.take() {
+        let handle = {
+            let mut guard = self.handle.blocking_lock();
+            (*guard).take()
+        };
+        if let Some(h) = handle {
             let _ = h.stop_tx.send(());
+            let _ = h.thread_handle.join();
         }
         if let Ok(mut s) = self.status.write() {
             *s = PipelineStatus::Idle;

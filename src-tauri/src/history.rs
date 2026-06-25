@@ -12,14 +12,6 @@ use uuid::Uuid;
 
 static HISTORY_IO_LOCK: Mutex<()> = Mutex::new(());
 
-/// 与 `altgo.toml` 同目录：`~/.config/altgo/history.json`
-pub fn default_history_path() -> PathBuf {
-    crate::config::Config::default_config_path()
-        .parent()
-        .map(|p| p.join("history.json"))
-        .unwrap_or_else(|| PathBuf::from("history.json"))
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct HistoryEntry {

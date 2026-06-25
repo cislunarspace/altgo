@@ -23,10 +23,6 @@ static XMODMAP_CACHE: OnceLock<std::collections::HashMap<String, u8>> = OnceLock
 const EVDEV_KEY_ALT: u16 = 56; // KEY_LEFTALT
 const EVDEV_KEY_ALT_R: u16 = 100; // KEY_RIGHTALT
 
-/// X11 keycode for Alt_L (from xmodmap output).
-#[allow(dead_code)]
-const X11_KEYCODE_ALT: u8 = 64;
-
 /// X11 按键监听器，使用 `xinput test-xi2` 捕获全局按键事件。
 ///
 /// 无需 root 权限，依赖 XInput2 扩展。

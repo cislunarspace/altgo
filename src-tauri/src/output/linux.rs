@@ -139,47 +139,6 @@ pub fn notify(title: &str, body: &str, timeout_ms: u64) -> anyhow::Result<()> {
     }
 }
 
-/// 显示处理中通知。
-#[allow(dead_code)]
-pub fn notify_processing(message: &str) -> anyhow::Result<()> {
-    notify("altgo", message, 5000)
-}
-
-/// 显示语音识别结果通知。
-pub fn notify_result(text: &str, timeout_ms: u64) -> anyhow::Result<()> {
-    let truncated = truncate_text(text, 200);
-    notify("altgo", &truncated, timeout_ms)
-}
-
-#[allow(dead_code)]
-pub fn show_recording_window() -> anyhow::Result<()> {
-    Ok(())
-}
-
-#[allow(dead_code)]
-pub fn close_recording_window() -> anyhow::Result<()> {
-    Ok(())
-}
-
-#[allow(dead_code)]
-pub async fn output_text(
-    raw_text: &str,
-    polished_text: &str,
-    polish_failed: bool,
-    _inject_at_cursor: bool,
-    prefer_polished: bool,
-    timeout_ms: u64,
-) -> anyhow::Result<&'static str> {
-    let text_to_use = if prefer_polished && !polish_failed {
-        polished_text
-    } else {
-        raw_text
-    };
-    write_clipboard(text_to_use).await?;
-    notify_result(text_to_use, timeout_ms)?;
-    Ok("clipboard")
-}
-
 /// Check if a command exists in PATH.
 fn which(cmd: &str) -> bool {
     Command::new("which")

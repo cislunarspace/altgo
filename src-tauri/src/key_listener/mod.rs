@@ -137,11 +137,4 @@ mod tests {
         handle.await.unwrap();
     }
 
-    #[test]
-    fn key_event_debug_format() {
-        let evt = KeyEvent { pressed: true };
-        let dbg = format!("{:?}", evt);
-        assert!(dbg.contains("KeyEvent"));
-        assert!(dbg.contains("true"));
-    }
 }

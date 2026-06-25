@@ -28,13 +28,12 @@ pub mod tray;
 pub mod voice_pipeline;
 pub mod whisper_server;
 
-pub use voice_pipeline::PipelineOutput;
-
 use std::sync::Arc;
 use tauri::Manager;
 
 pub struct PipelineHandle {
     pub stop_tx: tokio::sync::oneshot::Sender<()>,
+    pub thread_handle: std::thread::JoinHandle<()>,
 }
 
 /// Build the Tauri pipeline sink and spawn the voice pipeline on a dedicated
@@ -50,7 +49,7 @@ pub(crate) fn spawn_pipeline_thread(
     let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
     let app_handle = app.clone();
     let cfg_clone = cfg.clone();
-    std::thread::spawn(move || {
+    let thread_handle = std::thread::spawn(move || {
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
@@ -58,14 +57,13 @@ pub(crate) fn spawn_pipeline_thread(
         let sink = tauri_sink::TauriPipelineSink::new(app_handle, pipeline_status, cfg_clone);
         rt.block_on(voice_pipeline::run(cfg, stop_rx, sink));
     });
-    PipelineHandle { stop_tx }
+    PipelineHandle { stop_tx, thread_handle }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             let config_path = config::Config::default_config_path();
             let history_path = config_path

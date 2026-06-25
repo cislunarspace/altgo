@@ -25,8 +25,9 @@ async fn restart_pipeline(
     let cfg = Arc::new(config_store.snapshot().await);
     cfg.validate().map_err(|e| e.to_string())?;
     let status_arc = controller.status_arc();
+    controller.stop().await;
     controller
-        .restart_with(|| crate::spawn_pipeline_thread(&app, cfg, status_arc))
+        .start_with(|| crate::spawn_pipeline_thread(&app, cfg, status_arc))
         .await
 }
 

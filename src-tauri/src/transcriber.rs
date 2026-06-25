@@ -10,10 +10,11 @@
 
 use crate::error::TranscriberError;
 use crate::resource::expand_tilde;
-use async_trait::async_trait;
 use regex::Regex;
 use reqwest::Client;
 use serde::Deserialize;
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
@@ -53,7 +54,7 @@ impl From<&crate::config::Config> for TranscriberConfig {
     }
 }
 
-/// Expand tilde in path to home directory.
+/// Parse whisper-cli stderr progress output (percent or ratio).
 fn stderr_fraction(line: &str, re_percent: &Regex, re_ratio: &Regex) -> Option<f32> {
     if let Some(c) = re_percent.captures(line) {
         if let Ok(p) = c[1].parse::<u32>() {
@@ -74,7 +75,6 @@ fn stderr_fraction(line: &str, re_percent: &Regex, re_ratio: &Regex) -> Option<f
 
 /// 语音识别结果。
 #[derive(Debug)]
-#[allow(dead_code)]
 pub struct TranscribeResult {
     /// 识别出的文本
     pub text: String,
@@ -240,16 +240,33 @@ impl LocalWhisper {
         }
 
         // Write audio to a temp file.
-        let tmp_dir = tempfile::tempdir().map_err(|e| TranscriberError::WhisperCliFailed {
+        let tmp_dir = std::env::temp_dir().join(format!("altgo-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&tmp_dir).map_err(|e| TranscriberError::WhisperCliFailed {
             code: -1,
             output: format!("create temp dir: {}", e),
         })?;
-        let wav_path = tmp_dir.path().join("audio.wav");
-        std::fs::write(&wav_path, audio_data).map_err(|e| TranscriberError::WhisperCliFailed {
-            code: -1,
-            output: format!("write temp wav file: {}", e),
-        })?;
+        let wav_path = tmp_dir.join("audio.wav");
+        // ponytail: cleanup tmp_dir on write failure (TempDir::Drop did this automatically)
+        let write_result = std::fs::write(&wav_path, audio_data).map_err(|e| {
+            let _ = std::fs::remove_dir_all(&tmp_dir);
+            TranscriberError::WhisperCliFailed {
+                code: -1,
+                output: format!("write temp wav file: {}", e),
+            }
+        });
+        write_result?;
 
+        let result = self.do_transcribe(&wav_path, progress).await;
+        // ponytail: best-effort cleanup, matches old tempfile::TempDir behavior
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+        result
+    }
+
+    async fn do_transcribe(
+        &self,
+        wav_path: &std::path::Path,
+        progress: Option<UnboundedSender<f32>>,
+    ) -> Result<TranscribeResult, TranscriberError> {
         // Find whisper-cli binary.
         let whisper_bin = find_whisper_binary(&self.whisper_path)?;
 
@@ -264,7 +281,7 @@ impl LocalWhisper {
             .arg("-t")
             .arg(crate::whisper_server::effective_threads(self.threads).to_string())
             .arg("-f")
-            .arg(&wav_path)
+            .arg(wav_path)
             .arg("--no-timestamps")
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped());
@@ -426,77 +443,88 @@ fn which_binary(name: &str) -> Result<std::path::PathBuf, TranscriberError> {
 /// Progress is reported through the `on_progress` callback (a function pointer
 /// pointing to a closure the caller controls); the trait surface stays free of
 /// channel types so new backends can be plugged in without touching the trait.
-#[async_trait]
 pub trait Transcriber: Send + Sync {
     /// Transcribe WAV audio data.
     ///
     /// `on_progress` receives 0.0–1.0 fractions as the backend makes progress;
     /// backends without streaming progress should still call it once with `1.0`
     /// upon success so the UI gets a final tick.
-    async fn transcribe(
-        &self,
-        audio: &[u8],
+    fn transcribe<'life0, 'life1>(
+        &'life0 self,
+        audio: &'life1 [u8],
         on_progress: Arc<dyn Fn(f32) + Send + Sync>,
-    ) -> Result<TranscribeResult, TranscriberError>;
+    ) -> Pin<Box<dyn Future<Output = Result<TranscribeResult, TranscriberError>> + Send + 'life0>>
+    where
+        'life1: 'life0;
 }
 
-#[async_trait]
 impl Transcriber for WhisperApi {
-    async fn transcribe(
-        &self,
-        audio: &[u8],
+    fn transcribe<'life0, 'life1>(
+        &'life0 self,
+        audio: &'life1 [u8],
         _on_progress: Arc<dyn Fn(f32) + Send + Sync>,
-    ) -> Result<TranscribeResult, TranscriberError> {
-        WhisperApi::transcribe(self, audio).await
+    ) -> Pin<Box<dyn Future<Output = Result<TranscribeResult, TranscriberError>> + Send + 'life0>>
+    where
+        'life1: 'life0,
+    {
+        Box::pin(async move { WhisperApi::transcribe(self, audio).await })
     }
 }
 
-#[async_trait]
 impl Transcriber for LocalWhisper {
-    async fn transcribe(
-        &self,
-        audio: &[u8],
+    fn transcribe<'life0, 'life1>(
+        &'life0 self,
+        audio: &'life1 [u8],
         on_progress: Arc<dyn Fn(f32) + Send + Sync>,
-    ) -> Result<TranscribeResult, TranscriberError> {
-        // Bridge the callback back into the channel the inner implementation
-        // still consumes. One unbounded sender; one forwarder task per call.
-        let cb = Arc::clone(&on_progress);
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<f32>();
-        let forward = tokio::spawn(async move {
-            while let Some(fr) = rx.recv().await {
-                (cb)(fr);
+    ) -> Pin<Box<dyn Future<Output = Result<TranscribeResult, TranscriberError>> + Send + 'life0>>
+    where
+        'life1: 'life0,
+    {
+        Box::pin(async move {
+            // Bridge the callback back into the channel the inner implementation
+            // still consumes. One unbounded sender; one forwarder task per call.
+            let cb = Arc::clone(&on_progress);
+            let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<f32>();
+            let forward = tokio::spawn(async move {
+                while let Some(fr) = rx.recv().await {
+                    (cb)(fr);
+                }
+            });
+            let result = LocalWhisper::transcribe(self, audio, Some(tx)).await;
+            let _ = forward.await;
+            if result.is_ok() {
+                (on_progress)(1.0);
             }
-        });
-        let result = LocalWhisper::transcribe(self, audio, Some(tx)).await;
-        let _ = forward.await;
-        if result.is_ok() {
-            (on_progress)(1.0);
-        }
-        result
+            result
+        })
     }
 }
 
-#[async_trait]
 impl Transcriber for crate::whisper_server::ResidentWhisper {
-    async fn transcribe(
-        &self,
-        audio: &[u8],
+    fn transcribe<'life0, 'life1>(
+        &'life0 self,
+        audio: &'life1 [u8],
         on_progress: Arc<dyn Fn(f32) + Send + Sync>,
-    ) -> Result<TranscribeResult, TranscriberError> {
-        let cb = Arc::clone(&on_progress);
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<f32>();
-        let forward = tokio::spawn(async move {
-            while let Some(fr) = rx.recv().await {
-                (cb)(fr);
+    ) -> Pin<Box<dyn Future<Output = Result<TranscribeResult, TranscriberError>> + Send + 'life0>>
+    where
+        'life1: 'life0,
+    {
+        Box::pin(async move {
+            let cb = Arc::clone(&on_progress);
+            let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<f32>();
+            let forward = tokio::spawn(async move {
+                while let Some(fr) = rx.recv().await {
+                    (cb)(fr);
+                }
+            });
+            let result =
+                crate::whisper_server::ResidentWhisper::transcribe(self, audio, Some(tx)).await;
+            let _ = forward.await;
+            if result.is_ok() {
+                (on_progress)(1.0);
             }
-        });
-        let result =
-            crate::whisper_server::ResidentWhisper::transcribe(self, audio, Some(tx)).await;
-        let _ = forward.await;
-        if result.is_ok() {
-            (on_progress)(1.0);
-        }
-        result
+            result
+        })
     }
 }
 

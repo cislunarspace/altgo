@@ -59,17 +59,6 @@ impl Buffer {
         self.with_lock(|data| data.clear());
     }
 
-    #[allow(dead_code)]
-    /// 返回缓冲区当前字节数。
-    pub fn len(&self) -> usize {
-        self.with_lock(|data| data.len())
-    }
-
-    #[allow(dead_code)]
-    /// 缓冲区是否为空。
-    pub fn is_empty(&self) -> bool {
-        self.with_lock(|data| data.is_empty())
-    }
 }
 
 /// 将原始 PCM 数据编码为带 44 字节头的 WAV 格式。
@@ -192,7 +181,6 @@ mod tests {
         buf.write(b"hello");
         buf.write(b" world");
         assert_eq!(buf.read_all(), b"hello world");
-        assert_eq!(buf.len(), 11);
     }
 
     #[test]
@@ -200,8 +188,7 @@ mod tests {
         let buf = Buffer::new();
         buf.write(b"data");
         buf.reset();
-        assert!(buf.is_empty());
-        assert_eq!(buf.len(), 0);
+        assert!(buf.read_all().is_empty());
     }
 
     #[test]
@@ -229,7 +216,7 @@ mod tests {
             h.join().unwrap();
         }
 
-        assert_eq!(buf.len(), 1000);
+        assert_eq!(buf.read_all().len(), 1000);
     }
 
     #[test]

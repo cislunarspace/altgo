@@ -12,10 +12,9 @@ fi
 
 # Initialize cleanup variables
 TMP_DIR=""
-TMP_BUILD=""
 
 # Cleanup trap for temp directories
-trap 'rm -rf "${TMP_DIR}" "${TMP_BUILD}" 2>/dev/null || true' EXIT
+trap 'rm -rf "${TMP_DIR}" 2>/dev/null || true' EXIT
 
 # Validate inputs
 if [[ -z "$VERSION" ]]; then
@@ -28,9 +27,6 @@ PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 DEPS_DIR="${PROJECT_ROOT}/target/deps"
 BIN_DIR="${DEPS_DIR}/bin"
 BUILD_APPIMAGE_DIR="${PROJECT_ROOT}/target/appimage-build"
-
-# Source unified version constants
-source "${SCRIPT_DIR}/../scripts/versions.sh"
 
 echo "=== AppImage build for ${ARCH} ==="
 echo "VERSION=${VERSION}"
@@ -46,68 +42,10 @@ fi
 
 mkdir -p "${BIN_DIR}" "${BUILD_APPIMAGE_DIR}"
 
-# ─── Step 1: Build whisper.cpp from source ────────────────────────────────────
-WHISPER_VERSION="${WHISPER_CPP_VERSION}"
-WHISPER_TARGET="${BIN_DIR}/whisper-cli"
+# ─── Step 1: Download all bundled deps (whisper-cli + ffmpeg) ─────────────────
+bash "${SCRIPT_DIR}/../scripts/download-deps.sh" "${ARCH}"
 
-if [[ -f "${WHISPER_TARGET}" ]]; then
-    echo "[OK] whisper-cli already exists"
-else
-    echo "[INFO] Building whisper-cli from source..."
-    TMP_BUILD=$(mktemp -d)
-    git clone --depth 1 --branch "v${WHISPER_VERSION}" https://github.com/ggml-org/whisper.cpp.git "${TMP_BUILD}/whisper"
-
-    cd "${TMP_BUILD}/whisper"
-    if [[ "${ARCH}" == "aarch64" ]]; then
-        cmake -B build \
-            -DCMAKE_C_COMPILER=aarch64-linux-gnu-gcc \
-            -DCMAKE_CXX_COMPILER=aarch64-linux-gnu-g++ \
-            -DCMAKE_BUILD_TYPE=Release
-    else
-        cmake -B build -DCMAKE_BUILD_TYPE=Release
-    fi
-    cmake --build build -j"$(nproc)"
-
-    WHISPER_BIN=$(find "${TMP_BUILD}/whisper/build" -name "whisper-cli" 2>/dev/null | head -1)
-    if [[ -z "${WHISPER_BIN}" ]]; then
-        echo "ERROR: whisper-cli binary not found after build"
-        exit 1
-    fi
-
-    cp "${WHISPER_BIN}" "${WHISPER_TARGET}"
-    chmod +x "${WHISPER_TARGET}"
-    rm -rf "${TMP_BUILD}"
-    echo "[OK] whisper-cli built"
-fi
-
-# ─── Step 2: Download ffmpeg static binary ────────────────────────────────────
-FFMPEG_TARGET="${BIN_DIR}/ffmpeg"
-
-if [[ -f "${FFMPEG_TARGET}" ]]; then
-    echo "[OK] ffmpeg already exists"
-else
-    echo "[INFO] Downloading ffmpeg..."
-    if [[ "${ARCH}" == "x86_64" ]]; then
-        FFMPEG_URL="https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz"
-    else
-        FFMPEG_URL="https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-arm64-static.tar.xz"
-    fi
-
-    TMP_DIR=$(mktemp -d)
-    curl --fail --progress-bar -L -o "${TMP_DIR}/ffmpeg.tar.xz" "${FFMPEG_URL}"
-    tar xf "${TMP_DIR}/ffmpeg.tar.xz" -C "${TMP_DIR}"
-    FFMPEG_BIN=$(find "${TMP_DIR}" -name "ffmpeg" -type f | head -1)
-    if [[ -z "${FFMPEG_BIN}" ]]; then
-        echo "ERROR: ffmpeg binary not found in archive"
-        exit 1
-    fi
-    cp "${FFMPEG_BIN}" "${FFMPEG_TARGET}"
-    chmod +x "${FFMPEG_TARGET}"
-    rm -rf "${TMP_DIR}"
-    echo "[OK] ffmpeg downloaded"
-fi
-
-# ─── Step 3: Install Rust + Node deps ─────────────────────────────────────────
+# ─── Step 2: Install Rust + Node deps ─────────────────────────────────────────
 cd "${PROJECT_ROOT}"
 if ! command -v rustc &>/dev/null; then
     curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
@@ -121,7 +59,7 @@ fi
 
 npm ci --prefix "${PROJECT_ROOT}/frontend"
 
-# ─── Step 4: Build Tauri app (no bundle) ─────────────────────────────────────
+# ─── Step 3: Build Tauri app (no bundle) ─────────────────────────────────────
 echo "[INFO] Building Tauri app..."
 cargo install tauri-cli --version "^2" --locked --quiet
 
@@ -136,7 +74,7 @@ if [[ -z "${TAURI_BINARY}" ]]; then
 fi
 echo "[OK] Tauri binary: ${TAURI_BINARY}"
 
-# ─── Step 5: Assemble AppImage ─────────────────────────────────────────────────
+# ─── Step 4: Assemble AppImage ─────────────────────────────────────────────────
 echo "[INFO] Assembling AppImage..."
 
 # Write effective VERSION and ARCH to a temp file for appimage-builder

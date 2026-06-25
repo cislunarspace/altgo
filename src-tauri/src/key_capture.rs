@@ -32,17 +32,6 @@ pub struct CaptureActivationResponse {
     pub windows_vk: Option<i32>,
 }
 
-/// 一次性捕获用户按下物理键的 trait seam。
-///
-/// 由平台 adapter 实现（Linux evdev / Windows WH_KEYBOARD_LL），
-/// 与 `KeyListener` 共享平台能力但作为独立 seam，避免污染监听接口。
-pub trait KeyCapture: Send {
-    /// 阻塞等待用户按键，返回按键标识。
-    fn capture_blocking(timeout: std::time::Duration) -> Result<CaptureActivationResponse, String>
-    where
-        Self: Sized;
-}
-
 #[cfg(target_os = "linux")]
 fn parse_ev_key_line(line: &str) -> Option<(u16, i32)> {
     if !line.contains("EV_KEY") {
@@ -218,43 +207,9 @@ pub fn capture_activation_key_blocking() -> Result<CaptureActivationResponse, St
     })
 }
 
-/// Linux `KeyCapture` adapter（evdev 路径）。
-#[cfg(target_os = "linux")]
-pub struct LinuxKeyCapture;
-
-#[cfg(target_os = "linux")]
-impl KeyCapture for LinuxKeyCapture {
-    fn capture_blocking(timeout: Duration) -> Result<CaptureActivationResponse, String>
-    where
-        Self: Sized,
-    {
-        let code = capture_evdev_press(timeout)?;
-        let key_name = evdev_code_to_keysym_name(code);
-        Ok(CaptureActivationResponse {
-            key_name,
-            linux_evdev_code: Some(code),
-            windows_vk: None,
-        })
-    }
-}
-
 #[cfg(target_os = "windows")]
 pub fn capture_activation_key_blocking() -> Result<CaptureActivationResponse, String> {
     windows::capture_activation_key_blocking(std::time::Duration::from_secs(12))
-}
-
-/// Windows `KeyCapture` adapter（WH_KEYBOARD_LL 路径）。
-#[cfg(target_os = "windows")]
-pub struct WindowsKeyCapture;
-
-#[cfg(target_os = "windows")]
-impl KeyCapture for WindowsKeyCapture {
-    fn capture_blocking(timeout: std::time::Duration) -> Result<CaptureActivationResponse, String>
-    where
-        Self: Sized,
-    {
-        windows::capture_activation_key_blocking(timeout)
-    }
 }
 
 #[cfg(test)]

@@ -554,6 +554,7 @@
 /* Save area */
 .settings-save-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: flex-end;
   gap: var(--space-3);
@@ -747,50 +748,6 @@
 }
 
 /* ── UI Primitives ───────────────────────────── */
-
-.btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: var(--space-2);
-  font-weight: 500;
-  border-radius: var(--radius-md);
-  transition: all var(--duration-normal) var(--ease-out);
-  white-space: nowrap;
-  cursor: pointer;
-  border: none;
-  font-family: inherit;
-}
-
-.btn-sm {
-  padding: var(--space-1) var(--space-3);
-  font-size: var(--text-sm);
-}
-
-.btn-md {
-  padding: var(--space-2) var(--space-4);
-  font-size: var(--text-sm);
-}
-
-.btn-lg {
-  padding: var(--space-3) var(--space-6);
-  font-size: var(--text-base);
-}
-
-.btn-primary {
-  background: var(--color-accent);
-  color: var(--color-on-primary);
-}
-
-.btn-primary:hover:not(:disabled) {
-  background: var(--color-accent-hover);
-  box-shadow: var(--shadow-glow-accent);
-}
-
-.btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
 
 .input-wrapper {
   display: flex;
@@ -1132,10 +1089,6 @@
   line-height: var(--leading-relaxed);
   flex: 1;
   min-width: 0;
-}
-
-.settings-save-row {
-  flex-wrap: wrap;
 }
 
 .settings-save-hint {

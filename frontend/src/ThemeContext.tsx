@@ -11,7 +11,6 @@ import {
   applyThemeToDocument,
   getThemePref,
   installThemeListeners,
-  resolveEffectiveTheme,
   setThemePref,
   type ThemePref,
 } from "./theme";
@@ -20,7 +19,6 @@ export type { ThemePref };
 
 type ThemeContextValue = {
   themePref: ThemePref;
-  effectiveTheme: "light" | "dark";
   setTheme: (next: ThemePref) => void;
 };
 
@@ -45,7 +43,6 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   const value = useMemo<ThemeContextValue>(
     () => ({
       themePref: pref,
-      effectiveTheme: resolveEffectiveTheme(pref),
       setTheme,
     }),
     [pref, setTheme],

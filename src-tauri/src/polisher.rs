@@ -92,23 +92,6 @@ where
     Err(last_err.unwrap_or(PolisherError::RetriesExhausted))
 }
 
-#[allow(dead_code)]
-struct HttpStatusError(u16);
-
-impl std::fmt::Display for HttpStatusError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "HTTP {}", self.0)
-    }
-}
-
-impl std::fmt::Debug for HttpStatusError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "HttpStatusError({})", self.0)
-    }
-}
-
-impl std::error::Error for HttpStatusError {}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PolishLevel {
     /// 不润色
@@ -430,7 +413,8 @@ impl LLMFormatter {
             cfg.language.clone(),
         )
     }
-    #[allow(dead_code)]
+
+    #[cfg(test)]
     pub fn new(
         api_key: String,
         api_base_url: String,
