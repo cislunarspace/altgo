@@ -2,7 +2,7 @@
 //!
 //! 将管道事件转发为 Tauri 事件、剪贴板操作和浮窗管理。
 //!
-//! 浮窗物理操作已委托给 `OverlayManager`：本模块只描述「现在应该显示什么阶段」，
+//! 浮窗物理操作已委托给 `OverlaySink` trait object：本模块只描述「现在应该显示什么阶段」，
 //! 不再直接操纵窗口尺寸/位置/显隐。剪贴板和历史记录业务逻辑委托给
 //! `voice_pipeline::process_transcription_result`。
 
@@ -12,10 +12,8 @@ use tauri::Emitter;
 use crate::{
     config,
     history::HistoryStore,
-    overlay_manager::OverlayManager,
-    overlay_manager::OverlayState,
+    overlay_window::{OverlaySink, OverlayState},
     pipeline_controller::PipelineStatus,
-    tauri_overlay_window::TauriOverlayWindow,
     voice_pipeline::{process_transcription_result, PipelineOutput, PipelineSink},
 };
 
@@ -36,7 +34,7 @@ pub struct TauriPipelineSink {
     pipeline_status: Arc<std::sync::RwLock<PipelineStatus>>,
     prefer_polished: bool,
     output: Box<dyn crate::output::Output>,
-    overlay_manager: OverlayManager<TauriOverlayWindow>,
+    overlay: Arc<dyn OverlaySink>,
     history_store: HistoryStore,
 }
 
@@ -46,15 +44,15 @@ impl TauriPipelineSink {
         pipeline_status: Arc<std::sync::RwLock<PipelineStatus>>,
         cfg: Arc<config::Config>,
         history_store: HistoryStore,
+        overlay: Arc<dyn OverlaySink>,
     ) -> Self {
         let platform_output = crate::output::PlatformOutput::new();
-        let overlay_manager = OverlayManager::new(TauriOverlayWindow::new(app.clone()));
         Self {
             app,
             pipeline_status,
             prefer_polished: cfg.output.prefer_polished,
             output: Box::new(platform_output),
-            overlay_manager,
+            overlay,
             history_store,
         }
     }
@@ -70,14 +68,14 @@ impl PipelineSink for TauriPipelineSink {
         };
         emit_pipeline_status(&self.app, &self.pipeline_status, ps);
 
-        // 通过 OverlayManager 统一设置悬浮窗状态 —— 一次性 emit + resize + position + show/hide
+        // 通过 OverlaySink 统一设置悬浮窗状态 —— 一次性 emit + resize + position + show/hide
         let overlay_state = match status {
             "recording" => OverlayState::recording(),
             "processing" => OverlayState::processing(),
             "idle" | "stopped" => OverlayState::hidden(),
             _ => return,
         };
-        self.overlay_manager.set_state(overlay_state);
+        self.overlay.set_state(overlay_state);
     }
 
     fn on_error(&self, message: &str) {
@@ -95,7 +93,7 @@ impl PipelineSink for TauriPipelineSink {
         let output_clone = output.clone();
         let prefer_polished = self.prefer_polished;
         let output_adapter = self.output.clone_box();
-        let overlay_manager = self.overlay_manager.clone();
+        let overlay = self.overlay.clone();
         let history_store = self.history_store.clone();
 
         tauri::async_runtime::spawn(async move {
@@ -115,8 +113,8 @@ impl PipelineSink for TauriPipelineSink {
 
                     emit_pipeline_status(&app, &status, PipelineStatus::Done);
 
-                    // 通过 OverlayManager 切换到 done 状态
-                    overlay_manager.set_state(OverlayState::done());
+                    // 通过 OverlaySink 切换到 done 状态
+                    overlay.set_state(OverlayState::done());
 
                     let _ = app.emit("transcription-result", &res.text);
                 }

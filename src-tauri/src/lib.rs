@@ -49,6 +49,12 @@ pub(crate) fn spawn_pipeline_thread(
     let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
     let app_handle = app.clone();
     let cfg_clone = cfg.clone();
+
+    let overlay: Arc<dyn overlay_window::OverlaySink> =
+        Arc::new(overlay_manager::OverlayManager::new(
+            tauri_overlay_window::TauriOverlayWindow::new(app_handle.clone()),
+        ));
+
     let thread_handle = std::thread::spawn(move || {
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -62,6 +68,7 @@ pub(crate) fn spawn_pipeline_thread(
                 .state::<crate::history::HistoryStore>()
                 .inner()
                 .clone(),
+            overlay,
         );
         rt.block_on(voice_pipeline::run(cfg, stop_rx, sink));
     });

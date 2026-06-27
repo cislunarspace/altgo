@@ -9,7 +9,7 @@
 
 use tauri::{LogicalSize, PhysicalPosition};
 
-use crate::overlay_window::{OverlayError, OverlayWindow};
+use crate::overlay_window::{OverlayError, OverlaySink, OverlayWindow};
 
 pub use crate::overlay_window::OverlayState;
 
@@ -74,6 +74,12 @@ impl<W: OverlayWindow> OverlayManager<W> {
         if let Err(error) = self.window.show() {
             tracing::warn!(%error, "overlay show failed");
         }
+    }
+}
+
+impl<W: OverlayWindow + Send + Sync> OverlaySink for OverlayManager<W> {
+    fn set_state(&self, state: OverlayState) {
+        OverlayManager::set_state(self, state);
     }
 }
 

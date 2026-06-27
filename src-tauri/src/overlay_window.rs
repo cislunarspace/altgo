@@ -7,6 +7,15 @@
 use tauri::{LogicalSize, PhysicalPosition};
 use thiserror::Error;
 
+/// Seam for overlay state management.
+///
+/// Implemented by `OverlayManager`; consumed by `TauriPipelineSink` as
+/// `Box<dyn OverlaySink>` so the sink does not depend on the concrete
+/// manager or window types.
+pub trait OverlaySink: Send + Sync {
+    fn set_state(&self, state: OverlayState);
+}
+
 /// Errors that can occur while driving an overlay window.
 #[derive(Debug, Error)]
 pub enum OverlayError {
@@ -101,4 +110,3 @@ pub trait OverlayWindow: Send + Sync + Clone {
     /// Return the primary monitor geometry as `(x, y, width, height)` physical pixels.
     fn primary_monitor_geometry(&self) -> Result<(i32, i32, i32, i32), OverlayError>;
 }
-
