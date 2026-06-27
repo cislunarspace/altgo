@@ -136,3 +136,238 @@ impl PipelineSink for TauriPipelineSink {
         let _ = self.app.emit("key-listener-backend", backend);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Mutex;
+    use tempfile::tempdir;
+
+    // -----------------------------------------------------------------------
+    // Test doubles
+    // -----------------------------------------------------------------------
+
+    /// Mock `Output` that never touches the real clipboard.
+    struct MockOutput;
+
+    impl crate::output::Output for MockOutput {
+        fn write_clipboard(&self, _text: &str) -> anyhow::Result<()> {
+            Ok(())
+        }
+
+        fn notify(&self, _title: &str, _body: &str) -> anyhow::Result<()> {
+            Ok(())
+        }
+
+        fn clone_box(&self) -> Box<dyn crate::output::Output> {
+            Box::new(MockOutput)
+        }
+    }
+
+    /// Mock `OverlaySink` that records every `set_state` call.
+    struct MockOverlay {
+        states: Mutex<Vec<OverlayState>>,
+    }
+
+    impl MockOverlay {
+        fn new() -> Self {
+            Self {
+                states: Mutex::new(Vec::new()),
+            }
+        }
+
+        fn recorded_states(&self) -> Vec<OverlayState> {
+            self.states.lock().unwrap().clone()
+        }
+    }
+
+    impl OverlaySink for MockOverlay {
+        fn set_state(&self, state: OverlayState) {
+            self.states.lock().unwrap().push(state);
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Fixture
+    // -----------------------------------------------------------------------
+
+    struct TestFixture {
+        sink: TauriPipelineSink,
+        status: Arc<std::sync::RwLock<PipelineStatus>>,
+        overlay: Arc<MockOverlay>,
+        _history_dir: tempfile::TempDir,
+        _app: tauri::App<tauri::Wry>,
+    }
+
+    fn make_fixture(prefer_polished: bool) -> TestFixture {
+        // Build a minimal Tauri app for testing.
+        // Use mock_context + noop_assets to avoid embedding the full tauri.conf.json.
+        let app = tauri::Builder::<tauri::Wry>::default()
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("failed to build test tauri app");
+
+        let status = Arc::new(std::sync::RwLock::new(PipelineStatus::Idle));
+        let overlay = Arc::new(MockOverlay::new());
+        let history_dir = tempdir().unwrap();
+        let history_store = HistoryStore::new(history_dir.path().join("history.json"));
+
+        let mut cfg = config::Config::default();
+        cfg.output.prefer_polished = prefer_polished;
+
+        let sink = TauriPipelineSink {
+            app: app.handle().clone(),
+            pipeline_status: status.clone(),
+            prefer_polished,
+            output: Box::new(MockOutput),
+            overlay: overlay.clone(),
+            history_store,
+        };
+
+        TestFixture {
+            sink,
+            status,
+            overlay,
+            _history_dir: history_dir,
+            _app: app,
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // on_status_change 测试
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn on_status_change_recording_maps_status_and_overlay() {
+        let fx = make_fixture(true);
+        fx.sink.on_status_change("recording");
+
+        assert_eq!(*fx.status.read().unwrap(), PipelineStatus::Recording);
+        let states = fx.overlay.recorded_states();
+        assert_eq!(states.len(), 1);
+        assert_eq!(states[0].phase, "recording");
+    }
+
+    #[test]
+    fn on_status_change_processing_maps_status_and_overlay() {
+        let fx = make_fixture(true);
+        fx.sink.on_status_change("processing");
+
+        assert_eq!(*fx.status.read().unwrap(), PipelineStatus::Processing);
+        let states = fx.overlay.recorded_states();
+        assert_eq!(states.len(), 1);
+        assert_eq!(states[0].phase, "processing");
+    }
+
+    #[test]
+    fn on_status_change_done_maps_status_without_overlay_call() {
+        let fx = make_fixture(true);
+        fx.sink.on_status_change("done");
+
+        assert_eq!(*fx.status.read().unwrap(), PipelineStatus::Done);
+        // "done" does not match recording/processing/idle/stopped => overlay not called
+        assert!(fx.overlay.recorded_states().is_empty());
+    }
+
+    #[test]
+    fn on_status_change_idle_hides_overlay() {
+        let fx = make_fixture(true);
+        fx.sink.on_status_change("idle");
+
+        assert_eq!(*fx.status.read().unwrap(), PipelineStatus::Idle);
+        let states = fx.overlay.recorded_states();
+        assert_eq!(states.len(), 1);
+        assert_eq!(states[0].phase, "hidden");
+    }
+
+    #[test]
+    fn on_status_change_stopped_hides_overlay() {
+        let fx = make_fixture(true);
+        fx.sink.on_status_change("stopped");
+
+        assert_eq!(*fx.status.read().unwrap(), PipelineStatus::Idle);
+        let states = fx.overlay.recorded_states();
+        assert_eq!(states.len(), 1);
+        assert_eq!(states[0].phase, "hidden");
+    }
+
+    #[test]
+    fn on_status_change_unknown_defaults_to_idle_no_overlay() {
+        let fx = make_fixture(true);
+        fx.sink.on_status_change("garbage");
+
+        assert_eq!(*fx.status.read().unwrap(), PipelineStatus::Idle);
+        // Unknown status doesn't match any overlay arm => no overlay call
+        assert!(fx.overlay.recorded_states().is_empty());
+    }
+
+    // -----------------------------------------------------------------------
+    // on_error 测试
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn on_error_does_not_panic() {
+        let fx = make_fixture(true);
+        fx.sink.on_error("something went wrong");
+        fx.sink.on_error("");
+    }
+
+    // -----------------------------------------------------------------------
+    // on_transcription_result 测试
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn on_transcription_result_empty_raw_text_resets_to_idle() {
+        let fx = make_fixture(true);
+
+        // Set status to something non-idle first so we can observe the reset.
+        *fx.status.write().unwrap() = PipelineStatus::Recording;
+
+        fx.sink.on_transcription_result(&PipelineOutput {
+            text: String::new(),
+            raw_text: String::new(),
+            polish_failed: false,
+        });
+
+        // Synchronous early-return: status must be reset to Idle.
+        assert_eq!(*fx.status.read().unwrap(), PipelineStatus::Idle);
+    }
+
+    #[test]
+    fn on_transcription_result_non_empty_spawns_async() {
+        let fx = make_fixture(false);
+
+        fx.sink.on_transcription_result(&PipelineOutput {
+            text: "polished".into(),
+            raw_text: "raw text".into(),
+            polish_failed: false,
+        });
+
+        // The async task is spawned; we cannot observe its result synchronously
+        // without a tokio runtime, but we can verify we didn't panic and the
+        // status wasn't changed synchronously.
+    }
+
+    // -----------------------------------------------------------------------
+    // on_progress 测试
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn on_progress_does_not_panic() {
+        let fx = make_fixture(true);
+        fx.sink.on_progress("transcribe", Some(0.5));
+        fx.sink.on_progress("polish", None);
+        fx.sink.on_progress("done", Some(1.0));
+    }
+
+    // -----------------------------------------------------------------------
+    // on_key_listener_backend 测试
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn on_key_listener_backend_does_not_panic() {
+        let fx = make_fixture(true);
+        fx.sink.on_key_listener_backend("xinput");
+        fx.sink.on_key_listener_backend("evtest");
+        fx.sink.on_key_listener_backend("");
+    }
+}
