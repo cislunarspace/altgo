@@ -54,10 +54,21 @@ pub(crate) fn spawn_pipeline_thread(
             .enable_all()
             .build()
             .expect("failed to build tokio runtime");
-        let sink = tauri_sink::TauriPipelineSink::new(app_handle, pipeline_status, cfg_clone);
+        let sink = tauri_sink::TauriPipelineSink::new(
+            app_handle.clone(),
+            pipeline_status,
+            cfg_clone,
+            app_handle
+                .state::<crate::history::HistoryStore>()
+                .inner()
+                .clone(),
+        );
         rt.block_on(voice_pipeline::run(cfg, stop_rx, sink));
     });
-    PipelineHandle { stop_tx, thread_handle }
+    PipelineHandle {
+        stop_tx,
+        thread_handle,
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

@@ -7,7 +7,7 @@
 //! `voice_pipeline::process_transcription_result`。
 
 use std::sync::Arc;
-use tauri::{Emitter, Manager};
+use tauri::Emitter;
 
 use crate::{
     config,
@@ -37,6 +37,7 @@ pub struct TauriPipelineSink {
     prefer_polished: bool,
     output: Box<dyn crate::output::Output>,
     overlay_manager: OverlayManager<TauriOverlayWindow>,
+    history_store: HistoryStore,
 }
 
 impl TauriPipelineSink {
@@ -44,6 +45,7 @@ impl TauriPipelineSink {
         app: tauri::AppHandle,
         pipeline_status: Arc<std::sync::RwLock<PipelineStatus>>,
         cfg: Arc<config::Config>,
+        history_store: HistoryStore,
     ) -> Self {
         let platform_output = crate::output::PlatformOutput::new();
         let overlay_manager = OverlayManager::new(TauriOverlayWindow::new(app.clone()));
@@ -53,6 +55,7 @@ impl TauriPipelineSink {
             prefer_polished: cfg.output.prefer_polished,
             output: Box::new(platform_output),
             overlay_manager,
+            history_store,
         }
     }
 }
@@ -93,9 +96,9 @@ impl PipelineSink for TauriPipelineSink {
         let prefer_polished = self.prefer_polished;
         let output_adapter = self.output.clone_box();
         let overlay_manager = self.overlay_manager.clone();
+        let history_store = self.history_store.clone();
 
         tauri::async_runtime::spawn(async move {
-            let history_store = app.state::<HistoryStore>().inner().clone();
             let result = process_transcription_result(
                 &output_clone,
                 prefer_polished,
