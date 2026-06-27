@@ -8,9 +8,10 @@
 //! - `WaitSecondClick`（等待第二次点击）→ 短按松开后等待双击
 //! - `ContinuousRecording`（连续录音）→ 双击触发，再按一次停止；按住第二次时忽略系统按键连发直至松开
 //!
-//! 状态机通过 `tokio::select!` 同时监听按键事件和超时计时器，
-//! 以实现长按阈值和双击间隔的精确控制。
+//! 状态机提供同步接口（`process`、`poll_timeout`、`next_deadline`），
+//! 由调用方（`voice_pipeline::PipelineContext`）在 `tokio::select!` 主循环中驱动。
 
+use crate::key_listener::KeyEvent;
 use std::time::{Duration, Instant};
 
 /// 状态机发出的命令。
@@ -22,12 +23,7 @@ pub enum Command {
     StopRecord,
 }
 
-/// 按键事件。
-#[derive(Debug)]
-pub struct KeyEvent {
-    /// 是否为按下事件（`true` 为按下，`false` 为松开）
-    pub pressed: bool,
-}
+// 使用 key_listener::KeyEvent，不再重复定义
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum State {
@@ -106,8 +102,9 @@ impl Machine {
                     if let Some(pt) = self.press_time {
                         if Instant::now().duration_since(pt) < self.min_press_duration {
                             // Too quick — treat as spurious IME release.
-                            // Reset press_time so poll_timeout won't fire a stale
-                            // long-press timer for a key that is no longer held.
+                            // Reset to Idle so a subsequent spurious release
+                            // won't advance to WaitSecondClick without a real press.
+                            self.state = State::Idle;
                             self.press_time = None;
                             return None;
                         }
@@ -192,85 +189,12 @@ impl Machine {
     }
 
     /// Returns the next deadline for a timer-based transition, if any.
-    fn next_deadline(&self) -> Option<Instant> {
+    pub fn next_deadline(&self) -> Option<Instant> {
         match self.state {
             State::PotentialPress => self.press_time.map(|pt| pt + self.long_press_threshold),
             State::WaitSecondClick => self.press_time.map(|pt| pt + self.double_click_interval),
             _ => None,
         }
-    }
-
-    /// 在按键事件通道上运行状态机。
-    ///
-    /// 返回一个命令接收通道。当输入通道关闭时自动终止。
-    pub fn run(
-        self,
-        mut events: tokio::sync::mpsc::UnboundedReceiver<KeyEvent>,
-    ) -> tokio::sync::mpsc::Receiver<Command> {
-        let (cmd_tx, cmd_rx) = tokio::sync::mpsc::channel(16);
-
-        tokio::spawn(async move {
-            let mut machine = self;
-            loop {
-                if let Some(deadline) = machine.next_deadline() {
-                    tokio::select! {
-                        Some(event) = events.recv() => {
-                            if let Some(cmd) = machine.process(event) {
-                                if cmd_tx.send(cmd).await.is_err() {
-                                    tracing::warn!(
-                                        state = ?machine.state,
-                                        "command receiver dropped, shutting down state machine"
-                                    );
-                                    break;
-                                }
-                            }
-                        }
-                        _ = tokio::time::sleep_until(deadline.into()) => {
-                            if let Some(cmd) = machine.poll_timeout() {
-                                if cmd_tx.send(cmd).await.is_err() {
-                                    tracing::warn!(
-                                        state = ?machine.state,
-                                        "command receiver dropped, shutting down state machine"
-                                    );
-                                    break;
-                                }
-                            }
-                        }
-                        else => {
-                            tracing::warn!(
-                                state = ?machine.state,
-                                "key event channel closed (deadline branch), shutting down state machine"
-                            );
-                            break;
-                        },
-                    }
-                } else {
-                    // No deadline pending — wait for next event.
-                    match events.recv().await {
-                        Some(event) => {
-                            if let Some(cmd) = machine.process(event) {
-                                if cmd_tx.send(cmd).await.is_err() {
-                                    tracing::warn!(
-                                        state = ?machine.state,
-                                        "command receiver dropped, shutting down state machine"
-                                    );
-                                    break;
-                                }
-                            }
-                        }
-                        None => {
-                            tracing::warn!(
-                                state = ?machine.state,
-                                "key event channel closed, shutting down state machine"
-                            );
-                            break;
-                        }
-                    }
-                }
-            }
-        });
-
-        cmd_rx
     }
 }
 
@@ -407,10 +331,15 @@ mod tests {
         assert_eq!(sm.process(press()), None);
 
         assert_eq!(sm.process(release()), None);
-        assert_eq!(sm.state, State::PotentialPress);
+        // State must return to Idle, not stay in PotentialPress.
+        assert_eq!(sm.state, State::Idle);
 
         assert!(sm.press_time.is_none());
 
         assert_eq!(sm.poll_timeout(), None);
+
+        // A subsequent spurious release must not advance to WaitSecondClick.
+        assert_eq!(sm.process(release()), None);
+        assert_eq!(sm.state, State::Idle);
     }
 }

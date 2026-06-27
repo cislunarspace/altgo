@@ -496,16 +496,14 @@ mod tests {
     use super::*;
     use std::time::Duration;
 
-    fn test_config() -> KeyListenerConfig {
-        KeyListenerConfig {
+    fn test_config() -> crate::config::KeyListenerConfig {
+        crate::config::KeyListenerConfig {
             key_name: "Alt_R".to_string(),
             linux_evdev_code: None,
             windows_vk: None,
-            long_press_threshold_ms: 400,
-            double_click_interval_ms: 200,
-            debounce_window_ms: 30,
-            poll_interval_ms: 10,
-            min_press_duration_ms: 80,
+            long_press_threshold: std::time::Duration::from_millis(400),
+            double_click_interval: std::time::Duration::from_millis(200),
+            min_press_duration: std::time::Duration::from_millis(80),
         }
     }
 

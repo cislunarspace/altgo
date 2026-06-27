@@ -1,7 +1,7 @@
 //! Windows 激活键捕获（独立 WH_KEYBOARD_LL 钩子）。
 //!
 //! 与 `key_listener::windows.rs` 的运行时钩子分离开来，调用方拿到第一个
-//! `WM_KEYDOWN` 后立即停止消息泵并返回。这层不依赖 `key_listener`，所以
+//! `WM_KEYDOWN`/`WM_SYSKEYDOWN` 后立即停止消息泵并返回。这层不依赖 `key_listener`，所以
 //! `vk_to_name` 和捕获流程可以独立单元测试（issue #22）。
 //!
 //! 设计要点：
@@ -25,7 +25,7 @@ use windows::Win32::System::Threading::GetCurrentThreadId;
 use windows::Win32::UI::WindowsAndMessaging::{
     CallNextHookEx, DispatchMessageW, GetMessageW, PostThreadMessageW, SetWindowsHookExW,
     TranslateMessage, UnhookWindowsHookEx, KBDLLHOOKSTRUCT, MSG, WH_KEYBOARD_LL, WM_KEYDOWN,
-    WM_QUIT,
+    WM_QUIT, WM_SYSKEYDOWN,
 };
 
 use super::CaptureActivationResponse;
@@ -169,12 +169,16 @@ fn stop_capture_thread(state: &CaptureState) {
     }
 }
 
+fn is_key_down_message(message: u32) -> bool {
+    matches!(message, WM_KEYDOWN | WM_SYSKEYDOWN)
+}
+
 unsafe extern "system" fn capture_hook_proc(
     n_code: i32,
     w_param: WPARAM,
     l_param: LPARAM,
 ) -> LRESULT {
-    if n_code >= 0 && w_param.0 as u32 == WM_KEYDOWN {
+    if n_code >= 0 && is_key_down_message(w_param.0 as u32) {
         if let Some(state) = CAPTURE_STATE.lock().unwrap().as_ref() {
             // SAFETY: Windows calls WH_KEYBOARD_LL callbacks with l_param pointing to a valid
             // KBDLLHOOKSTRUCT whenever n_code >= 0.
@@ -192,6 +196,17 @@ unsafe extern "system" fn capture_hook_proc(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn is_key_down_message_accepts_regular_and_system_keydown() {
+        assert!(is_key_down_message(WM_KEYDOWN));
+        assert!(is_key_down_message(WM_SYSKEYDOWN));
+    }
+
+    #[test]
+    fn is_key_down_message_rejects_keyup_messages() {
+        assert!(!is_key_down_message(WM_KEYUP));
+    }
 
     #[test]
     fn vk_to_name_modifier_keys() {

@@ -33,23 +33,6 @@ pub struct PolisherConfig {
     pub language: String,
 }
 
-impl From<&crate::config::Config> for PolisherConfig {
-    fn from(cfg: &crate::config::Config) -> Self {
-        Self {
-            api_key: cfg.polisher.api_key.clone(),
-            api_base_url: cfg.polisher.api_base_url.clone(),
-            model: cfg.polisher.model.clone(),
-            protocol: cfg.polisher.protocol.clone(),
-            max_tokens: cfg.polisher.max_tokens,
-            temperature: cfg.polisher.temperature,
-            system_prompt: cfg.polisher.system_prompt.clone(),
-            timeout: cfg.polisher.timeout(),
-            level: cfg.polisher.level.clone(),
-            language: cfg.transcriber.language.clone(),
-        }
-    }
-}
-
 /// 重试延迟基数（毫秒），用于指数退避计算。
 const RETRY_BASE_DELAY_MS: u64 = 500;
 
@@ -389,28 +372,30 @@ impl TryFrom<&crate::config::Config> for LLMFormatter {
     type Error = PolisherError;
 
     fn try_from(cfg: &crate::config::Config) -> Result<Self, Self::Error> {
-        let polisher_cfg = PolisherConfig::from(cfg);
-        Self::from_config(&polisher_cfg)
+        Self::from_config(&cfg.polisher, &cfg.transcriber.language)
     }
 }
 
 impl LLMFormatter {
-    /// Create LLMFormatter from PolisherConfig.
-    pub fn from_config(cfg: &PolisherConfig) -> Result<Self, PolisherError> {
-        let protocol = protocol::ApiProtocol::from_str(&cfg.protocol).map_err(|_| {
+    /// Create LLMFormatter from config sections.
+    pub fn from_config(
+        polisher: &crate::config::PolisherConfig,
+        language: &str,
+    ) -> Result<Self, PolisherError> {
+        let protocol = protocol::ApiProtocol::from_str(&polisher.protocol).map_err(|_| {
             PolisherError::UnknownProtocol {
-                protocol: cfg.protocol.clone(),
+                protocol: polisher.protocol.clone(),
             }
         })?;
         Self::with_config(
-            cfg.api_key.clone(),
-            cfg.api_base_url.clone(),
-            cfg.model.clone(),
-            cfg.timeout,
-            cfg.max_tokens,
+            polisher.api_key.clone(),
+            polisher.api_base_url.clone(),
+            polisher.model.clone(),
+            polisher.timeout,
+            polisher.max_tokens,
             protocol,
-            cfg.temperature,
-            cfg.language.clone(),
+            polisher.temperature,
+            language.to_string(),
         )
     }
 
