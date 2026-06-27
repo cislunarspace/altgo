@@ -2,24 +2,7 @@
 //!
 //! 剪切板支持三种后端：`xclip`、`xsel`、`wl-copy`（Wayland）。
 //! 根据 `XDG_SESSION_TYPE` 自动检测可用工具。
-//!
-//! 桌面通知通过 `notify-send` 发送。
 
-/// 截断文本到指定字节数，尊重 UTF-8 字符边界。
-///
-/// 超过 `max_len` 的文本会被截断并附加 `...`。
-fn truncate_text(text: &str, max_len: usize) -> String {
-    if text.len() <= max_len {
-        return text.to_string();
-    }
-
-    // Find a safe truncation point (don't cut multi-byte chars).
-    let mut end = max_len;
-    while end > 0 && !text.is_char_boundary(end) {
-        end -= 1;
-    }
-    format!("{}...", &text[..end])
-}
 use std::process::Command;
 
 /// Linux 上可用的剪切板管理工具。
@@ -117,40 +100,12 @@ pub fn write_clipboard_with_tool(tool: ClipboardTool, text: &str) -> anyhow::Res
     }
 }
 
-/// 通过 `notify-send` 显示桌面通知。
-pub fn notify(title: &str, body: &str, timeout_ms: u64) -> anyhow::Result<()> {
-    let output = Command::new("notify-send")
-        .arg("-t")
-        .arg(timeout_ms.to_string())
-        .arg(title)
-        .arg(truncate_text(body, 200))
-        .output();
-
-    match output {
-        Ok(out) if out.status.success() => Ok(()),
-        Ok(_) => {
-            tracing::warn!("notify-send command failed");
-            Ok(())
-        }
-        Err(e) => {
-            tracing::warn!(error = %e, "notify-send not available");
-            Ok(())
-        }
-    }
-}
-
 /// Check if a command exists in PATH.
 fn which(cmd: &str) -> bool {
-    Command::new("which")
-        .arg(cmd)
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
+    crate::resource::which_binary(cmd).is_some()
 }
 
-/// Linux `Output` adapter — wraps clipboard tools and `notify-send`.
+/// Linux `Output` adapter — wraps clipboard tools.
 pub struct LinuxOutput {
     tool: Option<ClipboardTool>,
 }
@@ -171,10 +126,6 @@ impl super::Output for LinuxOutput {
         write_clipboard_with_tool(tool, text)
     }
 
-    fn notify(&self, title: &str, body: &str) -> anyhow::Result<()> {
-        notify(title, body, 5000)
-    }
-
     fn clone_box(&self) -> Box<dyn super::Output> {
         Box::new(LinuxOutput { tool: self.tool })
     }
@@ -183,34 +134,6 @@ impl super::Output for LinuxOutput {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_truncate_text_short() {
-        assert_eq!(truncate_text("hello", 10), "hello");
-    }
-
-    #[test]
-    fn test_truncate_text_exact() {
-        assert_eq!(truncate_text("hello", 5), "hello");
-    }
-
-    #[test]
-    fn test_truncate_text_long() {
-        let result = truncate_text("hello world", 5);
-        assert_eq!(result, "hello...");
-    }
-
-    #[test]
-    fn test_truncate_text_multibyte() {
-        let result = truncate_text("你好世界再见", 6);
-        assert!(result.ends_with("..."));
-        assert!(result.starts_with("你好"));
-    }
-
-    #[test]
-    fn test_truncate_text_empty() {
-        assert_eq!(truncate_text("", 10), "");
-    }
 
     #[test]
     fn test_detect_clipboard_tool() {

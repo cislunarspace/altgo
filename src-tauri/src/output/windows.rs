@@ -26,7 +26,7 @@ pub async fn write_clipboard(text: &str) -> Result<()> {
     .map_err(|e| anyhow::anyhow!("clipboard task panicked: {e}"))?
 }
 
-/// Windows `Output` adapter — arboard for clipboard, overlay for notifications.
+/// Windows `Output` adapter — arboard for clipboard.
 pub struct WindowsOutput;
 
 impl WindowsOutput {
@@ -43,11 +43,6 @@ impl super::Output for WindowsOutput {
         clipboard
             .set_text(text.to_string())
             .map_err(|e| anyhow::anyhow!("failed to set clipboard text: {e}"))
-    }
-
-    fn notify(&self, _title: &str, _body: &str) -> Result<()> {
-        // Notifications on Windows are handled by the Tauri overlay.
-        Ok(())
     }
 
     fn clone_box(&self) -> Box<dyn super::Output> {

@@ -155,10 +155,6 @@ mod tests {
             Ok(())
         }
 
-        fn notify(&self, _title: &str, _body: &str) -> anyhow::Result<()> {
-            Ok(())
-        }
-
         fn clone_box(&self) -> Box<dyn crate::output::Output> {
             Box::new(MockOutput)
         }

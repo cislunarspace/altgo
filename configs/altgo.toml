@@ -43,8 +43,6 @@ temperature = 0.3                   # LLM temperature（0.0-2.0）
 system_prompt = ""                  # 自定义则完全替换内置；为空时按 [transcriber] language 生成（中文默认输出简体中文，勿繁体）
 
 [output]
-enable_notify = true
-notify_timeout_ms = 5000
 inject_at_cursor = true             # 尝试将文本注入到当前光标位置（仅 Windows）
 prefer_polished = true              # 注入/复制时优先使用润色后的文本
 

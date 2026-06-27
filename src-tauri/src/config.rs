@@ -207,8 +207,6 @@ impl Default for PolisherConfig {
 #[derive(Debug, Deserialize, Clone, serde::Serialize)]
 #[serde(default)]
 pub struct OutputConfig {
-    /// 是否启用桌面通知
-    pub enable_notify: bool,
     /// 注入/复制时是否优先使用润色后的文本
     pub prefer_polished: bool,
 }
@@ -216,7 +214,6 @@ pub struct OutputConfig {
 impl Default for OutputConfig {
     fn default() -> Self {
         Self {
-            enable_notify: true,
             prefer_polished: true,
         }
     }
@@ -501,7 +498,7 @@ mod tests {
         assert_eq!(cfg.transcriber.temperature, 0.0);
         assert_eq!(cfg.polisher.level, "none");
         assert_eq!(cfg.polisher.temperature, 0.3);
-        assert!(cfg.output.enable_notify);
+        assert!(cfg.output.prefer_polished);
     }
 
     #[test]
@@ -532,7 +529,7 @@ language = "en"
 level = "heavy"
 
 [output]
-enable_notify = false
+prefer_polished = false
 "#
         )
         .unwrap();
@@ -543,7 +540,7 @@ enable_notify = false
         assert_eq!(cfg.transcriber.engine, "api");
         assert_eq!(cfg.transcriber.language, "en");
         assert_eq!(cfg.polisher.level, "heavy");
-        assert!(!cfg.output.enable_notify);
+        assert!(!cfg.output.prefer_polished);
     }
 
     #[test]
