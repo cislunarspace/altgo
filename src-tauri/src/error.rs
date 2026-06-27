@@ -69,7 +69,6 @@ pub enum FatalError {
 
     #[error("Recorder initialization failed: {0}")]
     RecorderInitFailed(#[from] RecorderError),
-
 }
 
 impl FatalError {
@@ -129,9 +128,6 @@ pub enum RecoverableError {
 
     #[error("Empty transcription result")]
     EmptyTranscription,
-
-    #[error("Output failed: {0}")]
-    OutputFailed(String),
 }
 
 impl RecoverableError {
@@ -145,13 +141,6 @@ impl RecoverableError {
                     "转写结果为空，请重试。".to_string()
                 } else {
                     "Transcription returned empty result. Please try again.".to_string()
-                }
-            }
-            Self::OutputFailed(msg) => {
-                if lang == "zh" {
-                    format!("输出失败: {}", msg)
-                } else {
-                    format!("Output failed: {}", msg)
                 }
             }
         }

@@ -27,13 +27,6 @@ impl std::str::FromStr for ApiProtocol {
     }
 }
 
-impl ApiProtocol {
-    #[allow(clippy::should_implement_trait)]
-    pub fn from_str(s: &str) -> anyhow::Result<Self> {
-        <Self as std::str::FromStr>::from_str(s)
-    }
-}
-
 // --- OpenAI-compatible protocol ---
 
 #[derive(Debug, Serialize)]

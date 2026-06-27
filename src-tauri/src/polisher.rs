@@ -18,21 +18,6 @@ use crate::error::PolisherError;
 use reqwest::Client;
 use std::time::Duration;
 
-/// Polisher configuration subset.
-#[derive(Debug, Clone)]
-pub struct PolisherConfig {
-    pub api_key: String,
-    pub api_base_url: String,
-    pub model: String,
-    pub protocol: String,
-    pub max_tokens: u32,
-    pub temperature: f32,
-    pub system_prompt: String,
-    pub timeout: Duration,
-    pub level: String,
-    pub language: String,
-}
-
 /// 重试延迟基数（毫秒），用于指数退避计算。
 const RETRY_BASE_DELAY_MS: u64 = 500;
 
@@ -382,11 +367,12 @@ impl LLMFormatter {
         polisher: &crate::config::PolisherConfig,
         language: &str,
     ) -> Result<Self, PolisherError> {
-        let protocol = protocol::ApiProtocol::from_str(&polisher.protocol).map_err(|_| {
-            PolisherError::UnknownProtocol {
+        let protocol = polisher
+            .protocol
+            .parse::<protocol::ApiProtocol>()
+            .map_err(|_| PolisherError::UnknownProtocol {
                 protocol: polisher.protocol.clone(),
-            }
-        })?;
+            })?;
         Self::with_config(
             polisher.api_key.clone(),
             polisher.api_base_url.clone(),
