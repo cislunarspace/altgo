@@ -4,15 +4,11 @@
 
 按住右 Alt 键说话，松开后在本地用 **whisper.cpp** 转写，可选通过 **OpenAI 兼容 API 或 Anthropic Messages API** 调用 LLM 润色；成功后**会尝试将结果写入系统剪贴板**，并在**悬浮窗**中展示，便于核对；也可在悬浮窗内再次点击复制（例如剪贴板工具不可用或需二次确认时）。所有转写文本（原始 + 润色后）会自动保存到本地**历史记录**，随时可查、可复制、可再次润色。
 
-**在线文档**：[https://cislunarspace.github.io/altgo/](https://cislunarspace.github.io/altgo/)（与 [`docs-site/`](docs-site/) 同源，由 GitHub Pages 部署）。
+**在线文档**：[https://cislunarspace.github.io/altgo/](https://cislunarspace.github.io/altgo/)（源码在 [`docs-site/`](docs-site/)，由 GitHub Pages 部署）。
 
-本仓库支持 **Linux**（Ubuntu 20.04+）和 **Windows**（MSI 安装包，由 GitHub Releases 提供）。不支持 macOS。
+支持 **Linux**（Ubuntu 20.04+）和 **Windows**（MSI 安装包，GitHub Releases 提供）。不支持 macOS。
 
 ![APP首页](figures/app_front_image.png)
-
-![首页转写中](figures/首页_转写中.png)
-
-![悬浮窗转写中](figures/悬浮窗_转写中.png)
 
 ## 功能
 
@@ -23,9 +19,12 @@
 - **LLM 润色（可选）**：通过 **OpenAI 兼容 API** 或 **Anthropic Messages API** 调用任意厂商或本地部署的 LLM（如云端 API、Ollama、vLLM 等），对转写文本做 light / medium / heavy 等档位润色
 - **悬浮窗与剪贴板**：处理完成后写入剪贴板并弹出悬浮窗；可在悬浮窗内再次复制
 - **桌面通知**：处理完成时可伴随通知提示（依配置）
-- **转写历史**：所有成功转写自动保存到本地 `history.json`；支持在历史页面查看列表、删除单条、清空全部、复制内容，以及对任意历史记录**再次润色**
+- **系统托盘**：常驻托盘图标，左键显示/隐藏主窗口，右键菜单提供退出选项
+- **转写历史**：所有成功转写自动保存到本地 `history.json`；支持查看列表、复制、删除单条、清空全部，以及对任意记录**再次润色**
 
-## 系统要求（Linux）
+## 系统要求
+
+### Linux
 
 - **测试与部署环境**：目前仅在 **Ubuntu 20.04** 上做过安装与运行验证；其他发行版可能可用，但未保证。
 - **读取键盘设备（必做）**：在常见安装方式下，必须将当前用户加入 **`input` 组**，否则无法稳定访问 `/dev/input/event*`，按键监听会失败。执行后**须重新登录**会话方可生效：
@@ -37,55 +36,43 @@
 
 - **其余系统组件**（如与桌面、音频、通知相关的库）由 **`.deb` 的依赖关系** 或发行说明处理：缺什么按安装器提示补装即可，不必手工对照长清单。
 
-### 系统要求（Windows）
+### Windows
 
 - **运行时**：需要 **WebView2 运行时**（MSI 安装包已内嵌引导，会自动安装；Windows 10 1803+ 和 Windows 11 通常已预装）。
 - **音频**：使用系统默认麦克风，无需额外配置。若应用无法识别录音设备，检查系统声音设置中是否有可用输入设备。
 - **无额外依赖**：`ffmpeg`、`whisper-cli` 等已随 MSI 一并打包，无需单独安装。
 
-## 系统托盘
-
-启动后会在系统托盘显示图标，点击图标可显示/隐藏主窗口，右键菜单提供「显示窗口」和「退出」选项。
-
 ## 安装
 
 ### 给最终用户（推荐）
 
-#### Linux（主要平台）
+#### Linux
 
 1. 前往 [Releases](../../releases) 下载 **`.deb`** 或 **AppImage**。
 2. 安装 **`.deb`**（Ubuntu / Debian 系）：
-   - **推荐**用 `apt` 从本地文件安装，这样会**自动安装** deb 的 `Depends` 里声明的系统包（如 GTK / WebKit、系统托盘、剪贴板工具、录音与通知相关组件等）：
+   - **推荐**用 `apt` 从本地文件安装，会**自动处理**依赖（如 GTK / WebKit、系统托盘、剪贴板工具等）：
 
      ```bash
      sudo apt install /path/to/altgo_*_amd64.deb
      ```
 
-     将路径换成你保存 deb 的**实际位置**；在 deb 所在目录时也可写 `sudo apt install ./altgo_*.deb`。
-   - **不建议只用** `sudo dpkg -i …`：dpkg 不会拉取依赖。若本机缺少任一依赖，常见报错为 *dependency problems – leaving unconfigured*，**软件包会处于未配置（unconfigured）状态**，主程序可能仍不可用或包管理器会提示有未完成配置。
-   - **已经用 dpkg 装到一半失败时**：
-     - 执行 `sudo apt install -f`（或同义的 `sudo apt -f install`），让 apt **补全依赖**并完成 `altgo` 的配置；或
-     - 先按错误信息用 `sudo apt install 缺失包名` 装齐，再执行 `sudo dpkg --configure -a`。
-   - 若需卸掉后重装：`sudo dpkg --remove altgo`（必要时加 `--force-remove-reinstreq`），再按上文的 **`apt install ./…deb`** 重装。
-   - **AppImage**：下载后赋予执行权限即可运行，无需安装：
+     将路径换成你保存 deb 的实际位置；在 deb 所在目录时也可写 `sudo apt install ./altgo_*.deb`。
+   - **不建议只用** `sudo dpkg -i …`：dpkg 不会拉取依赖，容易因缺包导致安装不完整。若已用 dpkg 装到一半失败，执行 `sudo apt install -f` 补全依赖。
+   - **AppImage**：赋予执行权限即可运行，无需安装：
 
      ```bash
      chmod +x /path/to/altgo-*.AppImage
      /path/to/altgo-*.AppImage
      ```
 
-3. **务必**完成 [系统要求](#系统要求linux) 中的 **`input` 组** 步骤（与按键监听相关，安装包无法代劳）。
+3. **务必**完成 [系统要求](#linux) 中的 **`input` 组** 步骤（与按键监听相关，安装包无法代劳）。
 4. 启动应用，在 **[设置](#首次使用应用内设置)** 里完成转写模型与可选润色等；**不要**一上来编辑配置文件。
-
-**预编译包与捆绑内容**：官方构建会把 **ffmpeg**、**whisper-cli** 等与程序一起打进 **deb / AppImage**，目标是 **安装后开箱即用**，无需再为录音与转写去单独安装这些二进制。
 
 #### Windows
 
 1. 前往 [Releases](../../releases) 下载 **`.msi`** 安装包。
 2. 双击运行 MSI，按向导完成安装。首次安装时若系统缺少 **WebView2 运行时**，安装程序会自动下载并安装（需联网）。
 3. 启动应用，在 **[设置](#首次使用应用内设置)** 里完成转写模型与可选润色等。
-
-**MSI 已内嵌** `ffmpeg`、`whisper-cli` 等二进制，无需单独安装。
 
 ### 给开发者（从本仓库构建）
 
@@ -154,6 +141,10 @@ cd frontend; npm install; cd ..
 3. **双击右 Alt** → 连续录音 → 再次单击停止 → 同上。
 4. 点击主窗口的**历史记录**标签，可浏览过往转写、复制内容或对单条记录再次润色。
 
+![首页转写中](figures/首页_转写中.png)
+
+![悬浮窗转写中](figures/悬浮窗转写中.png)
+
 ### 按 Alt 没有反应？
 
 1. **默认触发键是右侧 Alt**。优先在 **设置 → 录音 / 触发键** 里用「按下以设置」或预设；一般不必改配置文件。
@@ -162,7 +153,7 @@ cd frontend; npm install; cd ..
 4. 查看主窗口是否报错：模型缺失、`xinput`/`evtest` 不可用等会导致管道无法就绪。
 5. 调试：`RUST_LOG=altgo=debug altgo`（Linux）或在 PowerShell 中 `$env:RUST_LOG="altgo=debug"; altgo`（Windows）。
 
-### 历史记录查询
+### 历史记录
 
 所有成功转写结果都会自动保存到本地历史。在历史页面你可以：
 - 浏览全部转写记录（显示原始文本与润色后文本）
@@ -214,25 +205,6 @@ sudo apt install build-essential curl wget file \
 
 ### 常用命令
 
-```bash
-cd frontend && npm install
-make deps-linux && make build     # Linux：推荐，与发布一致
-
-cargo fmt --manifest-path=src-tauri/Cargo.toml -- --check
-cargo clippy --manifest-path=src-tauri/Cargo.toml -- -D warnings
-cargo test --manifest-path=src-tauri/Cargo.toml
-cd frontend && npm run build
-```
-
-```powershell
-# Windows 构建（与 make build 等价）
-.\build.ps1
-# 或: pwsh packaging/scripts/build.ps1
-# 或: build.cmd
-```
-
-### Makefile 摘要
-
 | 目标 | 说明 |
 | ---- | ---- |
 | `make deps-linux` | 下载 whisper-cli、ffmpeg 等至 `target/deps/bin/` |
@@ -240,6 +212,14 @@ cd frontend && npm run build
 | `make install` | 安装可执行文件与 `/etc/altgo` 配置（通常需 `sudo`） |
 | `make run` | 构建后直接运行 |
 | `make test` / `make fmt` / `make lint` | 测试、格式化、Clippy 检查 |
+
+不使用 Makefile 时，也可直接运行：
+
+```bash
+cargo fmt --manifest-path=src-tauri/Cargo.toml -- --check
+cargo clippy --manifest-path=src-tauri/Cargo.toml -- -D warnings
+cargo test --manifest-path=src-tauri/Cargo.toml
+```
 
 **Windows**：用 `.\build.ps1` 或 `build.cmd` 替代 `make build`（下载依赖 + `cargo tauri build --bundles msi`）。
 
