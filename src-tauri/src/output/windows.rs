@@ -8,24 +8,6 @@
 
 use anyhow::Result;
 
-/// 将文本写入系统剪切板（异步）。
-///
-/// 匹配 Linux 的 `write_clipboard` 签名，供 `output::write_clipboard` 跨平台派发。
-/// arboard 的 API 是同步的，且 `Clipboard` 非 `Send`，故在 `spawn_blocking` 闭包内
-/// 完成构造 + 写入 + drop。
-pub async fn write_clipboard(text: &str) -> Result<()> {
-    let text = text.to_string();
-    tokio::task::spawn_blocking(move || {
-        let mut clipboard = arboard::Clipboard::new()
-            .map_err(|e| anyhow::anyhow!("failed to access clipboard: {e}"))?;
-        clipboard
-            .set_text(text)
-            .map_err(|e| anyhow::anyhow!("failed to set clipboard text: {e}"))
-    })
-    .await
-    .map_err(|e| anyhow::anyhow!("clipboard task panicked: {e}"))?
-}
-
 /// Windows `Output` adapter — arboard for clipboard.
 pub struct WindowsOutput;
 

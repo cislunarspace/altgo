@@ -99,6 +99,7 @@ pub fn run() {
             app.manage(config_store);
             app.manage(history_store);
             app.manage(pipeline_controller);
+            app.manage(Box::new(output::PlatformOutput::new()) as Box<dyn output::Output>);
 
             tray::create_tray(app)?;
 

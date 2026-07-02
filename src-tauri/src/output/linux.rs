@@ -57,16 +57,6 @@ pub fn detect_clipboard_tool() -> Option<ClipboardTool> {
     None
 }
 
-/// 将文本写入系统剪切板（异步，5 秒超时）。
-pub async fn write_clipboard(text: &str) -> anyhow::Result<()> {
-    let tool = detect_clipboard_tool()
-        .ok_or_else(|| anyhow::anyhow!("no clipboard tool found (tried xclip, xsel, wl-copy)"))?;
-    let text = text.to_string();
-    tokio::task::spawn_blocking(move || write_clipboard_with_tool(tool, &text))
-        .await
-        .map_err(|e| anyhow::anyhow!("clipboard task panicked: {e}"))?
-}
-
 /// 使用指定的剪切板工具写入文本。
 pub fn write_clipboard_with_tool(tool: ClipboardTool, text: &str) -> anyhow::Result<()> {
     let args: Vec<&str> = match tool {

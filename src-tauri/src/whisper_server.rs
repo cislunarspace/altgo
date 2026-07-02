@@ -350,6 +350,13 @@ fn spawn_server(
 fn find_whisper_server(whisper_path: &str) -> Result<PathBuf, String> {
     if !whisper_path.is_empty() {
         if let Some(dir) = Path::new(whisper_path).parent() {
+            #[cfg(windows)]
+            {
+                let candidate = dir.join("whisper-server.exe");
+                if candidate.exists() {
+                    return Ok(candidate);
+                }
+            }
             let candidate = dir.join("whisper-server");
             if candidate.exists() {
                 return Ok(candidate);
@@ -369,6 +376,7 @@ fn find_whisper_server(whisper_path: &str) -> Result<PathBuf, String> {
 }
 
 /// 在 PATH 上查找 `whisper-server`。
+#[cfg(unix)]
 fn which_whisper_server() -> Result<PathBuf, String> {
     let output = std::process::Command::new("which")
         .arg("whisper-server")
@@ -377,6 +385,25 @@ fn which_whisper_server() -> Result<PathBuf, String> {
     if output.status.success() {
         let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
         let p = PathBuf::from(path);
+        if p.exists() {
+            return Ok(p);
+        }
+    }
+    Err("whisper-server not on PATH".to_string())
+}
+
+/// 在 PATH 上查找 `whisper-server.exe`（Windows）。
+#[cfg(windows)]
+fn which_whisper_server() -> Result<PathBuf, String> {
+    let output = std::process::Command::new("where")
+        .arg("whisper-server")
+        .output()
+        .map_err(|e| format!("where whisper-server: {}", e))?;
+    if output.status.success() {
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        // `where` 可能返回多行，取第一行。
+        let first_line = stdout.lines().next().unwrap_or("").trim();
+        let p = PathBuf::from(first_line);
         if p.exists() {
             return Ok(p);
         }

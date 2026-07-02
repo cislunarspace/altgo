@@ -6,6 +6,7 @@
 use anyhow::{Context, Result};
 use futures_util::StreamExt;
 use reqwest::Client;
+use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use std::time::Duration;
@@ -137,6 +138,56 @@ pub fn is_downloaded(name: &str) -> bool {
         None => return false,
     };
     models_dir().join(info.filename).exists()
+}
+
+/// 模型列表项（含下载状态），供 IPC 返回给前端。
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelEntry {
+    pub name: String,
+    pub filename: String,
+    pub size_bytes: u64,
+    pub description: String,
+    pub downloaded: bool,
+}
+
+/// 返回所有已知模型及下载状态。
+pub fn list_all_with_status() -> Vec<ModelEntry> {
+    let downloaded = list_downloaded();
+    models_info()
+        .iter()
+        .map(|m| ModelEntry {
+            name: m.name.to_string(),
+            filename: m.filename.to_string(),
+            size_bytes: m.size_bytes,
+            description: m.description.to_string(),
+            downloaded: downloaded.iter().any(|d| d == m.name),
+        })
+        .collect()
+}
+
+/// 校验模型名是否在已知模型列表中。
+pub fn validate_name(name: &str) -> Result<()> {
+    if models_info().iter().any(|m| m.name == name) {
+        Ok(())
+    } else {
+        Err(anyhow::anyhow!("unknown model: {}", name))
+    }
+}
+
+/// 删除指定模型的本地文件。
+///
+/// 从 `models_info()` 查找模型、`models_dir()` 拼路径、`fs::remove_file` 删除。
+/// 若文件不存在则静默返回 Ok。
+pub fn delete(name: &str) -> Result<()> {
+    validate_name(name)?;
+    let info = MODELS.iter().find(|m| m.name == name).unwrap();
+    let path = models_dir().join(info.filename);
+    if path.exists() {
+        std::fs::remove_file(&path)
+            .with_context(|| format!("删除模型文件失败: {}", path.display()))?;
+    }
+    Ok(())
 }
 
 /// 解析配置中的模型值。
@@ -310,5 +361,38 @@ mod tests {
         let dir = models_dir();
         assert!(dir.to_string_lossy().contains("altgo"));
         assert!(dir.to_string_lossy().contains("models"));
+    }
+
+    #[test]
+    fn test_validate_name_known() {
+        assert!(validate_name("tiny").is_ok());
+        assert!(validate_name("base").is_ok());
+        assert!(validate_name("large").is_ok());
+    }
+
+    #[test]
+    fn test_validate_name_unknown() {
+        assert!(validate_name("nonexistent").is_err());
+        assert!(validate_name("").is_err());
+    }
+
+    #[test]
+    fn test_list_all_with_status_count() {
+        let entries = list_all_with_status();
+        assert_eq!(entries.len(), models_info().len());
+        // 至少包含 tiny 和 base
+        assert!(entries.iter().any(|e| e.name == "tiny"));
+        assert!(entries.iter().any(|e| e.name == "base"));
+    }
+
+    #[test]
+    fn test_delete_unknown_model_errors() {
+        assert!(delete("nonexistent_model").is_err());
+    }
+
+    #[test]
+    fn test_delete_missing_file_ok() {
+        // 模型文件大概率不存在，删除应静默成功
+        let _ = delete("tiny");
     }
 }

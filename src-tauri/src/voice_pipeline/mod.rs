@@ -349,10 +349,6 @@ mod tests {
             Ok(())
         }
 
-        fn notify(&self, _title: &str, _body: &str) -> anyhow::Result<()> {
-            Ok(())
-        }
-
         fn clone_box(&self) -> Box<dyn Output> {
             Box::new(FakeOutput {
                 clipboard_writes: Arc::clone(&self.clipboard_writes),
@@ -433,9 +429,6 @@ mod tests {
         impl Output for FailingOutput {
             fn write_clipboard(&self, _text: &str) -> anyhow::Result<()> {
                 Err(anyhow::anyhow!("no clipboard"))
-            }
-            fn notify(&self, _: &str, _: &str) -> anyhow::Result<()> {
-                Ok(())
             }
             fn clone_box(&self) -> Box<dyn Output> {
                 Box::new(FailingOutput)

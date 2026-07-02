@@ -205,7 +205,8 @@ mod tests {
 
     #[test]
     fn is_key_down_message_rejects_keyup_messages() {
-        assert!(!is_key_down_message(WM_KEYUP));
+        // WM_KEYUP = 0x0101
+        assert!(!is_key_down_message(0x0101));
     }
 
     #[test]

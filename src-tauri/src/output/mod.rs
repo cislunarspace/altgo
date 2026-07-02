@@ -5,17 +5,12 @@
 //! - Windows：arboard（剪切板），结果展示由 Tauri overlay 处理。
 //!
 //! `Output` trait 将剪切板抽象为可替换 seam，使业务层不依赖平台细节。
-//! `cmd.rs` 中的 `copy_text` 命令直接调用平台函数，不经过 trait。
+//! 所有剪切板写入（包括 `cmd.rs::copy_text`）均通过 trait 路径完成。
 
 #[cfg(target_os = "linux")]
 mod linux;
 #[cfg(target_os = "windows")]
 mod windows;
-
-#[cfg(target_os = "linux")]
-pub use linux::write_clipboard;
-#[cfg(target_os = "windows")]
-pub use windows::write_clipboard;
 
 /// 平台 output adapter 类型别名。
 #[cfg(target_os = "linux")]

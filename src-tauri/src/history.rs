@@ -143,6 +143,12 @@ impl HistoryStore {
         }
         anyhow::bail!("history entry not found: {}", id)
     }
+
+    /// 用润色后文本更新条目。先查存在，再写入。
+    pub fn polish_entry(&self, id: &str, new_text: &str) -> Result<HistoryEntry> {
+        let _entry = self.get(id)?.ok_or_else(|| anyhow::anyhow!("history entry not found: {}", id))?;
+        self.update_text(id, new_text.to_string())
+    }
 }
 
 #[cfg(test)]
@@ -219,5 +225,24 @@ mod tests {
     fn get_returns_none_for_missing_id() {
         let (_dir, store) = make_store();
         assert!(store.get("nonexistent").unwrap().is_none());
+    }
+
+    #[test]
+    fn polish_entry_updates_text() {
+        let (_dir, store) = make_store();
+        let e = store.append("raw text".into(), "old text".into()).unwrap();
+        let updated = store.polish_entry(&e.id, "polished text").unwrap();
+        assert_eq!(updated.text, "polished text");
+        assert_eq!(updated.raw_text, "raw text");
+        // 再次读取确认持久化
+        let fetched = store.get(&e.id).unwrap().unwrap();
+        assert_eq!(fetched.text, "polished text");
+    }
+
+    #[test]
+    fn polish_entry_fails_for_missing_id() {
+        let (_dir, store) = make_store();
+        let err = store.polish_entry("nonexistent", "text").unwrap_err();
+        assert!(err.to_string().contains("not found"));
     }
 }

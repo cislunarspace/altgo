@@ -10,7 +10,7 @@ use crate::config::{Config, ConfigPatch};
 /// Holds the live config and its backing file path.
 /// All mutations go through `apply_patch`, which validates and persists atomically.
 pub struct ConfigStore {
-    pub config: Mutex<Config>,
+    pub(crate) config: Mutex<Config>,
     config_path: std::path::PathBuf,
 }
 

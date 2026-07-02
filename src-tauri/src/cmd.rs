@@ -50,7 +50,7 @@ pub struct ConfigResponse {
 
 #[tauri::command]
 pub async fn get_config(config_store: State<'_, ConfigStore>) -> Result<ConfigResponse, String> {
-    let cfg = config_store.config.lock().await;
+    let cfg = config_store.snapshot().await;
     Ok(ConfigResponse {
         key_name: cfg.key_listener.key_name.clone(),
         linux_evdev_code: cfg.key_listener.linux_evdev_code,
@@ -119,9 +119,14 @@ pub async fn get_status(
 }
 
 #[tauri::command]
-pub async fn copy_text(text: String) -> Result<(), String> {
-    output::write_clipboard(&text)
+pub async fn copy_text(
+    output_state: State<'_, Box<dyn output::Output>>,
+    text: String,
+) -> Result<(), String> {
+    let out = output_state.inner().clone_box();
+    tokio::task::spawn_blocking(move || out.write_clipboard(&text))
         .await
+        .map_err(|e| e.to_string())?
         .map_err(|e| e.to_string())
 }
 
@@ -131,40 +136,14 @@ pub async fn hide_overlay(app: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ModelEntry {
-    pub name: String,
-    pub filename: String,
-    pub size_bytes: u64,
-    pub description: String,
-    pub downloaded: bool,
-}
-
 #[tauri::command]
-pub async fn list_models() -> Result<Vec<ModelEntry>, String> {
-    let downloaded = crate::model::list_downloaded();
-    let entries = crate::model::models_info()
-        .iter()
-        .map(|m| ModelEntry {
-            name: m.name.to_string(),
-            filename: m.filename.to_string(),
-            size_bytes: m.size_bytes,
-            description: m.description.to_string(),
-            downloaded: downloaded.iter().any(|d| d == m.name),
-        })
-        .collect();
-    Ok(entries)
+pub async fn list_models() -> Result<Vec<crate::model::ModelEntry>, String> {
+    Ok(crate::model::list_all_with_status())
 }
 
 #[tauri::command]
 pub async fn download_model(app: tauri::AppHandle, name: String) -> Result<(), String> {
-    if crate::model::models_info()
-        .iter()
-        .all(|m| m.name != name.as_str())
-    {
-        return Err(format!("unknown model: {}", name));
-    }
+    crate::model::validate_name(&name).map_err(|e| e.to_string())?;
 
     if let Some(info) = crate::model::models_info()
         .iter()
@@ -228,15 +207,7 @@ pub async fn download_model(app: tauri::AppHandle, name: String) -> Result<(), S
 
 #[tauri::command]
 pub async fn delete_model(name: String) -> Result<(), String> {
-    let info = crate::model::models_info()
-        .iter()
-        .find(|m| m.name == name)
-        .ok_or_else(|| format!("unknown model: {}", name))?;
-    let path = crate::model::models_dir().join(info.filename);
-    if path.exists() {
-        std::fs::remove_file(&path).map_err(|e| e.to_string())?;
-    }
-    Ok(())
+    crate::model::delete(&name).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -284,16 +255,15 @@ pub async fn polish_history_entry(
     id: String,
 ) -> Result<history::HistoryEntry, String> {
     let cfg = config_store.snapshot().await;
-    let store = history_store.inner().clone();
-    let store2 = store.clone();
 
+    // 先拿原始文本，用于向 LLM 提交
+    let store = history_store.inner().clone();
     let entry = tokio::task::spawn_blocking({
         let id = id.clone();
         move || store.get(&id).map_err(|e| e.to_string())
     })
     .await
     .map_err(|e| e.to_string())??;
-
     let entry = entry.ok_or_else(|| "history entry not found".to_string())?;
 
     let polish_level = polisher::PolishLevel::effective(&cfg.polisher.level);
@@ -304,7 +274,8 @@ pub async fn polish_history_entry(
         .await
         .map_err(|e| e.to_string())?;
 
-    let out = tokio::task::spawn_blocking(move || store2.update_text(&id, polished))
+    let store = history_store.inner().clone();
+    let out = tokio::task::spawn_blocking(move || store.polish_entry(&id, &polished))
         .await
         .map_err(|e| e.to_string())?
         .map_err(|e| e.to_string())?;
