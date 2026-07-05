@@ -79,48 +79,10 @@ impl PipelineBuilder {
     /// Build polisher from config.
     ///
     /// Returns error if protocol is unknown or HTTP client fails to initialize.
+    /// 通过 `LLMFormatter::from_config_with_sources` 共享工厂构造，确保与
+    /// IPC handler（`cmd::polish_history_entry`）走同一条 prompt source chain。
     pub fn build_polisher(&self) -> Result<LLMFormatter, PipelineError> {
-        let formatter =
-            LLMFormatter::from_config(&self.cfg.polisher, &self.cfg.transcriber.language)
-                .map_err(PipelineError::fatal_polisher)?;
-
-        // 装配 system prompt 来源，链式短路：
-        //   PromptStore（加载成功）→ Custom（system_prompt 非空）→ hardcoded（内置兜底）
-        let store_source: Option<Box<dyn crate::polisher::SystemPromptSource>> =
-            std::env::current_exe()
-                .ok()
-                .and_then(|exe| exe.parent().map(|p| p.join("resources/prompts")))
-                .or_else(|| Some(std::path::PathBuf::from("resources/prompts")))
-                .filter(|dir| dir.exists())
-                .and_then(|dir| {
-                    let store = crate::prompt_store::PromptStore::new(dir);
-                    match store.ensure_loaded() {
-                        Ok(()) => {
-                            tracing::info!("PromptStore loaded successfully");
-                            Some(Box::new(crate::polisher::PromptStoreSource::new(
-                                store,
-                            ))
-                                as Box<dyn crate::polisher::SystemPromptSource>)
-                        }
-                        Err(e) => {
-                            tracing::warn!(error = %e, "failed to load prompts from PromptStore");
-                            None
-                        }
-                    }
-                });
-
-        let custom_source: Option<Box<dyn crate::polisher::SystemPromptSource>> =
-            if !self.cfg.polisher.system_prompt.is_empty() {
-                Some(Box::new(crate::polisher::CustomSource::new(
-                    self.cfg.polisher.system_prompt.clone(),
-                )) as Box<dyn crate::polisher::SystemPromptSource>)
-            } else {
-                None
-            };
-
-        let prompt_source = store_source.or(custom_source);
-
-        Ok(formatter.with_prompt_source(prompt_source))
+        LLMFormatter::from_config_with_sources(&self.cfg).map_err(PipelineError::fatal_polisher)
     }
 
     /// Build key listener from config.

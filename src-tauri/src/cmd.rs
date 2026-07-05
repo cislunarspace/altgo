@@ -267,7 +267,8 @@ pub async fn polish_history_entry(
     let entry = entry.ok_or_else(|| "history entry not found".to_string())?;
 
     let polish_level = polisher::PolishLevel::effective(&cfg.polisher.level);
-    let formatter = polisher::LLMFormatter::try_from(&cfg).map_err(|e| e.to_string())?;
+    let formatter = polisher::LLMFormatter::from_config_with_sources(&cfg)
+        .map_err(|e| e.to_string())?;
 
     let polished = formatter
         .polish(&entry.raw_text, polish_level)
