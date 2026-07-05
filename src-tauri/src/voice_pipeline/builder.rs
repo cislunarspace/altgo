@@ -162,3 +162,110 @@ impl PipelineBuilder {
         })
     }
 }
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::polisher::PolishLevel;
+    use std::sync::Arc;
+
+    fn test_config() -> crate::config::Config {
+        crate::config::Config::default()
+    }
+
+    #[test]
+    fn test_build_recorder() {
+        let cfg = Arc::new(test_config());
+        let builder = PipelineBuilder::new(cfg);
+        let _recorder = builder.build_recorder();
+    }
+
+    #[test]
+    fn test_build_transcriber_local_model_not_found() {
+        use crate::error::{FatalError, PipelineError};
+
+        let mut cfg = test_config();
+        cfg.transcriber.engine = "local".to_string();
+        cfg.transcriber.model = "nonexistent-model".to_string();
+
+        let builder = PipelineBuilder::new(Arc::new(cfg));
+        let err = match builder.build_transcriber() {
+            Ok(_) => panic!("expected error"),
+            Err(e) => e,
+        };
+        assert!(err.is_fatal());
+        assert!(matches!(
+            err,
+            PipelineError::Fatal(FatalError::ModelNotFound { .. })
+        ));
+    }
+
+    #[test]
+    fn test_build_polisher_unknown_protocol() {
+        use crate::error::{FatalError, PipelineError, PolisherError};
+
+        let mut cfg = test_config();
+        cfg.polisher.protocol = "unknown-protocol".to_string();
+
+        let builder = PipelineBuilder::new(Arc::new(cfg));
+        let result = builder.build_polisher();
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.is_fatal());
+        assert!(matches!(
+            err,
+            PipelineError::Fatal(FatalError::PolisherInitFailed(
+                PolisherError::UnknownProtocol { .. }
+            ))
+        ));
+    }
+
+    #[test]
+    fn test_polish_level() {
+        let mut cfg = test_config();
+        cfg.polisher.level = "heavy".to_string();
+
+        let builder = PipelineBuilder::new(Arc::new(cfg));
+        let level = builder.polish_level();
+
+        assert_eq!(level, PolishLevel::Heavy);
+    }
+
+    // 端到端入口测试：`run()` 必须在 build_context 失败时把错误上报到 sink。
+    // 故障点属于 builder（构建上下文），因此下沉到本模块。
+    #[tokio::test]
+    async fn run_reports_error_when_context_build_fails() {
+        use crate::voice_pipeline::sink::PipelineOutput;
+        use std::sync::Mutex;
+
+        struct ErrorSink {
+            errors: Arc<Mutex<Vec<String>>>,
+        }
+        impl crate::voice_pipeline::sink::PipelineSink for ErrorSink {
+            fn on_status_change(&self, _: &str) {}
+            fn on_error(&self, msg: &str) {
+                self.errors.lock().unwrap().push(msg.to_string());
+            }
+            fn on_transcription_result(&self, _: &PipelineOutput) {}
+            fn on_progress(&self, _: &str, _: Option<f32>) {}
+            fn on_key_listener_backend(&self, _: &str) {}
+        }
+
+        // Force build_context to fail via unknown polisher protocol.
+        let mut cfg = test_config();
+        cfg.polisher.protocol = "unknown".to_string();
+        let errors = Arc::new(Mutex::new(Vec::new()));
+        let sink = ErrorSink {
+            errors: Arc::clone(&errors),
+        };
+        let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
+        drop(stop_tx);
+        super::super::run(Arc::new(cfg), stop_rx, sink).await;
+        assert!(!errors.lock().unwrap().is_empty());
+    }
+}

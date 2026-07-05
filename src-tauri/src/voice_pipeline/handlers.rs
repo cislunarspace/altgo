@@ -171,3 +171,149 @@ pub async fn process_transcription_result(
         history_appended,
     })
 }
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::polisher::PolishLevel;
+    use crate::transcriber::Transcriber;
+    use std::sync::Arc;
+
+    fn test_output(raw: &str, polished: &str, polish_failed: bool) -> PipelineOutput {
+        PipelineOutput {
+            raw_text: raw.to_string(),
+            text: polished.to_string(),
+            polish_failed,
+        }
+    }
+
+    #[test]
+    fn test_select_text_prefer_polished_success() {
+        let output = test_output("raw text", "polished text", false);
+        assert_eq!(select_text(true, &output), "polished text");
+    }
+
+    #[test]
+    fn test_select_text_prefer_polished_failed() {
+        let output = test_output("raw text", "", true);
+        assert_eq!(select_text(true, &output), "raw text");
+    }
+
+    #[test]
+    fn test_select_text_prefer_polished_empty() {
+        let output = test_output("raw text", "  ", false);
+        assert_eq!(select_text(true, &output), "raw text");
+    }
+
+    #[test]
+    fn test_select_text_prefer_raw() {
+        let output = test_output("raw text", "polished text", false);
+        assert_eq!(select_text(false, &output), "raw text");
+    }
+
+    #[tokio::test]
+    async fn test_process_transcription_result_empty() {
+        use crate::history::HistoryStore;
+
+        let output = test_output("", "", false);
+        let (output_adapter, _) = super::super::test_doubles::FakeOutput::new();
+        let temp_dir = tempfile::tempdir().unwrap();
+        let history_store = HistoryStore::new(temp_dir.path().join("history.json"));
+
+        let result =
+            process_transcription_result(&output, true, &output_adapter, &history_store).await;
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_process_transcription_result_success() {
+        use crate::history::HistoryStore;
+
+        let output = test_output("raw text", "polished text", false);
+        let (output_adapter, writes) = super::super::test_doubles::FakeOutput::new();
+        let temp_dir = tempfile::tempdir().unwrap();
+        let history_store = HistoryStore::new(temp_dir.path().join("history.json"));
+
+        let result =
+            process_transcription_result(&output, true, &output_adapter, &history_store).await;
+        assert!(result.is_some());
+        let result = result.unwrap();
+        assert_eq!(result.text, "polished text");
+        assert!(result.history_appended);
+        assert_eq!(writes.lock().unwrap().len(), 1);
+        assert_eq!(writes.lock().unwrap()[0], "polished text");
+    }
+
+    #[tokio::test]
+    async fn test_process_transcription_result_clipboard_failure_still_returns_result() {
+        use crate::history::HistoryStore;
+
+        struct FailingOutput;
+        impl crate::output::Output for FailingOutput {
+            fn write_clipboard(&self, _text: &str) -> anyhow::Result<()> {
+                Err(anyhow::anyhow!("no clipboard"))
+            }
+            fn clone_box(&self) -> Box<dyn crate::output::Output> {
+                Box::new(FailingOutput)
+            }
+        }
+
+        let output = test_output("raw text", "polished text", false);
+        let temp_dir = tempfile::tempdir().unwrap();
+        let history_store = HistoryStore::new(temp_dir.path().join("history.json"));
+
+        let result =
+            process_transcription_result(&output, true, &FailingOutput, &history_store).await;
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().text, "polished text");
+    }
+
+    #[test]
+    fn handle_start_record_with_fake_recorder() {
+        let mut recorder = super::super::test_doubles::FakeRecorder::new(vec![]);
+        let sink = super::super::test_doubles::MockSink::new();
+        let result = handle_start_record(&mut recorder, &sink);
+        assert!(result.is_ok());
+        assert!(recorder.is_recording());
+        assert_eq!(sink.status_changes(), vec!["recording"]);
+    }
+
+    #[tokio::test]
+    async fn handle_stop_record_with_fake_recorder_reports_empty_audio() {
+        use crate::polisher::LLMFormatter;
+
+        let mut recorder = super::super::test_doubles::FakeRecorder::new(vec![0u8; 44]);
+        let sink = super::super::test_doubles::MockSink::new();
+        let sink_arc: Arc<dyn PipelineSink> = Arc::new(sink);
+
+        recorder.start_recording().unwrap();
+
+        let transcriber: Box<dyn Transcriber> = Box::new(crate::transcriber::LocalWhisper::new(
+            "/nonexistent/model".to_string(),
+            "zh".to_string(),
+            "whisper-cli".to_string(),
+            0,
+            0,
+        ));
+        let formatter = LLMFormatter::new(
+            "test-key".to_string(),
+            "http://localhost".to_string(),
+            "test-model".to_string(),
+            std::time::Duration::from_secs(5),
+        )
+        .unwrap();
+
+        handle_stop_record(
+            &mut recorder,
+            &*transcriber,
+            &formatter,
+            PolishLevel::None,
+            sink_arc,
+        )
+        .await;
+    }
+}

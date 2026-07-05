@@ -112,3 +112,82 @@ impl PipelineContext {
         tracing::info!("pipeline stopped");
     }
 }
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::key_listener::KeyListener;
+    use crate::polisher::{LLMFormatter, PolishLevel};
+    use crate::recorder::PlatformRecorder;
+
+    fn test_polisher_config() -> crate::config::PolisherConfig {
+        crate::config::PolisherConfig {
+            api_key: "test-key".to_string(),
+            api_base_url: "http://localhost".to_string(),
+            model: "test-model".to_string(),
+            protocol: "openai".to_string(),
+            max_tokens: 256,
+            temperature: 0.0,
+            system_prompt: String::new(),
+            timeout: std::time::Duration::from_secs(10),
+            level: "none".to_string(),
+        }
+    }
+
+    fn make_context(listener: Option<Box<dyn KeyListener>>) -> PipelineContext {
+        PipelineContext {
+            recorder: Box::new(PlatformRecorder::new(16000, 1)),
+            transcriber: Box::new(
+                crate::transcriber::WhisperApi::new(
+                    "test-key".to_string(),
+                    "http://localhost".to_string(),
+                    "test-model".to_string(),
+                    "en".to_string(),
+                    0.0,
+                    String::new(),
+                    std::time::Duration::from_secs(10),
+                )
+                .unwrap(),
+            ),
+            formatter: LLMFormatter::from_config(&test_polisher_config(), "en").unwrap(),
+            polish_level: PolishLevel::None,
+            listener: Mutex::new(listener),
+            long_press_threshold: std::time::Duration::from_millis(400),
+            double_click_interval: std::time::Duration::from_millis(200),
+            min_press_duration: std::time::Duration::from_millis(80),
+        }
+    }
+
+    #[test]
+    fn pipeline_context_accepts_boxed_key_listener() {
+        let fake: Box<dyn KeyListener> =
+            Box::new(super::super::test_doubles::FakeListener {
+                backend: "test-fake",
+            });
+        let ctx = make_context(Some(fake));
+        let mut taken = ctx.listener.lock().unwrap().take().unwrap();
+        assert_eq!(taken.start().unwrap().1, "test-fake");
+    }
+
+    #[test]
+    fn pipeline_context_run_returns_early_when_listener_already_taken() {
+        struct MockSink;
+        impl super::super::sink::PipelineSink for MockSink {
+            fn on_status_change(&self, _: &str) {}
+            fn on_error(&self, _: &str) {}
+            fn on_transcription_result(&self, _: &super::super::sink::PipelineOutput) {}
+            fn on_progress(&self, _: &str, _: Option<f32>) {}
+            fn on_key_listener_backend(&self, _: &str) {}
+        }
+
+        let ctx = make_context(None);
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
+        drop(stop_tx);
+        rt.block_on(ctx.run(stop_rx, MockSink));
+    }
+}
