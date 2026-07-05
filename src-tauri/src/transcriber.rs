@@ -385,7 +385,7 @@ fn find_whisper_binary(whisper_path: &str) -> Result<std::path::PathBuf, Transcr
 }
 
 /// Search for a binary on the system PATH.
-fn which_binary(name: &str) -> Result<std::path::PathBuf, TranscriberError> {
+pub(crate) fn which_binary(name: &str) -> Result<std::path::PathBuf, TranscriberError> {
     let output = std::process::Command::new("which")
         .arg(name)
         .output()
