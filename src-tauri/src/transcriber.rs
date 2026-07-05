@@ -466,34 +466,6 @@ impl Transcriber for LocalWhisper {
     }
 }
 
-impl Transcriber for crate::whisper_server::ResidentWhisper {
-    fn transcribe<'life0, 'life1>(
-        &'life0 self,
-        audio: &'life1 [u8],
-        on_progress: Arc<dyn Fn(f32) + Send + Sync>,
-    ) -> Pin<Box<dyn Future<Output = Result<TranscribeResult, TranscriberError>> + Send + 'life0>>
-    where
-        'life1: 'life0,
-    {
-        Box::pin(async move {
-            let cb = Arc::clone(&on_progress);
-            let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<f32>();
-            let forward = tokio::spawn(async move {
-                while let Some(fr) = rx.recv().await {
-                    (cb)(fr);
-                }
-            });
-            let result =
-                crate::whisper_server::ResidentWhisper::transcribe(self, audio, Some(tx)).await;
-            let _ = forward.await;
-            if result.is_ok() {
-                (on_progress)(1.0);
-            }
-            result
-        })
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

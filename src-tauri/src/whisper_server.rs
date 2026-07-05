@@ -10,18 +10,20 @@
 //! 都会 **回退到内置的一次性 `LocalWhisper`**，因此即使旧安装只带了 `whisper-cli`
 //! 也能照常工作。
 
+use std::future::Future;
 use std::path::{Path, PathBuf};
+use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use reqwest::Client;
 use serde::Deserialize;
-use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
 use tokio::sync::OnceCell;
 
 use crate::error::TranscriberError;
 use crate::resource::expand_tilde;
-use crate::transcriber::{LocalWhisper, TranscribeResult};
+use crate::transcriber::{LocalWhisper, TranscribeResult, Transcriber};
 
 /// 就绪探测总预算 —— large 模型从磁盘冷载入可能数十秒。
 const READY_TIMEOUT: Duration = Duration::from_secs(120);
@@ -280,6 +282,33 @@ impl ResidentWhisper {
         Ok(TranscribeResult {
             text: parsed.text.trim().to_string(),
             language: self.language.clone(),
+        })
+    }
+}
+
+impl Transcriber for ResidentWhisper {
+    fn transcribe<'life0, 'life1>(
+        &'life0 self,
+        audio: &'life1 [u8],
+        on_progress: Arc<dyn Fn(f32) + Send + Sync>,
+    ) -> Pin<Box<dyn Future<Output = Result<TranscribeResult, TranscriberError>> + Send + 'life0>>
+    where
+        'life1: 'life0,
+    {
+        Box::pin(async move {
+            let cb = Arc::clone(&on_progress);
+            let (tx, mut rx) = unbounded_channel::<f32>();
+            let forward = tokio::spawn(async move {
+                while let Some(fr) = rx.recv().await {
+                    (cb)(fr);
+                }
+            });
+            let result = ResidentWhisper::transcribe(self, audio, Some(tx)).await;
+            let _ = forward.await;
+            if result.is_ok() {
+                (on_progress)(1.0);
+            }
+            result
         })
     }
 }
