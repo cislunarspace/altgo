@@ -1,21 +1,17 @@
-//! Prompt template management with hot-reload support.
+//! Prompt template management.
 //!
 //! Loads prompt templates from `resources/prompts/`:
 //! - `base.txt`: shared instruction + Chinese writing guidance
 //! - `{level}-suffix.txt`: level-specific instruction
 //!
 //! Runtime composition: `base.txt` + `{level}-suffix.txt` → complete system prompt.
-//! Filesystem watcher reloads templates when files change (500ms debounce).
+//! Templates are loaded once at startup; restart the app to pick up edits.
 
 use crate::polisher::PolishLevel;
-use notify::{Config, Event, RecommendedWatcher, RecursiveMode, Watcher};
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
-use tokio::sync::mpsc;
-use tokio::time::sleep;
 
 /// Errors that can occur during prompt loading or validation.
 #[derive(Debug, thiserror::Error)]
@@ -31,12 +27,9 @@ pub enum PromptError {
         path: PathBuf,
         source: std::io::Error,
     },
-
-    #[error("Failed to start filesystem watcher: {0}")]
-    WatcherError(#[from] notify::Error),
 }
 
-/// Manages prompt templates with hot-reload support.
+/// Manages prompt templates.
 #[derive(Clone, Debug)]
 pub struct PromptStore {
     prompts_dir: PathBuf,
@@ -123,52 +116,6 @@ impl PromptStore {
         Ok(format!("{}\n\n{}", cache.base.trim(), suffix.trim()))
     }
 
-    /// Starts a filesystem watcher that reloads prompts when files change.
-    ///
-    /// Debounces changes with 500ms delay. Returns a handle that stops watching when dropped.
-    pub fn start_watcher(self) -> Result<WatcherHandle, PromptError> {
-        let (tx, mut rx) = mpsc::unbounded_channel();
-
-        let mut watcher = RecommendedWatcher::new(
-            move |res: Result<Event, notify::Error>| {
-                if let Ok(event) = res {
-                    if event.kind.is_modify() || event.kind.is_create() {
-                        let _ = tx.send(());
-                    }
-                }
-            },
-            Config::default(),
-        )?;
-
-        watcher.watch(&self.prompts_dir, RecursiveMode::NonRecursive)?;
-
-        let store = self.clone();
-        let handle = tokio::spawn(async move {
-            let mut pending_reload = false;
-
-            loop {
-                tokio::select! {
-                    Some(()) = rx.recv() => {
-                        pending_reload = true;
-                    }
-                    _ = sleep(Duration::from_millis(500)), if pending_reload => {
-                        pending_reload = false;
-                        if let Err(e) = store.load() {
-                            eprintln!("Failed to reload prompts: {}", e);
-                        } else {
-                            println!("Prompts reloaded successfully");
-                        }
-                    }
-                }
-            }
-        });
-
-        Ok(WatcherHandle {
-            _watcher: watcher,
-            _task: handle,
-        })
-    }
-
     fn load_file(&self, filename: &str) -> Result<String, PromptError> {
         let path = self.prompts_dir.join(filename);
 
@@ -187,14 +134,6 @@ impl PromptStore {
 
         Ok(content)
     }
-}
-
-/// Handle that keeps the filesystem watcher alive.
-///
-/// Watcher stops when this handle is dropped.
-pub struct WatcherHandle {
-    _watcher: RecommendedWatcher,
-    _task: tokio::task::JoinHandle<()>,
 }
 
 #[cfg(test)]
