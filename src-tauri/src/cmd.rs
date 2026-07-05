@@ -15,6 +15,7 @@ use crate::{
     pipeline_controller::{PipelineController, PipelineStatus},
     polisher,
     tauri_overlay_window::TauriOverlayWindow,
+    voice_pipeline,
 };
 
 async fn restart_pipeline(
@@ -255,32 +256,18 @@ pub async fn polish_history_entry(
     id: String,
 ) -> Result<history::HistoryEntry, String> {
     let cfg = config_store.snapshot().await;
-
-    // 先拿原始文本，用于向 LLM 提交
-    let store = history_store.inner().clone();
-    let entry = tokio::task::spawn_blocking({
-        let id = id.clone();
-        move || store.get(&id).map_err(|e| e.to_string())
-    })
-    .await
-    .map_err(|e| e.to_string())??;
-    let entry = entry.ok_or_else(|| "history entry not found".to_string())?;
-
-    let polish_level = polisher::PolishLevel::effective(&cfg.polisher.level);
     let formatter = polisher::LLMFormatter::from_config_with_sources(&cfg)
         .map_err(|e| e.to_string())?;
+    let polish_level = polisher::PolishLevel::effective(&cfg.polisher.level);
 
-    let polished = formatter
-        .polish(&entry.raw_text, polish_level)
-        .await
-        .map_err(|e| e.to_string())?;
-
-    let store = history_store.inner().clone();
-    let out = tokio::task::spawn_blocking(move || store.polish_entry(&id, &polished))
-        .await
-        .map_err(|e| e.to_string())?
-        .map_err(|e| e.to_string())?;
+    let updated = voice_pipeline::dispatch_history_polish(
+        history_store.inner(),
+        &id,
+        &formatter,
+        polish_level,
+    )
+    .await?;
 
     let _ = app.emit("history-updated", ());
-    Ok(out)
+    Ok(updated)
 }

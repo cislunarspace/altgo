@@ -1,18 +1,23 @@
 //! Voice Pipeline — 拥有完整语音转文字管道。
 //!
 //! 模块划分：
-//! - `sink` — 共享类型（PipelineOutput、PipelineSink、ProcessedResult）
+//! - `sink` — 事件接收端口（PipelineSink）与共享类型
+//!   （PipelineOutput / ProcessedResult）
+//! - `dispatcher` — 转写结果业务调度 seam（TranscriptionDispatch）
 //! - `builder` — PipelineBuilder 组件构造
 //! - `context` — PipelineContext 事件循环
-//! - `handlers` — 命令处理器与结果处理
+//! - `handlers` — 命令处理器、结果处理、历史润色编排
 //!
 //! 公共接口：
 //! - `run(cfg, stop_rx, sink)` — 入口（构建 context + 运行事件循环）
 //! - `PipelineBuilder` — 单独构造各组件（可测试）
 //! - `PipelineContext` — 拥有组件，暴露 `run(stop_rx, sink)`
+//! - `TranscriptionDispatch` / `TranscriptionDispatcherImpl` — sink 注入的业务 seam
+//! - `dispatch_history_polish` — 历史条目润色编排
 
 mod builder;
 mod context;
+mod dispatcher;
 mod handlers;
 mod sink;
 
@@ -21,8 +26,10 @@ mod test_doubles;
 
 pub use builder::PipelineBuilder;
 pub use context::PipelineContext;
+pub use dispatcher::{TranscriptionDispatch, TranscriptionDispatcherImpl};
 pub use handlers::{
-    handle_start_record, handle_stop_record, process_transcription_result, select_text,
+    dispatch_history_polish, handle_start_record, handle_stop_record,
+    process_transcription_result, select_text,
 };
 pub use sink::{PipelineOutput, PipelineSink, ProcessedResult};
 

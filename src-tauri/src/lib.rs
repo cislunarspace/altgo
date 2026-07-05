@@ -64,16 +64,20 @@ pub(crate) fn spawn_pipeline_thread(
             .state::<Arc<dyn output::Output>>()
             .inner()
             .clone();
+        let dispatch: Arc<dyn voice_pipeline::TranscriptionDispatch> =
+            Arc::new(voice_pipeline::TranscriptionDispatcherImpl {
+                output,
+                history_store: app_handle
+                    .state::<crate::history::HistoryStore>()
+                    .inner()
+                    .clone(),
+            });
         let sink = tauri_sink::TauriPipelineSink::new(
             app_handle.clone(),
             pipeline_status,
             cfg_clone,
-            app_handle
-                .state::<crate::history::HistoryStore>()
-                .inner()
-                .clone(),
+            dispatch,
             overlay,
-            output,
         );
         rt.block_on(voice_pipeline::run(cfg, stop_rx, sink));
     });

@@ -14,7 +14,7 @@ The lifecycle phase of the voice pipeline at any instant: `Idle`, `Recording`, `
 Owns the pipeline run handle and the shared `PipelineStatus` arc. Responsible for start, stop, and restart. Does not know how to spawn a pipeline — callers inject a spawn closure so this module stays free of Tauri and sink dependencies. Lives in `pipeline_controller.rs`.
 
 **PipelineSink**
-The trait that receives events from the running pipeline: status changes, progress, errors, and transcription results. `TauriPipelineSink` in `cmd.rs` is the single concrete adapter in production use.
+The trait that receives events from the running pipeline: status changes, progress, errors, and transcription results. `TauriPipelineSink` in `tauri_sink.rs` is the single concrete adapter in production use. The transcription-result path delegates business work (clipboard write + history append) to a `TranscriptionDispatch` trait object injected at construction; the sink itself only emits Tauri events and toggles overlay state.
 
 ## Configuration
 
@@ -35,7 +35,7 @@ A single transcription record: `id`, `createdAtMs`, `rawText` (Whisper output), 
 ## Output
 
 **Overlay**
-The floating status window shown during recording, processing, and result display. Positioned on the primary monitor via `xrandr` geometry. Managed directly by `TauriPipelineSink` on status transitions.
+The floating status window shown during recording, processing, and result display. Positioned on the primary monitor via `xrandr` geometry. Managed by `TauriPipelineSink` on status transitions through an `OverlaySink` abstraction; `TauriPipelineSink` only describes intent ("recording" / "processing" / "hidden" / "done"), the overlay manager translates that to window size/position/show/hide.
 
 **Polisher**
 The optional LLM post-processing step. Controlled by `PolishLevel` (`none`/`light`/`medium`/`heavy`). Communicates with any OpenAI-compatible chat API.

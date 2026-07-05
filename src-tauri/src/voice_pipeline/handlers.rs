@@ -124,6 +124,38 @@ pub fn select_text(prefer_polished: bool, output: &PipelineOutput) -> String {
     }
 }
 
+/// Dispatch a polish-then-persist pass for an existing history entry.
+///
+/// Loads `id` from `history`, runs `formatter.polish` on `raw_text`, writes
+/// back via `polish_entry`. All blocking I/O is moved to `spawn_blocking`.
+/// Returns the updated `HistoryEntry`.
+pub async fn dispatch_history_polish(
+    history: &HistoryStore,
+    id: &str,
+    formatter: &LLMFormatter,
+    polish_level: PolishLevel,
+) -> Result<crate::history::HistoryEntry, String> {
+    let store = history.clone();
+    let id_owned = id.to_string();
+    let entry = tokio::task::spawn_blocking(move || store.get(&id_owned))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "history entry not found".to_string())?;
+
+    let polished = formatter
+        .polish(&entry.raw_text, polish_level)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let store = history.clone();
+    let id_owned = id.to_string();
+    tokio::task::spawn_blocking(move || store.polish_entry(&id_owned, &polished))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())
+}
+
 /// Process a transcription result: select text, write clipboard, append history.
 ///
 /// Returns `None` if the transcription was empty (no action taken).

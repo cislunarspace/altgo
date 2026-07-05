@@ -1,20 +1,22 @@
 //! Tauri 管道事件接收器实现。
 //!
-//! 将管道事件转发为 Tauri 事件、剪贴板操作和浮窗管理。
+//! 将管道事件转发为 Tauri 事件与浮窗状态切换：sink 只做 emit + 状态切换，
+//! 不再持有 `Output` / `HistoryStore` 等业务依赖。
 //!
-//! 浮窗物理操作已委托给 `OverlaySink` trait object：本模块只描述「现在应该显示什么阶段」，
-//! 不再直接操纵窗口尺寸/位置/显隐。剪贴板和历史记录业务逻辑委托给
-//! `voice_pipeline::process_transcription_result`。
+//! 剪贴板写入与历史追加业务由 `voice_pipeline::TranscriptionDispatch`
+//! trait 注入（本模块不直接调用 `process_transcription_result`）；
+//! 浮窗物理操作由 `OverlaySink` trait 注入（本模块只描述阶段意图）。
 
 use std::sync::Arc;
 use tauri::Emitter;
 
 use crate::{
     config,
-    history::HistoryStore,
     overlay_window::{OverlaySink, OverlayState},
     pipeline_controller::PipelineStatus,
-    voice_pipeline::{process_transcription_result, PipelineOutput, PipelineSink},
+    voice_pipeline::{
+        TranscriptionDispatch, PipelineOutput, PipelineSink,
+    },
 };
 
 fn emit_pipeline_status(
@@ -28,14 +30,16 @@ fn emit_pipeline_status(
     }
 }
 
-/// Tauri 管道事件接收器 — 将管道事件转发为 Tauri 事件和系统操作。
+/// Tauri 管道事件接收器 — 将管道事件转发为 Tauri 事件和浮窗状态切换。
+///
+/// 只持有 `dispatch: Arc<dyn TranscriptionDispatch>` 与 overlay 抽象，
+/// 业务侧由调用方在构造时一次性注入。
 pub struct TauriPipelineSink {
     app: tauri::AppHandle,
     pipeline_status: Arc<std::sync::RwLock<PipelineStatus>>,
     prefer_polished: bool,
-    output: Arc<dyn crate::output::Output>,
+    dispatch: Arc<dyn TranscriptionDispatch>,
     overlay: Arc<dyn OverlaySink>,
-    history_store: HistoryStore,
 }
 
 impl TauriPipelineSink {
@@ -43,17 +47,15 @@ impl TauriPipelineSink {
         app: tauri::AppHandle,
         pipeline_status: Arc<std::sync::RwLock<PipelineStatus>>,
         cfg: Arc<config::Config>,
-        history_store: HistoryStore,
+        dispatch: Arc<dyn TranscriptionDispatch>,
         overlay: Arc<dyn OverlaySink>,
-        output: Arc<dyn crate::output::Output>,
     ) -> Self {
         Self {
             app,
             pipeline_status,
             prefer_polished: cfg.output.prefer_polished,
-            output,
+            dispatch,
             overlay,
-            history_store,
         }
     }
 }
@@ -92,18 +94,13 @@ impl PipelineSink for TauriPipelineSink {
         let status = self.pipeline_status.clone();
         let output_clone = output.clone();
         let prefer_polished = self.prefer_polished;
-        let output_adapter = Arc::clone(&self.output);
+        let dispatch = Arc::clone(&self.dispatch);
         let overlay = self.overlay.clone();
-        let history_store = self.history_store.clone();
 
         tauri::async_runtime::spawn(async move {
-            let result = process_transcription_result(
-                &output_clone,
-                prefer_polished,
-                &*output_adapter,
-                &history_store,
-            )
-            .await;
+            let result = dispatch
+                .dispatch(&output_clone, prefer_polished)
+                .await;
 
             match result {
                 Some(res) => {
@@ -140,23 +137,27 @@ impl PipelineSink for TauriPipelineSink {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::voice_pipeline::{ProcessedResult, TranscriptionDispatch};
+    use std::future::{ready, Future};
+    use std::pin::Pin;
     use std::sync::Mutex;
-    use tempfile::tempdir;
 
     // -----------------------------------------------------------------------
     // Test doubles
     // -----------------------------------------------------------------------
 
-    /// Mock `Output` that never touches the real clipboard.
-    struct MockOutput;
+    /// Mock `TranscriptionDispatch` that ignores the input and returns `None`
+    /// (mirroring empty-transcription semantics). Tests asserting behaviour
+    /// after `on_transcription_result` only need the sink to not panic.
+    struct MockDispatch;
 
-    impl crate::output::Output for MockOutput {
-        fn write_clipboard(&self, _text: &str) -> anyhow::Result<()> {
-            Ok(())
-        }
-
-        fn clone_box(&self) -> Arc<dyn crate::output::Output> {
-            Arc::new(MockOutput)
+    impl TranscriptionDispatch for MockDispatch {
+        fn dispatch<'a>(
+            &'a self,
+            _output: &'a PipelineOutput,
+            _prefer_polished: bool,
+        ) -> Pin<Box<dyn Future<Output = Option<ProcessedResult>> + Send + 'a>> {
+            Box::pin(ready(None))
         }
     }
 
@@ -191,7 +192,6 @@ mod tests {
         sink: TauriPipelineSink,
         status: Arc<std::sync::RwLock<PipelineStatus>>,
         overlay: Arc<MockOverlay>,
-        _history_dir: tempfile::TempDir,
         _app: tauri::App<tauri::Wry>,
     }
 
@@ -204,26 +204,23 @@ mod tests {
 
         let status = Arc::new(std::sync::RwLock::new(PipelineStatus::Idle));
         let overlay = Arc::new(MockOverlay::new());
-        let history_dir = tempdir().unwrap();
-        let history_store = HistoryStore::new(history_dir.path().join("history.json"));
 
         let mut cfg = config::Config::default();
         cfg.output.prefer_polished = prefer_polished;
 
-        let sink = TauriPipelineSink {
-            app: app.handle().clone(),
-            pipeline_status: status.clone(),
-            prefer_polished,
-            output: Arc::new(MockOutput) as Arc<dyn crate::output::Output>,
-            overlay: overlay.clone(),
-            history_store,
-        };
+        let dispatch: Arc<dyn TranscriptionDispatch> = Arc::new(MockDispatch);
+        let sink = TauriPipelineSink::new(
+            app.handle().clone(),
+            status.clone(),
+            Arc::new(cfg),
+            dispatch,
+            overlay.clone(),
+        );
 
         TestFixture {
             sink,
             status,
             overlay,
-            _history_dir: history_dir,
             _app: app,
         }
     }
