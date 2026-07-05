@@ -7,6 +7,7 @@
 //! 错误通过 `anyhow` 向上传播；剪切板写入路径靠 Windows 手动验证（路线 B 选项 3）。
 
 use anyhow::Result;
+use std::sync::Arc;
 
 /// Windows `Output` adapter — arboard for clipboard.
 pub struct WindowsOutput;
@@ -27,8 +28,8 @@ impl super::Output for WindowsOutput {
             .map_err(|e| anyhow::anyhow!("failed to set clipboard text: {e}"))
     }
 
-    fn clone_box(&self) -> Box<dyn super::Output> {
-        Box::new(WindowsOutput)
+    fn clone_box(&self) -> Arc<dyn super::Output> {
+        Arc::new(WindowsOutput)
     }
 }
 

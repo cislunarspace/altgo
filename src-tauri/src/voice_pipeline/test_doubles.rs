@@ -130,8 +130,8 @@ impl Output for FakeOutput {
         Ok(())
     }
 
-    fn clone_box(&self) -> Box<dyn Output> {
-        Box::new(FakeOutput {
+    fn clone_box(&self) -> Arc<dyn Output> {
+        Arc::new(FakeOutput {
             clipboard_writes: Arc::clone(&self.clipboard_writes),
         })
     }

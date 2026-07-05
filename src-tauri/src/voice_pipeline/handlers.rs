@@ -257,8 +257,8 @@ mod tests {
             fn write_clipboard(&self, _text: &str) -> anyhow::Result<()> {
                 Err(anyhow::anyhow!("no clipboard"))
             }
-            fn clone_box(&self) -> Box<dyn crate::output::Output> {
-                Box::new(FailingOutput)
+            fn clone_box(&self) -> Arc<dyn crate::output::Output> {
+                Arc::new(FailingOutput)
             }
         }
 

@@ -120,7 +120,7 @@ pub async fn get_status(
 
 #[tauri::command]
 pub async fn copy_text(
-    output_state: State<'_, Box<dyn output::Output>>,
+    output_state: State<'_, Arc<dyn output::Output>>,
     text: String,
 ) -> Result<(), String> {
     let out = output_state.inner().clone_box();

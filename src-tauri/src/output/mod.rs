@@ -18,6 +18,8 @@ pub type PlatformOutput = linux::LinuxOutput;
 #[cfg(target_os = "windows")]
 pub type PlatformOutput = windows::WindowsOutput;
 
+use std::sync::Arc;
+
 /// 剪切板写入的抽象接口。
 ///
 /// 由 `voice_pipeline::process_transcription_result` 持有，使输出行为可在测试中替换。
@@ -26,5 +28,5 @@ pub trait Output: Send + Sync {
     fn write_clipboard(&self, text: &str) -> anyhow::Result<()>;
 
     /// 支持 clone 为 trait object（用于 `PipelineEventHandler::Clone`）。
-    fn clone_box(&self) -> Box<dyn Output>;
+    fn clone_box(&self) -> Arc<dyn Output>;
 }

@@ -33,7 +33,7 @@ pub struct TauriPipelineSink {
     app: tauri::AppHandle,
     pipeline_status: Arc<std::sync::RwLock<PipelineStatus>>,
     prefer_polished: bool,
-    output: Box<dyn crate::output::Output>,
+    output: Arc<dyn crate::output::Output>,
     overlay: Arc<dyn OverlaySink>,
     history_store: HistoryStore,
 }
@@ -45,13 +45,13 @@ impl TauriPipelineSink {
         cfg: Arc<config::Config>,
         history_store: HistoryStore,
         overlay: Arc<dyn OverlaySink>,
+        output: Arc<dyn crate::output::Output>,
     ) -> Self {
-        let platform_output = crate::output::PlatformOutput::new();
         Self {
             app,
             pipeline_status,
             prefer_polished: cfg.output.prefer_polished,
-            output: Box::new(platform_output),
+            output,
             overlay,
             history_store,
         }
@@ -92,7 +92,7 @@ impl PipelineSink for TauriPipelineSink {
         let status = self.pipeline_status.clone();
         let output_clone = output.clone();
         let prefer_polished = self.prefer_polished;
-        let output_adapter = self.output.clone_box();
+        let output_adapter = Arc::clone(&self.output);
         let overlay = self.overlay.clone();
         let history_store = self.history_store.clone();
 
@@ -155,8 +155,8 @@ mod tests {
             Ok(())
         }
 
-        fn clone_box(&self) -> Box<dyn crate::output::Output> {
-            Box::new(MockOutput)
+        fn clone_box(&self) -> Arc<dyn crate::output::Output> {
+            Arc::new(MockOutput)
         }
     }
 
@@ -214,7 +214,7 @@ mod tests {
             app: app.handle().clone(),
             pipeline_status: status.clone(),
             prefer_polished,
-            output: Box::new(MockOutput),
+            output: Arc::new(MockOutput) as Arc<dyn crate::output::Output>,
             overlay: overlay.clone(),
             history_store,
         };

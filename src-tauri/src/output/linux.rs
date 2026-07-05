@@ -4,6 +4,7 @@
 //! 根据 `XDG_SESSION_TYPE` 自动检测可用工具。
 
 use std::process::Command;
+use std::sync::Arc;
 
 /// Linux 上可用的剪切板管理工具。
 #[derive(Debug, Clone, Copy)]
@@ -116,8 +117,8 @@ impl super::Output for LinuxOutput {
         write_clipboard_with_tool(tool, text)
     }
 
-    fn clone_box(&self) -> Box<dyn super::Output> {
-        Box::new(LinuxOutput { tool: self.tool })
+    fn clone_box(&self) -> Arc<dyn super::Output> {
+        Arc::new(LinuxOutput { tool: self.tool })
     }
 }
 

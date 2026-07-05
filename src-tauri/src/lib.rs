@@ -60,6 +60,10 @@ pub(crate) fn spawn_pipeline_thread(
             .enable_all()
             .build()
             .expect("failed to build tokio runtime");
+        let output: Arc<dyn output::Output> = app_handle
+            .state::<Arc<dyn output::Output>>()
+            .inner()
+            .clone();
         let sink = tauri_sink::TauriPipelineSink::new(
             app_handle.clone(),
             pipeline_status,
@@ -69,6 +73,7 @@ pub(crate) fn spawn_pipeline_thread(
                 .inner()
                 .clone(),
             overlay,
+            output,
         );
         rt.block_on(voice_pipeline::run(cfg, stop_rx, sink));
     });
@@ -99,7 +104,7 @@ pub fn run() {
             app.manage(config_store);
             app.manage(history_store);
             app.manage(pipeline_controller);
-            app.manage(Box::new(output::PlatformOutput::new()) as Box<dyn output::Output>);
+            app.manage(Arc::new(output::PlatformOutput::new()) as Arc<dyn output::Output>);
 
             tray::create_tray(app)?;
 
