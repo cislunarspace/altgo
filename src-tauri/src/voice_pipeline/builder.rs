@@ -84,42 +84,41 @@ impl PipelineBuilder {
             LLMFormatter::from_config(&self.cfg.polisher, &self.cfg.transcriber.language)
                 .map_err(PipelineError::fatal_polisher)?;
 
-        // Build prompt source chain: PromptStore → Custom → Hardcoded
-        let mut sources: Vec<Box<dyn crate::polisher::SystemPromptSource>> = Vec::new();
+        // 装配 system prompt 来源，链式短路：
+        //   PromptStore（加载成功）→ Custom（system_prompt 非空）→ hardcoded（内置兜底）
+        let store_source: Option<Box<dyn crate::polisher::SystemPromptSource>> =
+            std::env::current_exe()
+                .ok()
+                .and_then(|exe| exe.parent().map(|p| p.join("resources/prompts")))
+                .or_else(|| Some(std::path::PathBuf::from("resources/prompts")))
+                .filter(|dir| dir.exists())
+                .and_then(|dir| {
+                    let store = crate::prompt_store::PromptStore::new(dir);
+                    match store.ensure_loaded() {
+                        Ok(()) => {
+                            tracing::info!("PromptStore loaded successfully");
+                            Some(Box::new(crate::polisher::PromptStoreSource::new(
+                                store,
+                            ))
+                                as Box<dyn crate::polisher::SystemPromptSource>)
+                        }
+                        Err(e) => {
+                            tracing::warn!(error = %e, "failed to load prompts from PromptStore");
+                            None
+                        }
+                    }
+                });
 
-        let prompts_dir = std::env::current_exe()
-            .ok()
-            .and_then(|exe| exe.parent().map(|p| p.join("resources/prompts")))
-            .or_else(|| Some(std::path::PathBuf::from("resources/prompts")));
-
-        if let Some(dir) = prompts_dir {
-            if dir.exists() {
-                let store = crate::prompt_store::PromptStore::new(dir);
-                if let Err(e) = store.ensure_loaded() {
-                    tracing::warn!(error = %e, "failed to load prompts from PromptStore, using fallback");
-                } else {
-                    tracing::info!("PromptStore loaded successfully");
-                    sources.push(Box::new(crate::polisher::PromptStoreSource::new(store)));
-                }
+        let custom_source: Option<Box<dyn crate::polisher::SystemPromptSource>> =
+            if !self.cfg.polisher.system_prompt.is_empty() {
+                Some(Box::new(crate::polisher::CustomSource::new(
+                    self.cfg.polisher.system_prompt.clone(),
+                )) as Box<dyn crate::polisher::SystemPromptSource>)
             } else {
-                tracing::debug!("prompts directory not found, using hardcoded prompts");
-            }
-        }
+                None
+            };
 
-        if !self.cfg.polisher.system_prompt.is_empty() {
-            sources.push(Box::new(crate::polisher::CustomPromptSource::new(
-                self.cfg.polisher.system_prompt.clone(),
-            )));
-        }
-
-        let fallback = Box::new(crate::polisher::HardcodedPromptSource::new(
-            self.cfg.transcriber.language.clone(),
-        ));
-        let prompt_source: Box<dyn crate::polisher::SystemPromptSource> = if sources.is_empty() {
-            fallback
-        } else {
-            Box::new(crate::polisher::FallbackSource::new(sources, fallback))
-        };
+        let prompt_source = store_source.or(custom_source);
 
         Ok(formatter.with_prompt_source(prompt_source))
     }

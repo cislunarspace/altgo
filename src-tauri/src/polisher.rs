@@ -213,45 +213,18 @@ impl SystemPromptSource for PromptStoreSource {
     }
 }
 
-/// 硬编码 prompt 来源（内置默认）。
-pub struct HardcodedPromptSource {
-    language: String,
-}
-
-impl HardcodedPromptSource {
-    pub fn new(language: String) -> Self {
-        Self { language }
-    }
-}
-
-impl SystemPromptSource for HardcodedPromptSource {
-    fn get_prompt(
-        &self,
-        level: PolishLevel,
-        _language: &str,
-    ) -> Result<String, crate::prompt_store::PromptError> {
-        Ok(get_system_prompt(level, &self.language))
-    }
-
-    fn clone_box(&self) -> Box<dyn SystemPromptSource> {
-        Box::new(HardcodedPromptSource {
-            language: self.language.clone(),
-        })
-    }
-}
-
 /// 用户自定义 prompt 来源（来自 `config.polisher.system_prompt`）。
-pub struct CustomPromptSource {
+pub struct CustomSource {
     prompt: String,
 }
 
-impl CustomPromptSource {
+impl CustomSource {
     pub fn new(prompt: String) -> Self {
         Self { prompt }
     }
 }
 
-impl SystemPromptSource for CustomPromptSource {
+impl SystemPromptSource for CustomSource {
     fn get_prompt(
         &self,
         _level: PolishLevel,
@@ -261,48 +234,8 @@ impl SystemPromptSource for CustomPromptSource {
     }
 
     fn clone_box(&self) -> Box<dyn SystemPromptSource> {
-        Box::new(CustomPromptSource {
+        Box::new(CustomSource {
             prompt: self.prompt.clone(),
-        })
-    }
-}
-
-/// 链式 fallback：按顺序尝试多个来源，返回第一个成功的结果。
-pub struct FallbackSource {
-    sources: Vec<Box<dyn SystemPromptSource>>,
-    fallback: Box<dyn SystemPromptSource>,
-}
-
-impl FallbackSource {
-    pub fn new(
-        sources: Vec<Box<dyn SystemPromptSource>>,
-        fallback: Box<dyn SystemPromptSource>,
-    ) -> Self {
-        Self { sources, fallback }
-    }
-}
-
-impl SystemPromptSource for FallbackSource {
-    fn get_prompt(
-        &self,
-        level: PolishLevel,
-        language: &str,
-    ) -> Result<String, crate::prompt_store::PromptError> {
-        for source in &self.sources {
-            match source.get_prompt(level, language) {
-                Ok(prompt) => return Ok(prompt),
-                Err(e) => {
-                    tracing::warn!(error = %e, "prompt source failed, trying next");
-                }
-            }
-        }
-        self.fallback.get_prompt(level, language)
-    }
-
-    fn clone_box(&self) -> Box<dyn SystemPromptSource> {
-        Box::new(FallbackSource {
-            sources: self.sources.iter().map(|s| s.clone_box()).collect(),
-            fallback: self.fallback.clone_box(),
         })
     }
 }
@@ -312,7 +245,8 @@ impl SystemPromptSource for FallbackSource {
 /// 支持 OpenAI 和 Anthropic 两种 API 协议，
 /// 支持指数退避重试（最多 3 次）。
 ///
-/// System prompt 通过 `SystemPromptSource` trait 注入，`polish()` 内部不含 fallback 逻辑。
+/// System prompt 通过 `SystemPromptSource` trait 注入；`prompt_source` 为 `None` 时
+/// `polish()` 内部用内置 hardcoded prompt 兜底。
 pub struct LLMFormatter {
     api_key: String,
     api_base_url: String,
@@ -323,7 +257,7 @@ pub struct LLMFormatter {
     protocol: protocol::ApiProtocol,
     temperature: f32,
     language: String,
-    prompt_source: Box<dyn SystemPromptSource>,
+    prompt_source: Option<Box<dyn SystemPromptSource>>,
 }
 
 impl Clone for LLMFormatter {
@@ -338,7 +272,7 @@ impl Clone for LLMFormatter {
             protocol: self.protocol,
             temperature: self.temperature,
             language: self.language.clone(),
-            prompt_source: self.prompt_source.clone_box(),
+            prompt_source: self.prompt_source.as_ref().map(|s| s.clone_box()),
         }
     }
 }
@@ -419,8 +353,6 @@ impl LLMFormatter {
             .timeout(timeout)
             .build()
             .map_err(|e| PolisherError::HttpError(format!("failed to build HTTP client: {}", e)))?;
-        let prompt_source: Box<dyn SystemPromptSource> =
-            Box::new(HardcodedPromptSource::new(language.clone()));
         Ok(Self {
             api_key,
             api_base_url,
@@ -431,12 +363,15 @@ impl LLMFormatter {
             protocol,
             temperature,
             language,
-            prompt_source,
+            prompt_source: None,
         })
     }
 
-    /// Sets the prompt source for system prompt resolution.
-    pub fn with_prompt_source(mut self, source: Box<dyn SystemPromptSource>) -> Self {
+    /// Sets the prompt source for system prompt resolution. `None` 表示使用内置 hardcoded prompt。
+    pub fn with_prompt_source(
+        mut self,
+        source: Option<Box<dyn SystemPromptSource>>,
+    ) -> Self {
         self.prompt_source = source;
         self
     }
@@ -452,8 +387,9 @@ impl LLMFormatter {
 
         let system_prompt = self
             .prompt_source
-            .get_prompt(level, &self.language)
-            .map_err(|e| PolisherError::HttpError(format!("failed to get prompt: {e}")))?;
+            .as_ref()
+            .and_then(|s| s.get_prompt(level, &self.language).ok())
+            .unwrap_or_else(|| get_system_prompt(level, &self.language));
 
         retry_with_backoff(self.max_retries, || async {
             match self.protocol {
