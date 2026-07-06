@@ -9,9 +9,9 @@
 
 use tauri::{LogicalSize, PhysicalPosition};
 
-use crate::overlay_window::{OverlayError, OverlaySink, OverlayWindow};
+use crate::overlay::seam::{OverlayError, OverlaySink, OverlayWindow};
 
-pub use crate::overlay_window::OverlayState;
+pub use crate::overlay::seam::{OverlayPhase, OverlayState};
 
 /// 各阶段对应的悬浮窗逻辑尺寸（CSS pixels）。
 const SIZE_RECORDING: (f64, f64) = (200.0, 48.0);
@@ -37,7 +37,7 @@ impl<W: OverlayWindow> OverlayManager<W> {
     /// 这是一个**原子意图**：调用方只需描述「现在应该显示什么阶段」，
     /// 本方法内部一次性完成 resize → reposition → prepare → show → emit。
     pub fn set_state(&self, state: OverlayState) {
-        if state.phase == "hidden" {
+        if matches!(state.phase, OverlayPhase::Hidden) {
             if let Err(error) = self.window.emit_state(&state) {
                 tracing::warn!(%error, "overlay state emit failed");
             }
@@ -47,7 +47,7 @@ impl<W: OverlayWindow> OverlayManager<W> {
             return;
         }
 
-        let (width, height) = dimensions_for_phase(&state.phase);
+        let (width, height) = dimensions_for_phase(state.phase);
         if let Err(error) = self.window.set_size(LogicalSize::new(width, height)) {
             tracing::warn!(%error, "overlay set_size failed");
         }
@@ -83,12 +83,12 @@ impl<W: OverlayWindow + Send + Sync> OverlaySink for OverlayManager<W> {
     }
 }
 
-fn dimensions_for_phase(phase: &str) -> (f64, f64) {
+fn dimensions_for_phase(phase: OverlayPhase) -> (f64, f64) {
     match phase {
-        "recording" => SIZE_RECORDING,
-        "processing" => SIZE_PROCESSING,
-        "done" => SIZE_DONE,
-        _ => SIZE_RECORDING,
+        OverlayPhase::Recording => SIZE_RECORDING,
+        OverlayPhase::Processing => SIZE_PROCESSING,
+        OverlayPhase::Done => SIZE_DONE,
+        OverlayPhase::Hidden => SIZE_RECORDING,
     }
 }
 
@@ -173,7 +173,7 @@ mod tests {
 
     impl OverlayWindow for RecordingOverlayWindow {
         fn emit_state(&self, state: &OverlayState) -> Result<(), OverlayError> {
-            self.record(format!("emit:{}", state.phase));
+            self.record(format!("emit:{}", state.phase.as_str()));
             Ok(())
         }
 
@@ -220,10 +220,16 @@ mod tests {
 
     #[test]
     fn test_dimensions_for_phase() {
-        assert_eq!(dimensions_for_phase("recording"), SIZE_RECORDING);
-        assert_eq!(dimensions_for_phase("processing"), SIZE_PROCESSING);
-        assert_eq!(dimensions_for_phase("done"), SIZE_DONE);
-        assert_eq!(dimensions_for_phase("unknown"), SIZE_RECORDING);
+        assert_eq!(
+            dimensions_for_phase(OverlayPhase::Recording),
+            SIZE_RECORDING
+        );
+        assert_eq!(
+            dimensions_for_phase(OverlayPhase::Processing),
+            SIZE_PROCESSING
+        );
+        assert_eq!(dimensions_for_phase(OverlayPhase::Done), SIZE_DONE);
+        assert_eq!(dimensions_for_phase(OverlayPhase::Hidden), SIZE_RECORDING);
     }
 
     #[test]

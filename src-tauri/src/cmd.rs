@@ -11,11 +11,10 @@ use crate::{
     history,
     history::HistoryStore,
     output,
-    overlay_manager::{OverlayManager, OverlayState},
+    overlay::manager::{OverlayManager, OverlayState},
+    overlay::tauri::TauriOverlayWindow,
     pipeline_controller::{PipelineController, PipelineStatus},
-    polisher,
-    tauri_overlay_window::TauriOverlayWindow,
-    voice_pipeline,
+    polisher, voice_pipeline,
 };
 
 async fn restart_pipeline(
@@ -256,8 +255,8 @@ pub async fn polish_history_entry(
     id: String,
 ) -> Result<history::HistoryEntry, String> {
     let cfg = config_store.snapshot().await;
-    let formatter = polisher::LLMFormatter::from_config_with_sources(&cfg)
-        .map_err(|e| e.to_string())?;
+    let formatter =
+        polisher::LLMFormatter::from_config_with_sources(&cfg).map_err(|e| e.to_string())?;
     let polish_level = polisher::PolishLevel::effective(&cfg.polisher.level);
 
     let updated = voice_pipeline::dispatch_history_polish(

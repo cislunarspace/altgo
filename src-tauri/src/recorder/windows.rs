@@ -22,9 +22,6 @@ use std::sync::{Arc, Mutex};
 /// cpal（WASAPI）录音器，捕获音频并产出 16kHz 单声道 WAV。
 pub struct WindowsRecorder {
     sample_rate: u32,
-    /// 构造时传入的目标声道数；输出始终为单声道（回调内 downmix），此字段仅作记录。
-    #[allow(dead_code)]
-    channels: u32,
     shared_buffer: Arc<Buffer>,
     recording: Arc<AtomicBool>,
     stream: Mutex<Option<cpal::Stream>>,
@@ -35,11 +32,11 @@ pub struct WindowsRecorder {
 }
 
 impl WindowsRecorder {
-    /// 创建新的录音器。`sample_rate`/`channels` 为目标值（默认 16000 / 1）。
-    pub fn new(sample_rate: u32, channels: u32) -> Self {
+    /// 创建新的录音器。`sample_rate` 为目标采样率（默认 16000）；
+    /// 声道数使用设备默认值，输出始终在回调内 downmix 为单声道。
+    pub fn new(sample_rate: u32) -> Self {
         Self {
             sample_rate,
-            channels,
             shared_buffer: Arc::new(Buffer::new()),
             recording: Arc::new(AtomicBool::new(false)),
             stream: Mutex::new(None),
@@ -255,7 +252,7 @@ mod tests {
 
     #[test]
     fn test_recorder_creation() {
-        let recorder = WindowsRecorder::new(16000, 1);
+        let recorder = WindowsRecorder::new(16000);
         assert_eq!(recorder.sample_rate, 16000);
         assert!(!recorder.is_recording());
     }

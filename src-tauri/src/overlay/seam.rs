@@ -47,36 +47,61 @@ pub enum OverlayError {
     PrepareForShowFailed(String),
 }
 
+/// Overlay 阶段 —— Rust 内部用枚举流通，仅在序列化给前端时转字符串。
+///
+/// 序列化为 `"recording"` / `"processing"` / `"done"` / `"hidden"`，
+/// 与前端 `overlay-state` 事件协议保持一致。
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OverlayPhase {
+    Recording,
+    Processing,
+    Done,
+    Hidden,
+}
+
+impl OverlayPhase {
+    /// 与前端 `overlay-state` 协议一致的小写名称（与 serde 序列化相同）。
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Recording => "recording",
+            Self::Processing => "processing",
+            Self::Done => "done",
+            Self::Hidden => "hidden",
+        }
+    }
+}
+
 /// Visual state emitted from Rust to the frontend overlay.
 #[derive(Clone, Debug, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OverlayState {
-    /// Current phase: `"recording"` / `"processing"` / `"done"` / `"hidden"`
-    pub phase: String,
+    /// Current phase（序列化为前端协议字符串）。
+    pub phase: OverlayPhase,
 }
 
 impl OverlayState {
     pub fn recording() -> Self {
         Self {
-            phase: "recording".into(),
+            phase: OverlayPhase::Recording,
         }
     }
 
     pub fn processing() -> Self {
         Self {
-            phase: "processing".into(),
+            phase: OverlayPhase::Processing,
         }
     }
 
     pub fn done() -> Self {
         Self {
-            phase: "done".into(),
+            phase: OverlayPhase::Done,
         }
     }
 
     pub fn hidden() -> Self {
         Self {
-            phase: "hidden".into(),
+            phase: OverlayPhase::Hidden,
         }
     }
 }

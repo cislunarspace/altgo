@@ -1,5 +1,7 @@
 //! 管道事件接收器接口与共享类型。
 
+use crate::pipeline_controller::PipelineStatus;
+
 /// 管道处理结果。
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct PipelineOutput {
@@ -17,7 +19,7 @@ pub struct PipelineOutput {
 /// 实现方必须是 `Send + Sync + 'static`，以支持跨线程使用。
 pub trait PipelineSink: Send + Sync + 'static {
     /// 管道状态变化（idle / recording / processing / done / stopped）。
-    fn on_status_change(&self, status: &str);
+    fn on_status_change(&self, status: PipelineStatus);
 
     /// 管道错误。
     fn on_error(&self, message: &str);

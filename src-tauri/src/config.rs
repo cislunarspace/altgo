@@ -102,16 +102,11 @@ impl Default for KeyListenerConfig {
 pub struct RecorderConfig {
     /// 采样率（Hz），默认 16000
     pub sample_rate: u32,
-    /// 声道数，默认 1（单声道）
-    pub channels: u32,
 }
 
 impl Default for RecorderConfig {
     fn default() -> Self {
-        Self {
-            sample_rate: 16000,
-            channels: 1,
-        }
+        Self { sample_rate: 16000 }
     }
 }
 

@@ -18,11 +18,12 @@ use std::time::{Duration, Instant};
 
 use reqwest::Client;
 use serde::Deserialize;
-use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
+use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 use tokio::sync::OnceCell;
 
 use crate::error::TranscriberError;
 use crate::resource::expand_tilde;
+use crate::thread_config::effective_threads;
 use crate::transcriber::{LocalWhisper, TranscribeResult, Transcriber};
 
 /// 就绪探测总预算 —— large 模型从磁盘冷载入可能数十秒。
@@ -31,9 +32,6 @@ const READY_TIMEOUT: Duration = Duration::from_secs(120);
 const READY_POLL_INTERVAL: Duration = Duration::from_millis(200);
 /// 单次 `/health` 探测请求超时。
 const HEALTH_PROBE_TIMEOUT: Duration = Duration::from_secs(2);
-
-/// whisper-server 默认线程数下限的回退值（取不到 CPU 并行度时使用）。
-const DEFAULT_THREADS_FALLBACK: u32 = 4;
 
 /// `/inference` 默认返回 `{"text": "..."}`（`response_format=json`）。
 #[derive(Debug, Deserialize)]
@@ -310,18 +308,6 @@ impl Transcriber for ResidentWhisper {
             }
             result
         })
-    }
-}
-
-/// 解析有效线程数：配置 `> 0` 时用配置值，否则用 CPU 并行度（默认 whisper 仅用 min(4,hw)，
-/// 显式给满核数能直接提速）。
-pub fn effective_threads(configured: u32) -> u32 {
-    if configured > 0 {
-        configured
-    } else {
-        std::thread::available_parallelism()
-            .map(|n| n.get() as u32)
-            .unwrap_or(DEFAULT_THREADS_FALLBACK)
     }
 }
 

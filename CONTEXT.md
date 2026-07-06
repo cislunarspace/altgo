@@ -52,7 +52,7 @@ The complete prompt text sent to the LLM for polishing, composed at runtime from
 ## Recording
 
 **Recorder Output Format**
-The audio format the Voice Pipeline expects a recorder to return as WAV bytes. The configured `sample_rate` and `channels` describe the target recorder output, with defaults of 16kHz mono 16-bit PCM. Platform recorders may adapt native device formats into this target shape where practical.
+The audio format the Voice Pipeline expects a recorder to return as WAV bytes. The configured `sample_rate` describes the target recorder output sample rate (default 16kHz); output is always mono 16-bit PCM. Platform recorders may adapt native device formats into this target shape where practical.
 
 **Windows Recording Format Adaptation**
 On Windows, the recorder captures from the default WASAPI input device and adapts common device sample formats (`i16`, `u16`, `f32`) into signed 16-bit PCM. Multi-channel input is downmixed to mono when the target output is mono. If the device cannot capture at the target sample rate, the recorder resamples the captured audio to the target rate before returning WAV bytes.

@@ -324,9 +324,7 @@ impl LLMFormatter {
     /// 实时管道（`voice_pipeline::builder::build_polisher`）与 IPC handler
     /// （`cmd::polish_history_entry`）都通过此构造，确保两条路径走相同的
     /// prompt 解析：PromptStore → Custom → hardcoded fallback。
-    pub fn from_config_with_sources(
-        cfg: &crate::config::Config,
-    ) -> Result<Self, PolisherError> {
+    pub fn from_config_with_sources(cfg: &crate::config::Config) -> Result<Self, PolisherError> {
         let mut formatter = Self::from_config(&cfg.polisher, &cfg.transcriber.language)?;
         formatter.prompt_source = build_prompt_source_chain(cfg);
         Ok(formatter)
@@ -381,10 +379,7 @@ impl LLMFormatter {
     }
 
     /// Sets the prompt source for system prompt resolution. `None` 表示使用内置 hardcoded prompt。
-    pub fn with_prompt_source(
-        mut self,
-        source: Option<Box<dyn SystemPromptSource>>,
-    ) -> Self {
+    pub fn with_prompt_source(mut self, source: Option<Box<dyn SystemPromptSource>>) -> Self {
         self.prompt_source = source;
         self
     }
@@ -530,34 +525,32 @@ impl LLMFormatter {
 ///
 /// 优先级：PromptStore（`resources/prompts` 加载成功）→ Custom（`system_prompt` 非空）→ `None`。
 /// `None` 时调用方 `polish()` 用内置 hardcoded prompt 兜底。
-fn build_prompt_source_chain(
-    cfg: &crate::config::Config,
-) -> Option<Box<dyn SystemPromptSource>> {
-    let store_source: Option<Box<dyn SystemPromptSource>> =
-        std::env::current_exe()
-            .ok()
-            .and_then(|exe| exe.parent().map(|p| p.join("resources/prompts")))
-            .or_else(|| Some(std::path::PathBuf::from("resources/prompts")))
-            .filter(|dir| dir.exists())
-            .and_then(|dir| {
-                let store = crate::prompt_store::PromptStore::new(dir);
-                match store.ensure_loaded() {
-                    Ok(()) => {
-                        tracing::info!("PromptStore loaded successfully");
-                        Some(Box::new(PromptStoreSource::new(store))
-                            as Box<dyn SystemPromptSource>)
-                    }
-                    Err(e) => {
-                        tracing::warn!(error = %e, "failed to load prompts from PromptStore");
-                        None
-                    }
+fn build_prompt_source_chain(cfg: &crate::config::Config) -> Option<Box<dyn SystemPromptSource>> {
+    let store_source: Option<Box<dyn SystemPromptSource>> = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(|p| p.join("resources/prompts")))
+        .or_else(|| Some(std::path::PathBuf::from("resources/prompts")))
+        .filter(|dir| dir.exists())
+        .and_then(|dir| {
+            let store = crate::prompt_store::PromptStore::new(dir);
+            match store.ensure_loaded() {
+                Ok(()) => {
+                    tracing::info!("PromptStore loaded successfully");
+                    Some(Box::new(PromptStoreSource::new(store)) as Box<dyn SystemPromptSource>)
                 }
-            });
+                Err(e) => {
+                    tracing::warn!(error = %e, "failed to load prompts from PromptStore");
+                    None
+                }
+            }
+        });
 
     let custom_source: Option<Box<dyn SystemPromptSource>> =
         if !cfg.polisher.system_prompt.is_empty() {
-            Some(Box::new(CustomSource::new(cfg.polisher.system_prompt.clone()))
-                as Box<dyn SystemPromptSource>)
+            Some(
+                Box::new(CustomSource::new(cfg.polisher.system_prompt.clone()))
+                    as Box<dyn SystemPromptSource>,
+            )
         } else {
             None
         };

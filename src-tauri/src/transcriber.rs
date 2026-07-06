@@ -10,6 +10,7 @@
 
 use crate::error::TranscriberError;
 use crate::resource::expand_tilde;
+use crate::thread_config::effective_threads;
 use regex::Regex;
 use reqwest::Client;
 use serde::Deserialize;
@@ -245,7 +246,7 @@ impl LocalWhisper {
             .arg("-l")
             .arg(&self.language)
             .arg("-t")
-            .arg(crate::whisper_server::effective_threads(self.threads).to_string())
+            .arg(effective_threads(self.threads).to_string())
             .arg("-f")
             .arg(wav_path)
             .arg("--no-timestamps")

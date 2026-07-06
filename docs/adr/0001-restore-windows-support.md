@@ -27,7 +27,7 @@ We will restore Windows support as a **first-class target platform**, using **na
 | Key listening | `xinput test-xi2` + `evtest` (subprocess) | `WH_KEYBOARD_LL` (Win32 low-level keyboard hook) |
 | Audio recording | `parecord` (subprocess) | `cpal` crate (native Rust) |
 | Clipboard | `xclip`/`xsel`/`wl-copy` (subprocess) | `arboard` crate (native Rust) |
-| Notifications | `notify-send` (subprocess) | `notify-rust` crate (native Rust) |
+| Notifications | `notify-send` (subprocess) | Tauri overlay (no notification library) |
 | Overlay positioning | `xrandr` (subprocess) | `GetMonitorInfoW` (Win32 API) |
 | Activation key capture | `evtest` + evdev | `WH_KEYBOARD_LL` hook in capture mode |
 | Monitor geometry | `xrandr` query | `MonitorFromWindow` + `GetMonitorInfoW` |
@@ -60,7 +60,7 @@ We will restore Windows support as a **first-class target platform**, using **na
 
 - **Supersedes** the April 2026 "Drop Windows Support" ADR, which is now historical
 - Introduces `windows` crate as a Windows-only dependency for Win32 FFI
-- Introduces `cpal` (Windows only), `arboard` (cross-platform), `notify-rust` (cross-platform)
+- Introduces `cpal` (Windows only) and `arboard` (cross-platform); no notification library — Windows results are shown by the Tauri overlay
 - Requires `#[cfg(target_os = "windows")]` guards and platform-specific module files
 - Windows binary dependencies require download script and CI caching
 - Linux code remains unchanged; no behavioral regression

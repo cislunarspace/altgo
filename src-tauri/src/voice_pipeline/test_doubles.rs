@@ -7,6 +7,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::key_listener::KeyListener;
 use crate::output::Output;
+use crate::pipeline_controller::PipelineStatus;
 use crate::recorder::Recorder;
 
 use super::sink::{PipelineOutput, PipelineSink};
@@ -71,7 +72,7 @@ impl Recorder for FakeRecorder {
 
 #[derive(Clone)]
 pub(super) struct MockSink {
-    status_changes: Arc<Mutex<Vec<String>>>,
+    status_changes: Arc<Mutex<Vec<PipelineStatus>>>,
     errors: Arc<Mutex<Vec<String>>>,
     results: Arc<Mutex<Vec<PipelineOutput>>>,
 }
@@ -85,14 +86,14 @@ impl MockSink {
         }
     }
 
-    pub(super) fn status_changes(&self) -> Vec<String> {
+    pub(super) fn status_changes(&self) -> Vec<PipelineStatus> {
         self.status_changes.lock().unwrap().clone()
     }
 }
 
 impl PipelineSink for MockSink {
-    fn on_status_change(&self, status: &str) {
-        self.status_changes.lock().unwrap().push(status.to_string());
+    fn on_status_change(&self, status: PipelineStatus) {
+        self.status_changes.lock().unwrap().push(status);
     }
     fn on_error(&self, message: &str) {
         self.errors.lock().unwrap().push(message.to_string());
