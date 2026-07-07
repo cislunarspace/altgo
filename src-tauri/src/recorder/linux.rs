@@ -15,18 +15,16 @@ use std::thread::JoinHandle;
 /// PulseAudio 录音器，从默认音频源捕获 16 位 PCM 音频（16kHz 单声道）。
 pub struct PulseRecorder {
     sample_rate: u32,
-    channels: u32,
     shared_buffer: Arc<Buffer>,
     recording: Arc<AtomicBool>,
     done: std::sync::Mutex<Option<JoinHandle<()>>>,
 }
 
 impl PulseRecorder {
-    /// 创建新的录音器。
-    pub fn new(sample_rate: u32, channels: u32) -> Self {
+    /// 创建新的录音器。输出固定为单声道（16kHz 单声道是 whisper 输入要求）。
+    pub fn new(sample_rate: u32) -> Self {
         Self {
             sample_rate,
-            channels,
             shared_buffer: Arc::new(Buffer::new()),
             recording: Arc::new(AtomicBool::new(false)),
             done: std::sync::Mutex::new(None),
@@ -43,7 +41,6 @@ impl PulseRecorder {
         self.recording.store(true, Ordering::SeqCst);
 
         let sample_rate = self.sample_rate;
-        let channels = self.channels;
         let buffer = Arc::clone(&self.shared_buffer);
         let recording = Arc::clone(&self.recording);
 
@@ -52,7 +49,7 @@ impl PulseRecorder {
                 .args([
                     "--format=s16le",
                     &format!("--rate={}", sample_rate),
-                    &format!("--channels={}", channels),
+                    "--channels=1",
                     "--raw",
                 ])
                 .stdout(std::process::Stdio::piped())
@@ -139,7 +136,7 @@ impl PulseRecorder {
             return Err(RecorderError::EmptyRecording);
         }
 
-        let wav_data = audio::encode_wav(&pcm_data, self.sample_rate, self.channels as u16, 16)
+        let wav_data = audio::encode_wav(&pcm_data, self.sample_rate, 1, 16)
             .map_err(|e| RecorderError::CaptureFailed(e.to_string()))?;
         Ok(wav_data)
     }
@@ -165,8 +162,7 @@ mod tests {
 
     #[test]
     fn test_recorder_creation() {
-        let recorder = PulseRecorder::new(16000, 1);
+        let recorder = PulseRecorder::new(16000);
         assert_eq!(recorder.sample_rate, 16000);
-        assert_eq!(recorder.channels, 1);
     }
 }

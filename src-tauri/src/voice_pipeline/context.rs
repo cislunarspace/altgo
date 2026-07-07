@@ -10,6 +10,7 @@ use crate::transcriber::Transcriber;
 
 use super::handlers::{handle_start_record, handle_stop_record};
 use super::sink::PipelineSink;
+use crate::pipeline_controller::PipelineStatus;
 
 /// Owns all components needed while the pipeline runs.
 pub struct PipelineContext {
@@ -64,7 +65,7 @@ impl PipelineContext {
         );
         let mut deadline: Option<tokio::time::Instant> = None;
 
-        sink.on_status_change("idle");
+        sink.on_status_change(PipelineStatus::Idle);
 
         let mut stop_rx = stop_rx;
         loop {
@@ -108,7 +109,7 @@ impl PipelineContext {
             deadline = machine.next_deadline().map(|d| d.into());
         }
 
-        sink.on_status_change("stopped");
+        sink.on_status_change(PipelineStatus::Stopped);
         tracing::info!("pipeline stopped");
     }
 }
@@ -140,7 +141,7 @@ mod tests {
 
     fn make_context(listener: Option<Box<dyn KeyListener>>) -> PipelineContext {
         PipelineContext {
-            recorder: Box::new(PlatformRecorder::new(16000, 1)),
+            recorder: Box::new(PlatformRecorder::new(16000)),
             transcriber: Box::new(
                 crate::transcriber::WhisperApi::new(
                     "test-key".to_string(),
@@ -164,10 +165,9 @@ mod tests {
 
     #[test]
     fn pipeline_context_accepts_boxed_key_listener() {
-        let fake: Box<dyn KeyListener> =
-            Box::new(super::super::test_doubles::FakeListener {
-                backend: "test-fake",
-            });
+        let fake: Box<dyn KeyListener> = Box::new(super::super::test_doubles::FakeListener {
+            backend: "test-fake",
+        });
         let ctx = make_context(Some(fake));
         let mut taken = ctx.listener.lock().unwrap().take().unwrap();
         assert_eq!(taken.start().unwrap().1, "test-fake");
@@ -177,7 +177,7 @@ mod tests {
     fn pipeline_context_run_returns_early_when_listener_already_taken() {
         struct MockSink;
         impl super::super::sink::PipelineSink for MockSink {
-            fn on_status_change(&self, _: &str) {}
+            fn on_status_change(&self, _: crate::pipeline_controller::PipelineStatus) {}
             fn on_error(&self, _: &str) {}
             fn on_transcription_result(&self, _: &super::super::sink::PipelineOutput) {}
             fn on_progress(&self, _: &str, _: Option<f32>) {}

@@ -14,7 +14,6 @@ min_press_duration_ms = 100         # 最短按下时长（毫秒），过滤 IM
 
 [recorder]
 sample_rate = 16000
-channels = 1
 
 [transcriber]
 engine = "local"                     # "api"（OpenAI Whisper API）或 "local"（whisper.cpp）

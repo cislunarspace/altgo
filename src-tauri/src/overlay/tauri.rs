@@ -5,7 +5,7 @@
 
 use tauri::{Emitter, LogicalSize, Manager, PhysicalPosition};
 
-use crate::overlay_window::{OverlayError, OverlayState, OverlayWindow};
+use crate::overlay::seam::{OverlayError, OverlayState, OverlayWindow};
 
 const OVERLAY_WINDOW_LABEL: &str = "overlay";
 

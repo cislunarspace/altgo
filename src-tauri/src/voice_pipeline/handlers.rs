@@ -12,6 +12,7 @@ use crate::recorder::Recorder;
 use crate::transcriber::Transcriber;
 
 use super::sink::{PipelineOutput, PipelineSink, ProcessedResult};
+use crate::pipeline_controller::PipelineStatus;
 
 /// Handle StartRecord command: start recording and notify sink.
 pub fn handle_start_record(
@@ -25,7 +26,7 @@ pub fn handle_start_record(
             tracing::error!(error = %e, "failed to start recording");
             e.to_string()
         })?;
-    sink.on_status_change("recording");
+    sink.on_status_change(PipelineStatus::Recording);
     Ok(())
 }
 
@@ -38,13 +39,13 @@ pub async fn handle_stop_record(
     sink: Arc<dyn PipelineSink>,
 ) {
     tracing::info!("recording stopped, processing...");
-    sink.on_status_change("processing");
+    sink.on_status_change(PipelineStatus::Processing);
 
     let wav_data: Vec<u8> = match recorder.stop_recording() {
         Ok(data) => data,
         Err(e) => {
             tracing::error!(error = %e, "failed to stop recording");
-            sink.on_status_change("idle");
+            sink.on_status_change(PipelineStatus::Idle);
             return;
         }
     };
@@ -72,7 +73,7 @@ pub async fn handle_stop_record(
         Err(e) => {
             tracing::error!(error = %e, "transcription failed");
             sink.on_error(&format!("transcription: {}", e));
-            sink.on_status_change("idle");
+            sink.on_status_change(PipelineStatus::Idle);
             return;
         }
     };
@@ -311,7 +312,7 @@ mod tests {
         let result = handle_start_record(&mut recorder, &sink);
         assert!(result.is_ok());
         assert!(recorder.is_recording());
-        assert_eq!(sink.status_changes(), vec!["recording"]);
+        assert_eq!(sink.status_changes(), vec![PipelineStatus::Recording]);
     }
 
     #[tokio::test]

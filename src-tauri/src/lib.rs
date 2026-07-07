@@ -13,16 +13,15 @@ pub mod key_capture;
 pub mod key_listener;
 pub mod model;
 pub mod output;
-pub mod overlay_manager;
-pub mod overlay_window;
+pub mod overlay;
 pub mod pipeline_controller;
 pub mod polisher;
 pub mod prompt_store;
 pub mod recorder;
 pub mod resource;
 pub mod state_machine;
-pub mod tauri_overlay_window;
 pub mod tauri_sink;
+pub mod thread_config;
 pub mod transcriber;
 pub mod tray;
 pub mod voice_pipeline;
@@ -50,9 +49,9 @@ pub(crate) fn spawn_pipeline_thread(
     let app_handle = app.clone();
     let cfg_clone = cfg.clone();
 
-    let overlay: Arc<dyn overlay_window::OverlaySink> =
-        Arc::new(overlay_manager::OverlayManager::new(
-            tauri_overlay_window::TauriOverlayWindow::new(app_handle.clone()),
+    let overlay: Arc<dyn overlay::seam::OverlaySink> =
+        Arc::new(overlay::manager::OverlayManager::new(
+            overlay::tauri::TauriOverlayWindow::new(app_handle.clone()),
         ));
 
     let thread_handle = std::thread::spawn(move || {

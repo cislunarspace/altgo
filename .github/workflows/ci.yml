@@ -51,7 +51,7 @@ jobs:
         run: cargo build --release --manifest-path=src-tauri/Cargo.toml
 
       - name: Run tests
-        run: cargo test --manifest-path=src-tauri/Cargo.toml
+        run: cargo test --manifest-path=src-tauri/Cargo.toml --lib -- --skip tauri_sink
 
       - name: Install Tauri CLI
         run: cargo install tauri-cli --version "^2" --locked

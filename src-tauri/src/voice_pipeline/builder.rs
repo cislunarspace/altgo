@@ -24,7 +24,6 @@ impl PipelineBuilder {
     pub fn build_recorder(&self) -> Box<dyn Recorder> {
         Box::new(crate::recorder::PlatformRecorder::new(
             self.cfg.recorder.sample_rate,
-            self.cfg.recorder.channels,
         ))
     }
 
@@ -209,7 +208,7 @@ mod tests {
             errors: Arc<Mutex<Vec<String>>>,
         }
         impl crate::voice_pipeline::sink::PipelineSink for ErrorSink {
-            fn on_status_change(&self, _: &str) {}
+            fn on_status_change(&self, _: crate::pipeline_controller::PipelineStatus) {}
             fn on_error(&self, msg: &str) {
                 self.errors.lock().unwrap().push(msg.to_string());
             }

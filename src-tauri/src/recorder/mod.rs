@@ -44,7 +44,7 @@ mod tests {
     /// be a regression.
     #[test]
     fn pulse_recorder_returns_typed_recorder_error_on_empty_stop() {
-        let rec = PulseRecorder::new(16000, 1);
+        let rec = PulseRecorder::new(16000);
         // No recording thread started; stop_recording joins nothing,
         // sees an empty buffer, and returns EmptyRecording.
         let err = rec.stop_recording().unwrap_err();

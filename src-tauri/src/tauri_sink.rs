@@ -12,11 +12,9 @@ use tauri::Emitter;
 
 use crate::{
     config,
-    overlay_window::{OverlaySink, OverlayState},
+    overlay::seam::{OverlaySink, OverlayState},
     pipeline_controller::PipelineStatus,
-    voice_pipeline::{
-        TranscriptionDispatch, PipelineOutput, PipelineSink,
-    },
+    voice_pipeline::{PipelineOutput, PipelineSink, TranscriptionDispatch},
 };
 
 fn emit_pipeline_status(
@@ -61,21 +59,17 @@ impl TauriPipelineSink {
 }
 
 impl PipelineSink for TauriPipelineSink {
-    fn on_status_change(&self, status: &str) {
-        let ps = match status {
-            "recording" => PipelineStatus::Recording,
-            "processing" => PipelineStatus::Processing,
-            "done" => PipelineStatus::Done,
-            _ => PipelineStatus::Idle,
-        };
-        emit_pipeline_status(&self.app, &self.pipeline_status, ps);
+    fn on_status_change(&self, status: PipelineStatus) {
+        emit_pipeline_status(&self.app, &self.pipeline_status, status);
 
-        // 通过 OverlaySink 统一设置悬浮窗状态 —— 一次性 emit + resize + position + show/hide
+        // 通过 OverlaySink 统一设置悬浮窗状态 —— 一次性 emit + resize + position + show/hide。
+        // recording/processing/idle/stopped 各自映射到一个 overlay 阶段；
+        // Done 不在此驱动（done 浮窗由转写完成路径异步设置）。
         let overlay_state = match status {
-            "recording" => OverlayState::recording(),
-            "processing" => OverlayState::processing(),
-            "idle" | "stopped" => OverlayState::hidden(),
-            _ => return,
+            PipelineStatus::Recording => OverlayState::recording(),
+            PipelineStatus::Processing => OverlayState::processing(),
+            PipelineStatus::Idle | PipelineStatus::Stopped => OverlayState::hidden(),
+            PipelineStatus::Done => return,
         };
         self.overlay.set_state(overlay_state);
     }
@@ -98,9 +92,7 @@ impl PipelineSink for TauriPipelineSink {
         let overlay = self.overlay.clone();
 
         tauri::async_runtime::spawn(async move {
-            let result = dispatch
-                .dispatch(&output_clone, prefer_polished)
-                .await;
+            let result = dispatch.dispatch(&output_clone, prefer_polished).await;
 
             match result {
                 Some(res) => {
@@ -137,6 +129,7 @@ impl PipelineSink for TauriPipelineSink {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::overlay::seam::OverlayPhase;
     use crate::voice_pipeline::{ProcessedResult, TranscriptionDispatch};
     use std::future::{ready, Future};
     use std::pin::Pin;
@@ -232,65 +225,55 @@ mod tests {
     #[test]
     fn on_status_change_recording_maps_status_and_overlay() {
         let fx = make_fixture(true);
-        fx.sink.on_status_change("recording");
+        fx.sink.on_status_change(PipelineStatus::Recording);
 
         assert_eq!(*fx.status.read().unwrap(), PipelineStatus::Recording);
         let states = fx.overlay.recorded_states();
         assert_eq!(states.len(), 1);
-        assert_eq!(states[0].phase, "recording");
+        assert_eq!(states[0].phase, OverlayPhase::Recording);
     }
 
     #[test]
     fn on_status_change_processing_maps_status_and_overlay() {
         let fx = make_fixture(true);
-        fx.sink.on_status_change("processing");
+        fx.sink.on_status_change(PipelineStatus::Processing);
 
         assert_eq!(*fx.status.read().unwrap(), PipelineStatus::Processing);
         let states = fx.overlay.recorded_states();
         assert_eq!(states.len(), 1);
-        assert_eq!(states[0].phase, "processing");
+        assert_eq!(states[0].phase, OverlayPhase::Processing);
     }
 
     #[test]
     fn on_status_change_done_maps_status_without_overlay_call() {
         let fx = make_fixture(true);
-        fx.sink.on_status_change("done");
+        fx.sink.on_status_change(PipelineStatus::Done);
 
         assert_eq!(*fx.status.read().unwrap(), PipelineStatus::Done);
-        // "done" does not match recording/processing/idle/stopped => overlay not called
+        // Done 不在此驱动 overlay（done 浮窗由转写完成路径异步设置）
         assert!(fx.overlay.recorded_states().is_empty());
     }
 
     #[test]
     fn on_status_change_idle_hides_overlay() {
         let fx = make_fixture(true);
-        fx.sink.on_status_change("idle");
+        fx.sink.on_status_change(PipelineStatus::Idle);
 
         assert_eq!(*fx.status.read().unwrap(), PipelineStatus::Idle);
         let states = fx.overlay.recorded_states();
         assert_eq!(states.len(), 1);
-        assert_eq!(states[0].phase, "hidden");
+        assert_eq!(states[0].phase, OverlayPhase::Hidden);
     }
 
     #[test]
     fn on_status_change_stopped_hides_overlay() {
         let fx = make_fixture(true);
-        fx.sink.on_status_change("stopped");
+        fx.sink.on_status_change(PipelineStatus::Stopped);
 
-        assert_eq!(*fx.status.read().unwrap(), PipelineStatus::Idle);
+        assert_eq!(*fx.status.read().unwrap(), PipelineStatus::Stopped);
         let states = fx.overlay.recorded_states();
         assert_eq!(states.len(), 1);
-        assert_eq!(states[0].phase, "hidden");
-    }
-
-    #[test]
-    fn on_status_change_unknown_defaults_to_idle_no_overlay() {
-        let fx = make_fixture(true);
-        fx.sink.on_status_change("garbage");
-
-        assert_eq!(*fx.status.read().unwrap(), PipelineStatus::Idle);
-        // Unknown status doesn't match any overlay arm => no overlay call
-        assert!(fx.overlay.recorded_states().is_empty());
+        assert_eq!(states[0].phase, OverlayPhase::Hidden);
     }
 
     // -----------------------------------------------------------------------

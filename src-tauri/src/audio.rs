@@ -58,7 +58,6 @@ impl Buffer {
     pub fn reset(&self) {
         self.with_lock(|data| data.clear());
     }
-
 }
 
 /// 将原始 PCM 数据编码为带 44 字节头的 WAV 格式。
