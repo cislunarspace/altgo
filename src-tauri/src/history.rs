@@ -3,7 +3,7 @@
 //! 历史通过 `HistoryStore` 访问：调用方不直接处理文件路径，
 //! 也不调用模块私有 helper。所有路径 I/O 与并发互斥都由 store 内部完成。
 
-use anyhow::{Context, Result};
+use crate::error::HistoryError;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
@@ -28,23 +28,25 @@ struct HistoryFile {
     entries: Vec<HistoryEntry>,
 }
 
-fn load_raw(path: &std::path::Path) -> Result<HistoryFile> {
+fn load_raw(path: &std::path::Path) -> Result<HistoryFile, HistoryError> {
     if !path.exists() {
         return Ok(HistoryFile::default());
     }
-    let s = fs::read_to_string(path).context("read history file")?;
+    let s = fs::read_to_string(path)?;
     if s.trim().is_empty() {
         return Ok(HistoryFile::default());
     }
-    serde_json::from_str(&s).context("parse history json")
+    serde_json::from_str(&s)
+        .map_err(|e| HistoryError::JsonError(format!("parse history json: {e}")))
 }
 
-fn save_raw(path: &std::path::Path, data: &HistoryFile) -> Result<()> {
+fn save_raw(path: &std::path::Path, data: &HistoryFile) -> Result<(), HistoryError> {
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).context("create history directory")?;
+        fs::create_dir_all(parent)?;
     }
-    let s = serde_json::to_string_pretty(data).context("serialize history")?;
-    fs::write(path, s).context("write history file")?;
+    let s = serde_json::to_string_pretty(data)
+        .map_err(|e| HistoryError::SerializeError(format!("serialize history: {e}")))?;
+    fs::write(path, s)?;
 
     // Restrict file permissions to owner-only (protect transcription data at rest).
     #[cfg(unix)]
@@ -68,23 +70,23 @@ impl HistoryStore {
         Self { path }
     }
 
-    pub fn list(&self) -> Result<Vec<HistoryEntry>> {
+    pub fn list(&self) -> Result<Vec<HistoryEntry>, HistoryError> {
         let _g = HISTORY_IO_LOCK
             .lock()
-            .map_err(|_| anyhow::anyhow!("history lock poisoned"))?;
+            .map_err(|_| HistoryError::LockPoisoned)?;
         let file = load_raw(&self.path)?;
         Ok(file.entries)
     }
 
     /// Number of entries currently stored.
-    pub fn count(&self) -> Result<usize> {
+    pub fn count(&self) -> Result<usize, HistoryError> {
         Ok(self.list()?.len())
     }
 
-    pub fn append(&self, raw_text: String, text: String) -> Result<HistoryEntry> {
+    pub fn append(&self, raw_text: String, text: String) -> Result<HistoryEntry, HistoryError> {
         let _g = HISTORY_IO_LOCK
             .lock()
-            .map_err(|_| anyhow::anyhow!("history lock poisoned"))?;
+            .map_err(|_| HistoryError::LockPoisoned)?;
         let mut file = load_raw(&self.path)?;
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -101,10 +103,10 @@ impl HistoryStore {
         Ok(entry)
     }
 
-    pub fn delete(&self, ids: &[String]) -> Result<usize> {
+    pub fn delete(&self, ids: &[String]) -> Result<usize, HistoryError> {
         let _g = HISTORY_IO_LOCK
             .lock()
-            .map_err(|_| anyhow::anyhow!("history lock poisoned"))?;
+            .map_err(|_| HistoryError::LockPoisoned)?;
         let mut file = load_raw(&self.path)?;
         let before = file.entries.len();
         let id_set: std::collections::HashSet<&str> = ids.iter().map(|s| s.as_str()).collect();
@@ -113,25 +115,25 @@ impl HistoryStore {
         Ok(before - file.entries.len())
     }
 
-    pub fn clear(&self) -> Result<()> {
+    pub fn clear(&self) -> Result<(), HistoryError> {
         let _g = HISTORY_IO_LOCK
             .lock()
-            .map_err(|_| anyhow::anyhow!("history lock poisoned"))?;
+            .map_err(|_| HistoryError::LockPoisoned)?;
         save_raw(&self.path, &HistoryFile::default())
     }
 
-    pub fn get(&self, id: &str) -> Result<Option<HistoryEntry>> {
+    pub fn get(&self, id: &str) -> Result<Option<HistoryEntry>, HistoryError> {
         let _g = HISTORY_IO_LOCK
             .lock()
-            .map_err(|_| anyhow::anyhow!("history lock poisoned"))?;
+            .map_err(|_| HistoryError::LockPoisoned)?;
         let file = load_raw(&self.path)?;
         Ok(file.entries.iter().find(|e| e.id == id).cloned())
     }
 
-    pub fn update_text(&self, id: &str, new_text: String) -> Result<HistoryEntry> {
+    pub fn update_text(&self, id: &str, new_text: String) -> Result<HistoryEntry, HistoryError> {
         let _g = HISTORY_IO_LOCK
             .lock()
-            .map_err(|_| anyhow::anyhow!("history lock poisoned"))?;
+            .map_err(|_| HistoryError::LockPoisoned)?;
         let mut file = load_raw(&self.path)?;
         for e in &mut file.entries {
             if e.id == id {
@@ -141,14 +143,14 @@ impl HistoryStore {
                 return Ok(out);
             }
         }
-        anyhow::bail!("history entry not found: {}", id)
+        Err(HistoryError::NotFound(id.to_string()))
     }
 
     /// 用润色后文本更新条目。先查存在，再写入。
-    pub fn polish_entry(&self, id: &str, new_text: &str) -> Result<HistoryEntry> {
+    pub fn polish_entry(&self, id: &str, new_text: &str) -> Result<HistoryEntry, HistoryError> {
         let _entry = self
             .get(id)?
-            .ok_or_else(|| anyhow::anyhow!("history entry not found: {}", id))?;
+            .ok_or_else(|| HistoryError::NotFound(id.to_string()))?;
         self.update_text(id, new_text.to_string())
     }
 }

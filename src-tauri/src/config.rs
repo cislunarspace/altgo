@@ -9,7 +9,8 @@
 //!
 //! 默认配置路径为 `~/.config/altgo/altgo.toml`。
 
-use anyhow::{Context, Result};
+use crate::error::ConfigError;
+use serde::de::DeserializeOwned;
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -234,11 +235,11 @@ impl Config {
     /// 从指定路径加载配置文件。如果文件不存在，返回默认配置。
     /// 环境变量 `ALTGO_TRANSCRIBER_API_KEY` 和 `ALTGO_POLISHER_API_KEY`
     /// 会覆盖配置文件中的对应字段。
-    pub fn load(path: &Path) -> Result<Self> {
+    pub fn load(path: &Path) -> Result<Self, ConfigError> {
         let mut cfg = if path.exists() {
-            let content = std::fs::read_to_string(path)
-                .with_context(|| format!("read {}", path.display()))?;
-            toml::from_str(&content).with_context(|| format!("parse {}", path.display()))?
+            let content = std::fs::read_to_string(path)?;
+            toml::from_str(&content)
+                .map_err(|e| ConfigError::ParseError(format!("parse {}: {}", path.display(), e)))?
         } else {
             Config::default()
         };
@@ -256,10 +257,10 @@ impl Config {
 
     /// Validate the loaded configuration.
     /// Call this after `load()` to check API keys are present when using API engines.
-    pub fn validate(&self) -> Result<()> {
+    pub fn validate(&self) -> Result<(), ConfigError> {
         if self.transcriber.engine == "api" && self.transcriber.api_key.trim().is_empty() {
             let config_path = Self::default_config_path();
-            anyhow::bail!(
+            return Err(ConfigError::ValidationFailed(format!(
                 "转写引擎设置为 'api'，但未配置 API 密钥。\n\
                  \n\
                  解决方法（任选一种）：\n\
@@ -270,12 +271,12 @@ impl Config {
                  3. 使用本地 whisper.cpp（无需 API 密钥）：\n\
                     将 transcriber.engine 改为 \"local\"",
                 config_path.display()
-            );
+            )));
         }
         // Only require polisher API key when polishing is actually enabled.
         if self.polisher.level != "none" && self.polisher.api_key.trim().is_empty() {
             let config_path = Self::default_config_path();
-            anyhow::bail!(
+            return Err(ConfigError::ValidationFailed(format!(
                 "润色功能已开启（level = \"{}\"），但未配置 API 密钥。\n\
                  \n\
                  请在配置文件中填写 [polisher] 段：\n\
@@ -291,23 +292,23 @@ impl Config {
                  配置文件路径：{}",
                 self.polisher.level,
                 config_path.display()
-            );
+            )));
         }
         Ok(())
     }
 
     /// 将配置保存到指定路径。
-    pub fn save(&self, path: &Path) -> Result<()> {
-        let content = toml::to_string_pretty(self).context("failed to serialize config to TOML")?;
+    pub fn save(&self, path: &Path) -> Result<(), ConfigError> {
+        let content = toml::to_string_pretty(self).map_err(|e| {
+            ConfigError::SerializeError(format!("failed to serialize config to TOML: {e}"))
+        })?;
 
         // Ensure parent directory exists.
         if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)
-                .with_context(|| format!("create directory {}", parent.display()))?;
+            std::fs::create_dir_all(parent)?;
         }
 
-        std::fs::write(path, content)
-            .with_context(|| format!("write config to {}", path.display()))?;
+        std::fs::write(path, content)?;
 
         // Restrict file permissions to owner-only (protect API keys at rest).
         #[cfg(unix)]
@@ -333,57 +334,26 @@ impl Config {
 // ConfigPatch — partial update for Config
 // ---------------------------------------------------------------------------
 
-/// 三态反序列化：JSON 字段缺失 = 不修改；`null` = 清除；数值 = 设置。
+/// 三态反序列化：JSON 字段缺失 = 不修改；`null` = 清除；值 = 设置。
 ///
-/// 紧靠 `KeyListenerConfig.linux_evdev_code` 字段定义。
-fn deserialize_opt_patch_u16<'de, D>(deserializer: D) -> Result<Option<Option<u16>>, D::Error>
+/// 泛型实现，适用于任意可从 JSON 值反序列化的类型。
+fn deserialize_opt_patch<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
 where
     D: serde::Deserializer<'de>,
+    T: DeserializeOwned,
 {
     let v = serde_json::Value::deserialize(deserializer)?;
     match v {
         serde_json::Value::Null => Ok(Some(None)),
-        serde_json::Value::Number(n) => {
-            let u = n
-                .as_u64()
-                .ok_or_else(|| serde::de::Error::custom("linux_evdev_code: expected number"))?;
-            if u > u16::MAX as u64 {
-                return Err(serde::de::Error::custom("linux_evdev_code out of range"));
-            }
-            Ok(Some(Some(u as u16)))
+        other => {
+            let val: T = serde_json::from_value(other)
+                .map_err(|e| serde::de::Error::custom(e.to_string()))?;
+            Ok(Some(Some(val)))
         }
-        _ => Err(serde::de::Error::custom(
-            "linux_evdev_code: expected null or number",
-        )),
     }
 }
 
-/// 三态反序列化：JSON 字段缺失 = 不修改；`null` = 清除；数值 = 设置。
-///
-/// 紧靠 `KeyListenerConfig.windows_vk` 字段定义。
-fn deserialize_opt_patch_i32<'de, D>(deserializer: D) -> Result<Option<Option<i32>>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let v = serde_json::Value::deserialize(deserializer)?;
-    match v {
-        serde_json::Value::Null => Ok(Some(None)),
-        serde_json::Value::Number(n) => {
-            let i = n
-                .as_i64()
-                .ok_or_else(|| serde::de::Error::custom("windows_vk: expected number"))?;
-            if i < i32::MIN as i64 || i > i32::MAX as i64 {
-                return Err(serde::de::Error::custom("windows_vk out of range"));
-            }
-            Ok(Some(Some(i as i32)))
-        }
-        _ => Err(serde::de::Error::custom(
-            "windows_vk: expected null or number",
-        )),
-    }
-}
-
-fn apply_nested_opt_u16(target: &mut Option<u16>, patch: Option<Option<u16>>) {
+fn apply_nested_opt<T>(target: &mut Option<T>, patch: Option<Option<T>>) {
     match patch {
         None => {}
         Some(None) => *target = None,
@@ -391,11 +361,23 @@ fn apply_nested_opt_u16(target: &mut Option<u16>, patch: Option<Option<u16>>) {
     }
 }
 
-fn apply_nested_opt_i32(target: &mut Option<i32>, patch: Option<Option<i32>>) {
-    match patch {
-        None => {}
-        Some(None) => *target = None,
-        Some(Some(v)) => *target = Some(v),
+/// serde 辅助模块：将 `deserialize_opt_patch<u16>` 暴露为模块形式供 `deserialize_with` 使用。
+mod opt_patch_u16 {
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Option<Option<u16>>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        super::deserialize_opt_patch::<D, u16>(deserializer)
+    }
+}
+
+/// serde 辅助模块：将 `deserialize_opt_patch<i32>` 暴露为模块形式供 `deserialize_with` 使用。
+mod opt_patch_i32 {
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Option<Option<i32>>, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        super::deserialize_opt_patch::<D, i32>(deserializer)
     }
 }
 
@@ -407,11 +389,11 @@ pub struct ConfigPatch {
     pub key_name: Option<String>,
     /// `None` = field absent (no change); `Some(None)` = JSON `null` (clear);
     /// `Some(Some(v))` = set to v.
-    #[serde(default, deserialize_with = "deserialize_opt_patch_u16")]
+    #[serde(default, deserialize_with = "opt_patch_u16::deserialize")]
     pub linux_evdev_code: Option<Option<u16>>,
     /// `None` = field absent (no change); `Some(None)` = JSON `null` (clear);
     /// `Some(Some(v))` = set to v.
-    #[serde(default, deserialize_with = "deserialize_opt_patch_i32")]
+    #[serde(default, deserialize_with = "opt_patch_i32::deserialize")]
     pub windows_vk: Option<Option<i32>>,
     pub language: Option<String>,
     pub engine: Option<String>,
@@ -431,11 +413,11 @@ impl ConfigPatch {
         if let Some(ref v) = self.key_name {
             cfg.key_listener.key_name = v.clone();
         }
-        apply_nested_opt_u16(
+        apply_nested_opt(
             &mut cfg.key_listener.linux_evdev_code,
             self.linux_evdev_code,
         );
-        apply_nested_opt_i32(&mut cfg.key_listener.windows_vk, self.windows_vk);
+        apply_nested_opt(&mut cfg.key_listener.windows_vk, self.windows_vk);
         if let Some(ref v) = self.language {
             cfg.transcriber.language = v.clone();
         }

@@ -10,7 +10,6 @@ import {
   Loader2,
   AlertCircle,
 } from "lucide-react";
-import "../styles/components.css";
 
 interface PolishConfig {
   polishModel: string;

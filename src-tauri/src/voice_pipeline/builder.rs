@@ -201,7 +201,7 @@ mod tests {
     // 故障点属于 builder（构建上下文），因此下沉到本模块。
     #[tokio::test]
     async fn run_reports_error_when_context_build_fails() {
-        use crate::voice_pipeline::sink::PipelineOutput;
+        use crate::voice_pipeline::sink::TranscriptionResult;
         use std::sync::Mutex;
 
         struct ErrorSink {
@@ -212,7 +212,7 @@ mod tests {
             fn on_error(&self, msg: &str) {
                 self.errors.lock().unwrap().push(msg.to_string());
             }
-            fn on_transcription_result(&self, _: &PipelineOutput) {}
+            fn on_transcription_result(&self, _: &TranscriptionResult) {}
             fn on_progress(&self, _: &str, _: Option<f32>) {}
             fn on_key_listener_backend(&self, _: &str) {}
         }

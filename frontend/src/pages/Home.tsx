@@ -10,7 +10,6 @@ import { StatusIndicator } from "../components/StatusIndicator";
 import { Copy, Check } from "lucide-react";
 import { useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import "../styles/components.css";
 
 export default function Home() {
   const { t } = useTranslation();

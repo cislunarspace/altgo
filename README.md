@@ -8,7 +8,7 @@
 
 支持 **Linux**（Ubuntu 20.04+）和 **Windows**（MSI 安装包，GitHub Releases 提供）。不支持 macOS。
 
-![APP首页](figures/app_front_image.png)
+![APP首页](figures/app-front.png)
 
 ## 功能
 
@@ -116,7 +116,7 @@ cd frontend; npm install; cd ..
 
 跟着界面走即可完成日常使用。
 
-![设置](figures/设置.png)
+![设置](figures/settings.png)
 
 ## 高级：直接编辑配置文件（可选）
 
@@ -141,7 +141,7 @@ cd frontend; npm install; cd ..
 3. **双击右 Alt** → 连续录音 → 再次单击停止 → 同上。
 4. 点击主窗口的**历史记录**标签，可浏览过往转写、复制内容或对单条记录再次润色。
 
-![首页转写中](figures/首页_转写中.png)
+![首页转写中](figures/home-transcribing.png)
 
 ![悬浮窗转写中](figures/悬浮窗转写中.png)
 
@@ -163,7 +163,7 @@ cd frontend; npm install; cd ..
 
 > **隐私说明**：历史记录仅保存**文本**，不会存储任何音频文件。
 
-![转录历史](figures/转录历史.png)
+![转录历史](figures/history.png)
 
 ## 架构
 

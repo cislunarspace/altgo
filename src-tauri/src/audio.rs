@@ -34,13 +34,7 @@ impl Buffer {
     where
         F: FnOnce(&mut Vec<u8>) -> R,
     {
-        let mut data = match self.data.lock() {
-            Ok(d) => d,
-            Err(poisoned) => {
-                tracing::warn!("audio buffer mutex was poisoned, recovering");
-                poisoned.into_inner()
-            }
-        };
+        let mut data = self.data.lock().expect("audio data mutex poisoned");
         f(&mut data)
     }
 

@@ -11,7 +11,7 @@ use crate::polisher::{LLMFormatter, PolishLevel};
 use crate::recorder::Recorder;
 use crate::transcriber::Transcriber;
 
-use super::sink::{PipelineOutput, PipelineSink, ProcessedResult};
+use super::sink::{DispatchOutcome, PipelineSink, TranscriptionResult};
 use crate::pipeline_controller::PipelineStatus;
 
 /// Handle StartRecord command: start recording and notify sink.
@@ -83,7 +83,7 @@ pub async fn handle_stop_record(
     if result.text.is_empty() {
         tracing::warn!("empty transcription, skipping");
         sink.on_progress("done", Some(1.0));
-        sink.on_transcription_result(&PipelineOutput {
+        sink.on_transcription_result(&TranscriptionResult {
             text: String::new(),
             raw_text: String::new(),
             polish_failed: false,
@@ -108,7 +108,7 @@ pub async fn handle_stop_record(
 
     sink.on_progress("done", Some(1.0));
 
-    let output = PipelineOutput {
+    let output = TranscriptionResult {
         text: polished,
         raw_text,
         polish_failed,
@@ -117,7 +117,7 @@ pub async fn handle_stop_record(
 }
 
 /// Select which text to use based on preferences and polish status.
-pub fn select_text(prefer_polished: bool, output: &PipelineOutput) -> String {
+pub fn select_text(prefer_polished: bool, output: &TranscriptionResult) -> String {
     if prefer_polished && !output.polish_failed && !output.text.trim().is_empty() {
         output.text.clone()
     } else {
@@ -161,11 +161,11 @@ pub async fn dispatch_history_polish(
 ///
 /// Returns `None` if the transcription was empty (no action taken).
 pub async fn process_transcription_result(
-    output: &PipelineOutput,
+    output: &TranscriptionResult,
     prefer_polished: bool,
     output_adapter: &dyn Output,
     history_store: &HistoryStore,
-) -> Option<ProcessedResult> {
+) -> Option<DispatchOutcome> {
     if output.raw_text.is_empty() {
         return None;
     }
@@ -199,7 +199,7 @@ pub async fn process_transcription_result(
         tracing::warn!("failed to append transcription history");
     }
 
-    Some(ProcessedResult {
+    Some(DispatchOutcome {
         text: text_to_use,
         history_appended,
     })
@@ -216,8 +216,8 @@ mod tests {
     use crate::transcriber::Transcriber;
     use std::sync::Arc;
 
-    fn test_output(raw: &str, polished: &str, polish_failed: bool) -> PipelineOutput {
-        PipelineOutput {
+    fn test_output(raw: &str, polished: &str, polish_failed: bool) -> TranscriptionResult {
+        TranscriptionResult {
             raw_text: raw.to_string(),
             text: polished.to_string(),
             polish_failed,
@@ -287,8 +287,10 @@ mod tests {
 
         struct FailingOutput;
         impl crate::output::Output for FailingOutput {
-            fn write_clipboard(&self, _text: &str) -> anyhow::Result<()> {
-                Err(anyhow::anyhow!("no clipboard"))
+            fn write_clipboard(&self, _text: &str) -> Result<(), crate::error::OutputError> {
+                Err(crate::error::OutputError::ClipboardFailed(
+                    "no clipboard".to_string(),
+                ))
             }
             fn clone_box(&self) -> Arc<dyn crate::output::Output> {
                 Arc::new(FailingOutput)

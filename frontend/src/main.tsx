@@ -3,7 +3,12 @@ import ReactDOM from "react-dom/client";
 import App from "./App";
 import { ThemeProvider } from "./ThemeContext";
 import "./styles/global.css";
-import "./styles/components.css";
+import "./styles/layout.css";
+import "./styles/components/ui-primitives.css";
+import "./styles/components/status-indicator.css";
+import "./styles/pages/home.css";
+import "./styles/pages/settings.css";
+import "./styles/pages/history.css";
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>

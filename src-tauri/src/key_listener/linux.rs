@@ -7,7 +7,7 @@
 
 use super::{KeyEvent, KeyListener};
 use crate::config::KeyListenerConfig;
-use anyhow::{Context, Result};
+use crate::error::KeyListenerError;
 use std::io::BufRead;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
@@ -34,7 +34,7 @@ pub struct X11Listener {
 }
 
 /// 枚举可用于 `evtest` 回退的键盘设备（供按键捕获使用）。
-pub fn list_keyboard_devices() -> Result<Vec<PathBuf>> {
+pub fn list_keyboard_devices() -> Result<Vec<PathBuf>, KeyListenerError> {
     let by_id_path = PathBuf::from("/dev/input/by-id");
     let mut devices = Vec::new();
 
@@ -81,13 +81,17 @@ pub fn list_keyboard_devices() -> Result<Vec<PathBuf>> {
 
 impl X11Listener {
     /// 创建新的 X11 监听器，验证 `xinput` 是否可用。
-    pub fn new(cfg: &KeyListenerConfig) -> Result<Self> {
+    pub fn new(cfg: &KeyListenerConfig) -> Result<Self, KeyListenerError> {
         Command::new("xinput")
             .arg("version")
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .status()
-            .context("xinput not found — install xinput package")?;
+            .map_err(|_| {
+                KeyListenerError::ToolNotFound(
+                    "xinput not found — install xinput package".to_string(),
+                )
+            })?;
 
         Ok(Self {
             key_name: cfg.key_name.clone(),
@@ -98,7 +102,9 @@ impl X11Listener {
     }
 
     /// 开始监听按键事件，返回事件通道与后端标识（`"xinput"` / `"evtest"`）。
-    pub fn start(&mut self) -> Result<(mpsc::UnboundedReceiver<KeyEvent>, &'static str)> {
+    pub fn start(
+        &mut self,
+    ) -> Result<(mpsc::UnboundedReceiver<KeyEvent>, &'static str), KeyListenerError> {
         // evtest：有捕获码则只认该码；否则按 keysym 映射到 evdev（左/右 Alt 严格区分）。
         let allowed_evdev: std::sync::Arc<[u16]> = if let Some(c) = self.linux_evdev_code {
             std::sync::Arc::from([c])
@@ -193,7 +199,7 @@ impl X11Listener {
     fn try_start_evtest(
         &mut self,
         allowed_evdev: std::sync::Arc<[u16]>,
-    ) -> Result<mpsc::UnboundedReceiver<KeyEvent>> {
+    ) -> Result<mpsc::UnboundedReceiver<KeyEvent>, KeyListenerError> {
         let (tx, rx) = mpsc::unbounded_channel();
         self.running.store(true, Ordering::SeqCst);
         let running = Arc::clone(&self.running);
@@ -211,13 +217,15 @@ impl X11Listener {
         keycode: u8,
         tx: tokio::sync::mpsc::UnboundedSender<KeyEvent>,
         running: Arc<AtomicBool>,
-    ) -> Result<Child> {
+    ) -> Result<Child, KeyListenerError> {
         let mut child = Command::new("xinput")
             .args(["test-xi2", "--root"])
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
-            .context("failed to start xinput test-xi2")?;
+            .map_err(|e| {
+                KeyListenerError::StartFailed(format!("failed to start xinput test-xi2: {e}"))
+            })?;
 
         // Check stderr for XWayland warning
         let stderr = child.stderr.take();
@@ -232,7 +240,10 @@ impl X11Listener {
             });
         }
 
-        let stdout = child.stdout.take().context("no stdout from xinput")?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| KeyListenerError::StartFailed("no stdout from xinput".to_string()))?;
 
         std::thread::spawn(move || {
             let reader = std::io::BufReader::new(stdout);
@@ -294,12 +305,12 @@ impl X11Listener {
         allowed_evdev: std::sync::Arc<[u16]>,
         tx: tokio::sync::mpsc::UnboundedSender<KeyEvent>,
         running: Arc<AtomicBool>,
-    ) -> Result<()> {
+    ) -> Result<(), KeyListenerError> {
         // Find keyboard devices
         let keyboard_devices = list_keyboard_devices()?;
         if keyboard_devices.is_empty() {
-            return Err(anyhow::anyhow!(
-                "no keyboard devices found for evtest fallback"
+            return Err(KeyListenerError::StartFailed(
+                "no keyboard devices found for evtest fallback".to_string(),
             ));
         }
 
@@ -398,7 +409,7 @@ impl X11Listener {
         }
     }
 
-    fn resolve_keycode(&self) -> Result<u8> {
+    fn resolve_keycode(&self) -> Result<u8, KeyListenerError> {
         let keycode_map = XMODMAP_CACHE.get_or_init(|| {
             let output = match Command::new("xmodmap").arg("-pke").output() {
                 Ok(o) => o,
@@ -439,8 +450,9 @@ impl X11Listener {
         });
 
         if keycode_map.is_empty() {
-            return Err(anyhow::anyhow!(
+            return Err(KeyListenerError::ResolveFailed(
                 "xmodmap failed to produce keycode mappings — is xmodmap installed and DISPLAY set?"
+                    .to_string(),
             ));
         }
 
@@ -452,10 +464,10 @@ impl X11Listener {
                 let name = self.key_name.as_str();
                 // 单元素切片：自定义 keysym 名
                 return keycode_map.get(name).copied().ok_or_else(|| {
-                    anyhow::anyhow!(
+                    KeyListenerError::ResolveFailed(format!(
                         "keycode for '{}' not found in xmodmap output",
                         self.key_name
-                    )
+                    ))
                 });
             }
         };
@@ -471,11 +483,10 @@ impl X11Listener {
             }
         }
 
-        Err(anyhow::anyhow!(
+        Err(KeyListenerError::ResolveFailed(format!(
             "keycode for trigger '{}' not found in xmodmap (tried: {:?})",
-            self.key_name,
-            candidates
-        ))
+            self.key_name, candidates
+        )))
     }
 }
 
@@ -486,7 +497,9 @@ impl Drop for X11Listener {
 }
 
 impl KeyListener for X11Listener {
-    fn start(&mut self) -> Result<(mpsc::UnboundedReceiver<KeyEvent>, &'static str)> {
+    fn start(
+        &mut self,
+    ) -> Result<(mpsc::UnboundedReceiver<KeyEvent>, &'static str), KeyListenerError> {
         self.start()
     }
 }

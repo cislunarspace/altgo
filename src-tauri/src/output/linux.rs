@@ -6,6 +6,8 @@
 use std::process::Command;
 use std::sync::Arc;
 
+use crate::error::OutputError;
+
 /// Linux 上可用的剪切板管理工具。
 #[derive(Debug, Clone, Copy)]
 pub enum ClipboardTool {
@@ -59,7 +61,7 @@ pub fn detect_clipboard_tool() -> Option<ClipboardTool> {
 }
 
 /// 使用指定的剪切板工具写入文本。
-pub fn write_clipboard_with_tool(tool: ClipboardTool, text: &str) -> anyhow::Result<()> {
+pub fn write_clipboard_with_tool(tool: ClipboardTool, text: &str) -> Result<(), OutputError> {
     let args: Vec<&str> = match tool {
         ClipboardTool::XClip => vec!["-selection", "clipboard"],
         ClipboardTool::XSel => vec!["--clipboard", "--input"],
@@ -82,12 +84,15 @@ pub fn write_clipboard_with_tool(tool: ClipboardTool, text: &str) -> anyhow::Res
 
     match output {
         Ok(out) if out.status.success() => Ok(()),
-        Ok(out) => Err(anyhow::anyhow!(
+        Ok(out) => Err(OutputError::ClipboardFailed(format!(
             "clipboard command {} failed: {}",
             tool,
             String::from_utf8_lossy(&out.stderr)
-        )),
-        Err(e) => Err(anyhow::anyhow!("failed to run {}: {}", tool, e)),
+        ))),
+        Err(e) => Err(OutputError::ClipboardFailed(format!(
+            "failed to run {}: {}",
+            tool, e
+        ))),
     }
 }
 
@@ -110,10 +115,8 @@ impl LinuxOutput {
 }
 
 impl super::Output for LinuxOutput {
-    fn write_clipboard(&self, text: &str) -> anyhow::Result<()> {
-        let tool = self
-            .tool
-            .ok_or_else(|| anyhow::anyhow!("no clipboard tool found"))?;
+    fn write_clipboard(&self, text: &str) -> Result<(), OutputError> {
+        let tool = self.tool.ok_or(OutputError::NoClipboardTool)?;
         write_clipboard_with_tool(tool, text)
     }
 

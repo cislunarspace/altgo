@@ -6,7 +6,6 @@
 use crate::audio::{self, Buffer};
 use crate::error::RecorderError;
 use crate::recorder::Recorder;
-use anyhow::Result;
 use std::io::Read;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -98,10 +97,7 @@ impl PulseRecorder {
             let _ = child.wait();
         });
 
-        *self
-            .done
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner()) = Some(handle);
+        *self.done.lock().expect("done mutex poisoned") = Some(handle);
         Ok(())
     }
 
@@ -110,12 +106,7 @@ impl PulseRecorder {
         self.recording.store(false, Ordering::SeqCst);
 
         // Wait for the recording thread to finish.
-        if let Some(handle) = self
-            .done
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner())
-            .take()
-        {
+        if let Some(handle) = self.done.lock().expect("done mutex poisoned").take() {
             if let Err(e) = handle.join() {
                 let msg = if let Some(s) = e.downcast_ref::<&str>() {
                     s.to_string()

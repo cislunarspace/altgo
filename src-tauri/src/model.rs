@@ -3,7 +3,7 @@
 //! 提供 whisper.cpp GGML 模型的注册、下载、切换功能。
 //! 模型存储在 altgo 配置目录的 `models/` 子目录下。
 
-use anyhow::{Context, Result};
+use crate::error::ModelError;
 use futures_util::StreamExt;
 use reqwest::Client;
 use serde::Serialize;
@@ -167,11 +167,11 @@ pub fn list_all_with_status() -> Vec<ModelEntry> {
 }
 
 /// 校验模型名是否在已知模型列表中。
-pub fn validate_name(name: &str) -> Result<()> {
+pub fn validate_name(name: &str) -> Result<(), ModelError> {
     if models_info().iter().any(|m| m.name == name) {
         Ok(())
     } else {
-        Err(anyhow::anyhow!("unknown model: {}", name))
+        Err(ModelError::UnknownModel(name.to_string()))
     }
 }
 
@@ -179,13 +179,12 @@ pub fn validate_name(name: &str) -> Result<()> {
 ///
 /// 从 `models_info()` 查找模型、`models_dir()` 拼路径、`fs::remove_file` 删除。
 /// 若文件不存在则静默返回 Ok。
-pub fn delete(name: &str) -> Result<()> {
+pub fn delete(name: &str) -> Result<(), ModelError> {
     validate_name(name)?;
     let info = MODELS.iter().find(|m| m.name == name).unwrap();
     let path = models_dir().join(info.filename);
     if path.exists() {
-        std::fs::remove_file(&path)
-            .with_context(|| format!("删除模型文件失败: {}", path.display()))?;
+        std::fs::remove_file(&path)?;
     }
     Ok(())
 }
@@ -220,18 +219,20 @@ pub fn resolve_model_path(config_model: &str) -> Option<PathBuf> {
 /// 下载指定模型，通过回调报告进度。
 ///
 /// `on_progress` 参数为 `(downloaded_bytes, total_bytes)` 回调。
-pub async fn download_with_progress<F>(name: &str, mut on_progress: F) -> Result<PathBuf>
+pub async fn download_with_progress<F>(
+    name: &str,
+    mut on_progress: F,
+) -> Result<PathBuf, ModelError>
 where
     F: FnMut(u64, u64),
 {
     let info = MODELS
         .iter()
         .find(|m| m.name == name)
-        .ok_or_else(|| anyhow::anyhow!("未知模型: {}", name))?;
+        .ok_or_else(|| ModelError::UnknownModel(name.to_string()))?;
 
     let dir = models_dir();
-    std::fs::create_dir_all(&dir)
-        .with_context(|| format!("创建模型目录失败: {}", dir.display()))?;
+    std::fs::create_dir_all(&dir)?;
 
     let dest = dir.join(info.filename);
 
@@ -242,7 +243,7 @@ where
     let bases = model_download_bases();
     let tmp_path = dest.with_extension("bin.tmp");
 
-    let mut last_err: Option<anyhow::Error> = None;
+    let mut last_err: Option<ModelError> = None;
     for attempt in 0..DOWNLOAD_ATTEMPTS {
         if attempt > 0 {
             let _ = std::fs::remove_file(&tmp_path);
@@ -256,9 +257,12 @@ where
                     let file_size = std::fs::metadata(&tmp_path)?.len();
                     if file_size < 10 * 1024 * 1024 {
                         let _ = std::fs::remove_file(&tmp_path);
-                        anyhow::bail!("下载的模型文件过小 ({} bytes)，可能损坏", file_size);
+                        return Err(ModelError::DownloadFailed(format!(
+                            "下载的模型文件过小 ({} bytes)，可能损坏",
+                            file_size
+                        )));
                     }
-                    std::fs::rename(&tmp_path, &dest).with_context(|| "重命名临时文件失败")?;
+                    std::fs::rename(&tmp_path, &dest)?;
                     return Ok(dest);
                 }
                 Err(e) => {
@@ -270,10 +274,10 @@ where
     }
 
     Err(last_err.unwrap_or_else(|| {
-        anyhow::anyhow!(
+        ModelError::DownloadFailed(format!(
             "下载模型失败（已尝试官方与镜像）。可设置环境变量 {} 指定可访问的基址，或检查代理/防火墙。",
             ENV_MODEL_BASE_URL
-        )
+        ))
     }))
 }
 
@@ -282,34 +286,32 @@ async fn download_once_to_tmp<F>(
     info: &ModelInfo,
     tmp_path: &Path,
     on_progress: &mut F,
-) -> Result<()>
+) -> Result<(), ModelError>
 where
     F: FnMut(u64, u64),
 {
-    let response = model_download_client()
-        .get(url)
-        .send()
-        .await
-        .map_err(|e| anyhow::anyhow!("无法从 {} 下载（网络或 TLS 错误）: {}", url, e))?;
+    let response = model_download_client().get(url).send().await.map_err(|e| {
+        ModelError::HttpError(format!("无法从 {} 下载（网络或 TLS 错误）: {}", url, e))
+    })?;
 
     if !response.status().is_success() {
-        anyhow::bail!(
+        return Err(ModelError::DownloadFailed(format!(
             "下载失败: HTTP {} — {}\n可尝试设置环境变量 {} 使用镜像基址。",
             response.status(),
             url,
             ENV_MODEL_BASE_URL
-        );
+        )));
     }
 
     let total_size = response.content_length().unwrap_or(info.size_bytes);
     on_progress(0, total_size);
-    let mut file = std::fs::File::create(tmp_path).with_context(|| "创建临时文件失败")?;
+    let mut file = std::fs::File::create(tmp_path)?;
 
     let mut downloaded: u64 = 0;
     let mut stream = response.bytes_stream();
     while let Some(chunk) = stream.next().await {
-        let chunk = chunk.context("读取下载数据失败")?;
-        std::io::Write::write_all(&mut file, &chunk).context("写入下载数据失败")?;
+        let chunk = chunk.map_err(|e| ModelError::HttpError(format!("读取下载数据失败: {e}")))?;
+        std::io::Write::write_all(&mut file, &chunk)?;
         downloaded += chunk.len() as u64;
         on_progress(downloaded, total_size);
     }
