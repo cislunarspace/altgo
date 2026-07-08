@@ -1,6 +1,7 @@
 import { resolve } from "path";
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+/// <reference types="vitest/config" />
 
 const host = process.env.TAURI_DEV_HOST;
 
@@ -31,5 +32,11 @@ export default defineConfig({
         overlay: resolve(__dirname, "overlay.html"),
       },
     },
+  },
+  test: {
+    globals: true,
+    environment: "jsdom",
+    setupFiles: "./src/test-setup.ts",
+    css: true,
   },
 });
