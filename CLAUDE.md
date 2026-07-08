@@ -58,6 +58,7 @@ cargo clippy --manifest-path=src-tauri/Cargo.toml -- -D warnings
 |-----------|------|
 | **Tauri GUI** | `src-tauri/` + `frontend/` |
 | **核心模块** | `src-tauri/src/` |
+| **文档站点** | `docs-site/`（Docusaurus） |
 
 由键盘事件驱动的核心流水线：
 
@@ -77,7 +78,7 @@ Key Listener → State Machine → Recorder → Transcriber → Polisher → Out
 - **`error.rs`** —— 类型化管道错误（`PipelineError`），区分致命（停管道）与可恢复（降级），中英双语消息。
 - **`transcriber.rs`** —— 转写后端 trait 与实现：`WhisperApi`（HTTP multipart 上传至兼容 OpenAI 的端点）、`LocalWhisper`（一次性 `whisper-cli` 子进程）。本地默认走常驻后端（见 `whisper_server.rs`）。
 - **`whisper_server.rs`** —— 常驻 whisper-server 管理（`ResidentWhisper`）：管道启动时拉起一次，模型常驻内存，逐句走本地 HTTP；二进制缺失、端口冲突、就绪超时或运行期崩溃均自动回退到一次性 `LocalWhisper`。
-- **`polisher.rs`** —— 使用 LLM 对文本进行 4 档润色（`none`/`light`/`medium`/`heavy`），支持 OpenAI 兼容聊天 API 与 Anthropic Messages API 两种协议。指数退避重试（3 次）。
+- **`polisher.rs`** —— 使用 LLM 对文本进行 4 档润色（`none`/`light`/`medium`/`heavy`），支持 OpenAI 兼容聊天 API 与 Anthropic Messages API 两种协议。指数退避重试（3 次）。`polisher/protocol.rs` 定义 API 协议类型（`ApiProtocol`）。
 - **`prompt_store.rs`** —— 润色 prompt 模板管理：从 `resources/prompts/` 组合 `base.txt` + 各档后缀，文件变动时热重载（去抖 500ms）。
 - **`voice_pipeline/`** —— 核心处理流水线（录音→转写→润色）的单一深模块。`sink.rs` 定义 `PipelineSink` 接缝（状态变更、错误、结果、进度、按键后端通知）与 `PipelineOutput` / `ProcessedResult`；`dispatcher.rs` 是 sink 注入的业务 seam（剪贴板写入 + 历史追加，归到 `TranscriptionDispatch` trait），生产实现 `TranscriptionDispatcherImpl` 转调 `process_transcription_result`；`handlers.rs` 留有 `dispatch_history_polish` 编排 `store.get + formatter.polish + store.polish_entry`。
 - **`pipeline_controller.rs`** —— 流水线生命周期与状态跟踪（`PipelineStatus`：Idle/Recording/Processing 等），对应 `start`/`stop`/`get_status`。
@@ -85,11 +86,11 @@ Key Listener → State Machine → Recorder → Transcriber → Polisher → Out
 - **`model.rs`** —— whisper.cpp GGML 模型管理（下载、切换、存储在 `~/.config/altgo/models/`）。
 - **`tray.rs`** —— 系统托盘配置（显示窗口、退出菜单）。
 - **`resource.rs`** —— 资源文件管理。
-- **`key_capture.rs`** —— 设置中的一次性激活键捕获（Linux evdev；Windows WH_KEYBOARD_LL）。
+- **`key_capture/`** —— 设置中的一次性激活键捕获（Linux evdev；Windows WH_KEYBOARD_LL）。`mod.rs` 包含共享类型与 Linux 实现，`windows.rs` 为 Windows 实现。
 - **`key_listener/`** —— 按键检测（Linux：`xinput test-xi2` / Windows：通过 `SetWindowsHookExW` 在独立消息泵线程上挂接 `WH_KEYBOARD_LL`）。
 - **`recorder/`** —— 音频捕获（Linux：`parecord` PulseAudio / Windows：`cpal` WASAPI；输出 16kHz 单声道 WAV；如果设备采样率不同，则通过 rubato 重采样）。
 - **`output/`** —— 剪贴板 + 通知（Linux：`xclip`/`xsel`/`wl-copy` + `notify-send` / Windows：`arboard` 剪贴板 + 空操作通知；Windows 由浮窗负责显示）。
-- **悬浮窗（`overlay_window.rs` / `overlay_manager.rs` / `tauri_overlay_window.rs`）** —— 状态意图与窗口操作分离：`overlay_window.rs` 定义 `OverlayWindow` seam，`overlay_manager.rs` 按状态意图算尺寸/位置，`tauri_overlay_window.rs` 是 Tauri 适配器（用 `GetMonitorInfoW` 取显示器几何）。
+- **悬浮窗（`overlay/`）** —— 状态意图与窗口操作分离：`overlay/seam.rs` 定义 `OverlayWindow` seam，`overlay/manager.rs` 按状态意图算尺寸/位置，`overlay/tauri.rs` 是 Tauri 适配器（用 `GetMonitorInfoW` 取显示器几何）。
 
 ### 前端结构（`frontend/src/`）
 
@@ -101,7 +102,6 @@ Key Listener → State Machine → Recorder → Transcriber → Polisher → Out
 ├── overlay.tsx             # 悬浮窗口组件
 ├── overlay.css             # 浮窗样式（引入 overlay-base、motion）
 ├── components/
-│   ├── ui/                 # 基础 UI 组件（Input、Button、Card）
 │   ├── Layout.tsx          # 布局组件
 │   └── StatusIndicator.tsx # 状态指示器
 ├── pages/
@@ -109,7 +109,9 @@ Key Listener → State Machine → Recorder → Transcriber → Polisher → Out
 │   ├── History.tsx         # 转写历史（选择 / 删除 / 清空 / 复制 / 润色单行）
 │   └── Settings.tsx        # 设置页
 ├── hooks/
-│   └── useTauri.ts         # Tauri 集成 hook
+│   ├── useTauri.ts         # Tauri 集成 hook
+│   ├── useConfigForm.ts    # 配置表单 hook
+│   └── useModelManager.ts  # 模型管理 hook
 ├── i18n/                   # 国际化
 └── styles/
     ├── global.css

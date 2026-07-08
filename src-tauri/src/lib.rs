@@ -21,7 +21,6 @@ pub mod recorder;
 pub mod resource;
 pub mod state_machine;
 pub mod tauri_sink;
-pub mod thread_config;
 pub mod transcriber;
 pub mod tray;
 pub mod voice_pipeline;

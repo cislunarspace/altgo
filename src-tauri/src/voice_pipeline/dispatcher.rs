@@ -12,19 +12,19 @@ use crate::history::HistoryStore;
 use crate::output::Output;
 
 use super::handlers::process_transcription_result;
-use super::sink::{PipelineOutput, ProcessedResult};
+use super::sink::{DispatchOutcome, TranscriptionResult};
 
 /// 转写结果分发端口：把转写完成事件转为剪贴板写入 + 历史追加，
-/// 返回一个描述本次分发结果的 `ProcessedResult`（若无操作则为 `None`）。
+/// 返回一个描述本次分发结果的 `DispatchOutcome`（若无操作则为 `None`）。
 ///
 /// `TauriPipelineSink` 只持有这个 trait object，不再直接接触
 /// `Output` 与 `HistoryStore`。测试可注入 fake，跳过真实业务。
 pub trait TranscriptionDispatch: Send + Sync + 'static {
     fn dispatch<'a>(
         &'a self,
-        output: &'a PipelineOutput,
+        output: &'a TranscriptionResult,
         prefer_polished: bool,
-    ) -> Pin<Box<dyn Future<Output = Option<ProcessedResult>> + Send + 'a>>;
+    ) -> Pin<Box<dyn Future<Output = Option<DispatchOutcome>> + Send + 'a>>;
 }
 
 /// 生产实现：把转写结果转发给 `process_transcription_result`。
@@ -36,9 +36,9 @@ pub struct TranscriptionDispatcherImpl {
 impl TranscriptionDispatch for TranscriptionDispatcherImpl {
     fn dispatch<'a>(
         &'a self,
-        output: &'a PipelineOutput,
+        output: &'a TranscriptionResult,
         prefer_polished: bool,
-    ) -> Pin<Box<dyn Future<Output = Option<ProcessedResult>> + Send + 'a>> {
+    ) -> Pin<Box<dyn Future<Output = Option<DispatchOutcome>> + Send + 'a>> {
         let output_handle = Arc::clone(&self.output);
         let store = self.history_store.clone();
         Box::pin(async move {

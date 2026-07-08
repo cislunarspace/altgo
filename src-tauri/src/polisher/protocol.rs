@@ -1,6 +1,6 @@
 //! Polisher API 协议类型定义。
 
-use anyhow::anyhow;
+use crate::error::PolisherError;
 use serde::{Deserialize, Serialize};
 
 /// API 协议类型。
@@ -13,16 +13,15 @@ pub enum ApiProtocol {
 }
 
 impl std::str::FromStr for ApiProtocol {
-    type Err = anyhow::Error;
+    type Err = PolisherError;
 
-    fn from_str(s: &str) -> anyhow::Result<Self> {
+    fn from_str(s: &str) -> Result<Self, PolisherError> {
         match s.to_lowercase().as_str() {
             "openai" => Ok(ApiProtocol::OpenAi),
             "anthropic" => Ok(ApiProtocol::Anthropic),
-            other => Err(anyhow!(
-                "unknown polisher protocol: '{}'. Use 'openai' or 'anthropic'",
-                other
-            )),
+            _other => Err(PolisherError::UnknownProtocol {
+                protocol: s.to_string(),
+            }),
         }
     }
 }

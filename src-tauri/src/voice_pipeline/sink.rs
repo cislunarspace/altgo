@@ -2,9 +2,9 @@
 
 use crate::pipeline_controller::PipelineStatus;
 
-/// 管道处理结果。
+/// 转写结果。
 #[derive(Debug, Clone, serde::Serialize)]
-pub struct PipelineOutput {
+pub struct TranscriptionResult {
     /// 处理后的文本（润色成功时为润色文本，否则为原始转写文本）
     pub text: String,
     /// 原始转写文本（润色前）
@@ -25,7 +25,7 @@ pub trait PipelineSink: Send + Sync + 'static {
     fn on_error(&self, message: &str);
 
     /// 转写+润色完成，输出结果。
-    fn on_transcription_result(&self, output: &PipelineOutput);
+    fn on_transcription_result(&self, output: &TranscriptionResult);
 
     /// 转写/润色进度更新。`phase` 为 `"transcribe"` / `"polish"` / `"done"`，
     /// `fraction` 为 0–1 或 `None`（不确定进度）。
@@ -35,9 +35,9 @@ pub trait PipelineSink: Send + Sync + 'static {
     fn on_key_listener_backend(&self, backend: &str);
 }
 
-/// Result of processing a transcription event.
+/// 派发结果。
 #[derive(Debug, Clone)]
-pub struct ProcessedResult {
+pub struct DispatchOutcome {
     /// Text that was written to clipboard and should be shown.
     pub text: String,
     /// Whether history was appended successfully.

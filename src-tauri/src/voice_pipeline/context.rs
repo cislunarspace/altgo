@@ -179,7 +179,7 @@ mod tests {
         impl super::super::sink::PipelineSink for MockSink {
             fn on_status_change(&self, _: crate::pipeline_controller::PipelineStatus) {}
             fn on_error(&self, _: &str) {}
-            fn on_transcription_result(&self, _: &super::super::sink::PipelineOutput) {}
+            fn on_transcription_result(&self, _: &super::super::sink::TranscriptionResult) {}
             fn on_progress(&self, _: &str, _: Option<f32>) {}
             fn on_key_listener_backend(&self, _: &str) {}
         }

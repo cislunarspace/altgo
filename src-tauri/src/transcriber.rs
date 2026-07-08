@@ -9,8 +9,8 @@
 //! 所有实现都返回 `TranscribeResult`（文本 + 语言信息），进度通过闭包回调上报。
 
 use crate::error::TranscriberError;
+use crate::resource::effective_threads;
 use crate::resource::expand_tilde;
-use crate::thread_config::effective_threads;
 use regex::Regex;
 use reqwest::Client;
 use serde::Deserialize;

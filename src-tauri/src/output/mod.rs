@@ -20,12 +20,14 @@ pub type PlatformOutput = windows::WindowsOutput;
 
 use std::sync::Arc;
 
+use crate::error::OutputError;
+
 /// 剪切板写入的抽象接口。
 ///
 /// 由 `voice_pipeline::process_transcription_result` 持有，使输出行为可在测试中替换。
 pub trait Output: Send + Sync {
     /// 将文本写入系统剪切板。
-    fn write_clipboard(&self, text: &str) -> anyhow::Result<()>;
+    fn write_clipboard(&self, text: &str) -> Result<(), OutputError>;
 
     /// 支持 clone 为 trait object（用于 `PipelineEventHandler::Clone`）。
     fn clone_box(&self) -> Arc<dyn Output>;

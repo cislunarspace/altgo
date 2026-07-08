@@ -19,7 +19,6 @@ import {
   Keyboard,
 } from "lucide-react";
 import { useTheme, type ThemePref } from "../ThemeContext";
-import "../styles/components.css";
 
 const KEY_PRESETS: { value: string; labelKey: string }[] = [
   { value: "Alt_R", labelKey: "settings.key_preset_right_alt" },

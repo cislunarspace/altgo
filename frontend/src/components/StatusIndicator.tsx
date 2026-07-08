@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from '../i18n';
-import '../styles/components.css';
 
 type Status = 'idle' | 'recording' | 'processing' | 'done';
 

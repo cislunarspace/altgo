@@ -3,7 +3,6 @@ import { NavLink } from "react-router-dom";
 import { Mic, Settings, History, Minus, Maximize2, Minimize2, X } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useState, useEffect } from "react";
-import "../styles/components.css";
 
 interface LayoutProps {
   children: React.ReactNode;

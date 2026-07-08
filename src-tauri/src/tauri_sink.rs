@@ -14,7 +14,7 @@ use crate::{
     config,
     overlay::seam::{OverlaySink, OverlayState},
     pipeline_controller::PipelineStatus,
-    voice_pipeline::{PipelineOutput, PipelineSink, TranscriptionDispatch},
+    voice_pipeline::{PipelineSink, TranscriptionDispatch, TranscriptionResult},
 };
 
 fn emit_pipeline_status(
@@ -78,7 +78,7 @@ impl PipelineSink for TauriPipelineSink {
         let _ = self.app.emit("pipeline-error", message);
     }
 
-    fn on_transcription_result(&self, output: &PipelineOutput) {
+    fn on_transcription_result(&self, output: &TranscriptionResult) {
         if output.raw_text.is_empty() {
             emit_pipeline_status(&self.app, &self.pipeline_status, PipelineStatus::Idle);
             return;
@@ -130,7 +130,7 @@ impl PipelineSink for TauriPipelineSink {
 mod tests {
     use super::*;
     use crate::overlay::seam::OverlayPhase;
-    use crate::voice_pipeline::{ProcessedResult, TranscriptionDispatch};
+    use crate::voice_pipeline::{DispatchOutcome, TranscriptionDispatch};
     use std::future::{ready, Future};
     use std::pin::Pin;
     use std::sync::Mutex;
@@ -147,9 +147,9 @@ mod tests {
     impl TranscriptionDispatch for MockDispatch {
         fn dispatch<'a>(
             &'a self,
-            _output: &'a PipelineOutput,
+            _output: &'a TranscriptionResult,
             _prefer_polished: bool,
-        ) -> Pin<Box<dyn Future<Output = Option<ProcessedResult>> + Send + 'a>> {
+        ) -> Pin<Box<dyn Future<Output = Option<DispatchOutcome>> + Send + 'a>> {
             Box::pin(ready(None))
         }
     }
@@ -298,7 +298,7 @@ mod tests {
         // Set status to something non-idle first so we can observe the reset.
         *fx.status.write().unwrap() = PipelineStatus::Recording;
 
-        fx.sink.on_transcription_result(&PipelineOutput {
+        fx.sink.on_transcription_result(&TranscriptionResult {
             text: String::new(),
             raw_text: String::new(),
             polish_failed: false,
@@ -312,7 +312,7 @@ mod tests {
     fn on_transcription_result_non_empty_spawns_async() {
         let fx = make_fixture(false);
 
-        fx.sink.on_transcription_result(&PipelineOutput {
+        fx.sink.on_transcription_result(&TranscriptionResult {
             text: "polished".into(),
             raw_text: "raw text".into(),
             polish_failed: false,

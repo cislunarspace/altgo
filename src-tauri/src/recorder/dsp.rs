@@ -6,6 +6,7 @@
 
 #![cfg_attr(not(target_os = "windows"), allow(dead_code))]
 
+use crate::error::RecorderError;
 use rubato::{
     Resampler, SincFixedIn, SincInterpolationParameters, SincInterpolationType, WindowFunction,
 };
@@ -58,12 +59,18 @@ pub(crate) fn downmix_to_mono(samples: &[i16], channels: usize) -> Vec<i16> {
 ///
 /// 使用 rubato `SincFixedIn` 做一次性整段重采样。同采样率直接返回副本，
 /// 空输入返回空。`stop_recording` 在设备采样率 != 16kHz 时调用。
-pub(crate) fn resample(samples: &[i16], from_rate: u32, to_rate: u32) -> anyhow::Result<Vec<i16>> {
+pub(crate) fn resample(
+    samples: &[i16],
+    from_rate: u32,
+    to_rate: u32,
+) -> Result<Vec<i16>, RecorderError> {
     if samples.is_empty() {
         return Ok(Vec::new());
     }
     if from_rate == 0 || to_rate == 0 {
-        anyhow::bail!("sample rates must be positive");
+        return Err(RecorderError::CaptureFailed(
+            "sample rates must be positive".to_string(),
+        ));
     }
     if from_rate == to_rate {
         return Ok(samples.to_vec());
@@ -79,7 +86,7 @@ pub(crate) fn resample(samples: &[i16], from_rate: u32, to_rate: u32) -> anyhow:
         window: WindowFunction::BlackmanHarris2,
     };
     let mut resampler = SincFixedIn::<f32>::new(ratio, 2.0, params, chunk_size, 1)
-        .map_err(|e| anyhow::anyhow!("failed to create resampler: {e}"))?;
+        .map_err(|e| RecorderError::CaptureFailed(format!("failed to create resampler: {e}")))?;
 
     // i16 -> f32（单声道，一个声道向量）。
     let frames: Vec<f32> = samples.iter().map(|&s| s as f32 / 32768.0).collect();
@@ -96,7 +103,7 @@ pub(crate) fn resample(samples: &[i16], from_rate: u32, to_rate: u32) -> anyhow:
             let input_buf = vec![frames[pos..].to_vec()];
             let res = resampler
                 .process_partial(Some(&input_buf), None)
-                .map_err(|e| anyhow::anyhow!("resample failed: {e}"))?;
+                .map_err(|e| RecorderError::CaptureFailed(format!("resample failed: {e}")))?;
             if let Some(ch) = res.first() {
                 out.extend_from_slice(ch);
             }
@@ -105,7 +112,7 @@ pub(crate) fn resample(samples: &[i16], from_rate: u32, to_rate: u32) -> anyhow:
             let input_buf = vec![frames[pos..pos + needed].to_vec()];
             let res = resampler
                 .process(&input_buf, None)
-                .map_err(|e| anyhow::anyhow!("resample failed: {e}"))?;
+                .map_err(|e| RecorderError::CaptureFailed(format!("resample failed: {e}")))?;
             if let Some(ch) = res.first() {
                 out.extend_from_slice(ch);
             }
@@ -117,7 +124,7 @@ pub(crate) fn resample(samples: &[i16], from_rate: u32, to_rate: u32) -> anyhow:
     while out.len() < delay + new_length {
         let res = resampler
             .process_partial::<Vec<f32>>(None, None)
-            .map_err(|e| anyhow::anyhow!("resample drain failed: {e}"))?;
+            .map_err(|e| RecorderError::CaptureFailed(format!("resample drain failed: {e}")))?;
         match res.first() {
             Some(ch) if !ch.is_empty() => out.extend_from_slice(ch),
             _ => break,

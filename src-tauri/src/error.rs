@@ -1,6 +1,6 @@
 //! Structured error types for the altgo pipeline.
 //!
-//! Provides bilingual error messages (Chinese/English) and distinguishes
+//! Provides user-facing error messages (Chinese) and distinguishes
 //! between fatal errors (stop pipeline) and recoverable errors (degrade gracefully).
 
 use std::path::PathBuf;
@@ -37,11 +37,11 @@ impl PipelineError {
         Self::Fatal(FatalError::PolisherInitFailed(e))
     }
 
-    /// Returns a user-facing error message in the specified language.
-    pub fn message(&self, lang: &str) -> String {
+    /// Returns a user-facing error message in Chinese.
+    pub fn message(&self) -> String {
         match self {
-            Self::Fatal(e) => e.message(lang),
-            Self::Recoverable(e) => e.message(lang),
+            Self::Fatal(e) => e.message(),
+            Self::Recoverable(e) => e.message(),
         }
     }
 }
@@ -72,44 +72,26 @@ pub enum FatalError {
 }
 
 impl FatalError {
-    pub fn message(&self, lang: &str) -> String {
+    pub fn message(&self) -> String {
         match self {
             Self::ModelNotFound { model, searched } => {
-                if lang == "zh" {
-                    format!(
-                        "本地模型未找到（配置值: {:?}）。\n搜索路径: {:?}\n请在 GUI 设置中下载模型，或将 [transcriber] model 设为已下载模型的名称（如 \"base\"）或完整文件路径。",
-                        model, searched
-                    )
-                } else {
-                    format!(
-                        "Model '{}' not found.\nSearched: {:?}\nDownload it in Settings or set [transcriber] model to an existing model name (e.g., \"base\") or full path.",
-                        model, searched
-                    )
-                }
+                format!(
+                    "本地模型未找到（配置值: {:?}）。\n搜索路径: {:?}\n请在 GUI 设置中下载模型，或将 [transcriber] model 设为已下载模型的名称（如 \"base\"）或完整文件路径。",
+                    model, searched
+                )
             }
             Self::ApiAuthFailed { service, status } => {
-                if lang == "zh" {
-                    format!(
-                        "{} API 认证失败（HTTP {}）。请检查 API 密钥配置。",
-                        service, status
-                    )
-                } else {
-                    format!(
-                        "{} API authentication failed (HTTP {}). Check your API key configuration.",
-                        service, status
-                    )
-                }
+                format!(
+                    "{} API 认证失败（HTTP {}）。请检查 API 密钥配置。",
+                    service, status
+                )
             }
             Self::KeyListenerFailed { backend, reason } => {
-                if lang == "zh" {
-                    format!("按键监听器启动失败（{}）: {}", backend, reason)
-                } else {
-                    format!("Key listener failed to start ({}): {}", backend, reason)
-                }
+                format!("按键监听器启动失败（{}）: {}", backend, reason)
             }
-            Self::TranscriberInitFailed(e) => e.message(lang),
-            Self::PolisherInitFailed(e) => e.message(lang),
-            Self::RecorderInitFailed(e) => e.message(lang),
+            Self::TranscriberInitFailed(e) => e.message(),
+            Self::PolisherInitFailed(e) => e.message(),
+            Self::RecorderInitFailed(e) => e.message(),
         }
     }
 }
@@ -131,18 +113,12 @@ pub enum RecoverableError {
 }
 
 impl RecoverableError {
-    pub fn message(&self, lang: &str) -> String {
+    pub fn message(&self) -> String {
         match self {
-            Self::TranscriptionFailed(e) => e.message(lang),
-            Self::PolishingFailed(e) => e.message(lang),
-            Self::RecordingFailed(e) => e.message(lang),
-            Self::EmptyTranscription => {
-                if lang == "zh" {
-                    "转写结果为空，请重试。".to_string()
-                } else {
-                    "Transcription returned empty result. Please try again.".to_string()
-                }
-            }
+            Self::TranscriptionFailed(e) => e.message(),
+            Self::PolishingFailed(e) => e.message(),
+            Self::RecordingFailed(e) => e.message(),
+            Self::EmptyTranscription => "转写结果为空，请重试。".to_string(),
         }
     }
 }
@@ -173,57 +149,21 @@ pub enum TranscriberError {
 }
 
 impl TranscriberError {
-    pub fn message(&self, lang: &str) -> String {
+    pub fn message(&self) -> String {
         match self {
-            Self::EmptyAudio => {
-                if lang == "zh" {
-                    "音频数据为空，请重新录音。".to_string()
-                } else {
-                    "Empty audio data. Please record again.".to_string()
-                }
-            }
-            Self::MissingApiKey => {
-                if lang == "zh" {
-                    "转写 API 密钥未配置。请在设置中添加 API 密钥。".to_string()
-                } else {
-                    "Transcriber API key not configured. Add it in Settings.".to_string()
-                }
-            }
+            Self::EmptyAudio => "音频数据为空，请重新录音。".to_string(),
+            Self::MissingApiKey => "转写 API 密钥未配置。请在设置中添加 API 密钥。".to_string(),
             Self::ApiError { status, body } => {
-                if lang == "zh" {
-                    format!("Whisper API 错误（HTTP {}）: {}", status, body)
-                } else {
-                    format!("Whisper API error (HTTP {}): {}", status, body)
-                }
+                format!("Whisper API 错误（HTTP {}）: {}", status, body)
             }
             Self::WhisperCliNotFound { path } => {
-                if lang == "zh" {
-                    format!("whisper-cli 未找到: {}\n请在配置中设置正确的 whisper_path 或将 whisper-cli 添加到 PATH。", path)
-                } else {
-                    format!("whisper-cli not found: {}\nSet whisper_path in config or add whisper-cli to PATH.", path)
-                }
+                format!("whisper-cli 未找到: {}\n请在配置中设置正确的 whisper_path 或将 whisper-cli 添加到 PATH。", path)
             }
             Self::WhisperCliFailed { code, output } => {
-                if lang == "zh" {
-                    format!("whisper-cli 执行失败（退出码 {}）:\n{}", code, output)
-                } else {
-                    format!("whisper-cli failed (exit code {}):\n{}", code, output)
-                }
+                format!("whisper-cli 执行失败（退出码 {}）:\n{}", code, output)
             }
-            Self::HttpError(msg) => {
-                if lang == "zh" {
-                    format!("HTTP 请求失败: {}", msg)
-                } else {
-                    format!("HTTP request failed: {}", msg)
-                }
-            }
-            Self::JsonError(msg) => {
-                if lang == "zh" {
-                    format!("JSON 解析失败: {}", msg)
-                } else {
-                    format!("JSON parse error: {}", msg)
-                }
-            }
+            Self::HttpError(msg) => format!("HTTP 请求失败: {}", msg),
+            Self::JsonError(msg) => format!("JSON 解析失败: {}", msg),
         }
     }
 }
@@ -257,70 +197,23 @@ pub enum PolisherError {
 }
 
 impl PolisherError {
-    pub fn message(&self, lang: &str) -> String {
+    pub fn message(&self) -> String {
         match self {
             Self::UnknownProtocol { protocol } => {
-                if lang == "zh" {
-                    format!(
-                        "未知的润色协议: '{}'。请使用 'openai' 或 'anthropic'。",
-                        protocol
-                    )
-                } else {
-                    format!(
-                        "Unknown polisher protocol: '{}'. Use 'openai' or 'anthropic'.",
-                        protocol
-                    )
-                }
+                format!(
+                    "未知的润色协议: '{}'。请使用 'openai' 或 'anthropic'。",
+                    protocol
+                )
             }
-            Self::MissingApiKey => {
-                if lang == "zh" {
-                    "润色 API 密钥未配置。请在设置中添加 API 密钥。".to_string()
-                } else {
-                    "Polisher API key not configured. Add it in Settings.".to_string()
-                }
-            }
-            Self::RateLimited => {
-                if lang == "zh" {
-                    "API 请求频率受限，请稍后重试。".to_string()
-                } else {
-                    "API rate limited. Please try again later.".to_string()
-                }
-            }
+            Self::MissingApiKey => "润色 API 密钥未配置。请在设置中添加 API 密钥。".to_string(),
+            Self::RateLimited => "API 请求频率受限，请稍后重试。".to_string(),
             Self::ApiError { status, body } => {
-                if lang == "zh" {
-                    format!("LLM API 错误（HTTP {}）: {}", status, body)
-                } else {
-                    format!("LLM API error (HTTP {}): {}", status, body)
-                }
+                format!("LLM API 错误（HTTP {}）: {}", status, body)
             }
-            Self::EmptyResponse => {
-                if lang == "zh" {
-                    "LLM 返回空响应。".to_string()
-                } else {
-                    "LLM returned empty response.".to_string()
-                }
-            }
-            Self::HttpError(msg) => {
-                if lang == "zh" {
-                    format!("HTTP 请求失败: {}", msg)
-                } else {
-                    format!("HTTP request failed: {}", msg)
-                }
-            }
-            Self::JsonError(msg) => {
-                if lang == "zh" {
-                    format!("JSON 解析失败: {}", msg)
-                } else {
-                    format!("JSON parse error: {}", msg)
-                }
-            }
-            Self::RetriesExhausted => {
-                if lang == "zh" {
-                    "所有重试尝试均失败。".to_string()
-                } else {
-                    "All retry attempts exhausted.".to_string()
-                }
-            }
+            Self::EmptyResponse => "LLM 返回空响应。".to_string(),
+            Self::HttpError(msg) => format!("HTTP 请求失败: {}", msg),
+            Self::JsonError(msg) => format!("JSON 解析失败: {}", msg),
+            Self::RetriesExhausted => "所有重试尝试均失败。".to_string(),
         }
     }
 }
@@ -342,36 +235,12 @@ pub enum RecorderError {
 }
 
 impl RecorderError {
-    pub fn message(&self, lang: &str) -> String {
+    pub fn message(&self) -> String {
         match self {
-            Self::StartFailed(msg) => {
-                if lang == "zh" {
-                    format!("启动录音失败: {}", msg)
-                } else {
-                    format!("Failed to start recording: {}", msg)
-                }
-            }
-            Self::StopFailed(msg) => {
-                if lang == "zh" {
-                    format!("停止录音失败: {}", msg)
-                } else {
-                    format!("Failed to stop recording: {}", msg)
-                }
-            }
-            Self::CaptureFailed(msg) => {
-                if lang == "zh" {
-                    format!("音频捕获错误: {}", msg)
-                } else {
-                    format!("Audio capture error: {}", msg)
-                }
-            }
-            Self::EmptyRecording => {
-                if lang == "zh" {
-                    "录音为空，请重试。".to_string()
-                } else {
-                    "Empty recording. Please try again.".to_string()
-                }
-            }
+            Self::StartFailed(msg) => format!("启动录音失败: {}", msg),
+            Self::StopFailed(msg) => format!("停止录音失败: {}", msg),
+            Self::CaptureFailed(msg) => format!("音频捕获错误: {}", msg),
+            Self::EmptyRecording => "录音为空，请重试。".to_string(),
         }
     }
 }
@@ -379,6 +248,86 @@ impl RecorderError {
 // Conversion from anyhow::Error for gradual migration was removed: modules now
 // return typed errors directly (TranscriberError, PolisherError, RecorderError)
 // and the pipeline aggregates them at the boundary.
+
+/// Output (clipboard) errors.
+#[derive(Debug, thiserror::Error)]
+pub enum OutputError {
+    #[error("no clipboard tool found")]
+    NoClipboardTool,
+
+    #[error("clipboard error: {0}")]
+    ClipboardFailed(String),
+}
+
+/// Key listener errors.
+#[derive(Debug, thiserror::Error)]
+pub enum KeyListenerError {
+    #[error("key listener tool not found: {0}")]
+    ToolNotFound(String),
+
+    #[error("unsupported activation key: '{0}'")]
+    UnsupportedKey(String),
+
+    #[error("key listener start failed: {0}")]
+    StartFailed(String),
+
+    #[error("keycode resolution failed: {0}")]
+    ResolveFailed(String),
+
+    #[error("I/O error: {0}")]
+    Io(#[from] std::io::Error),
+}
+
+/// Model management errors.
+#[derive(Debug, thiserror::Error)]
+pub enum ModelError {
+    #[error("unknown model: {0}")]
+    UnknownModel(String),
+
+    #[error("I/O error: {0}")]
+    Io(#[from] std::io::Error),
+
+    #[error("download failed: {0}")]
+    DownloadFailed(String),
+
+    #[error("HTTP error: {0}")]
+    HttpError(String),
+}
+
+/// Configuration errors.
+#[derive(Debug, thiserror::Error)]
+pub enum ConfigError {
+    #[error("I/O error: {0}")]
+    Io(#[from] std::io::Error),
+
+    #[error("TOML parse error: {0}")]
+    ParseError(String),
+
+    #[error("TOML serialize error: {0}")]
+    SerializeError(String),
+
+    #[error("validation failed:\n{0}")]
+    ValidationFailed(String),
+}
+
+/// History store errors.
+#[derive(Debug, thiserror::Error)]
+pub enum HistoryError {
+    #[error("I/O error: {0}")]
+    Io(#[from] std::io::Error),
+
+    #[error("JSON error: {0}")]
+    JsonError(String),
+
+    #[error("history entry not found: {0}")]
+    NotFound(String),
+
+    #[error("history lock poisoned")]
+    LockPoisoned,
+
+    #[error("serialization error: {0}")]
+    SerializeError(String),
+}
 
 #[cfg(test)]
 mod tests {
@@ -402,37 +351,25 @@ mod tests {
     }
 
     #[test]
-    fn test_bilingual_messages_zh() {
+    fn test_fatal_error_messages() {
         let err = PipelineError::Fatal(FatalError::ModelNotFound {
             model: "base".to_string(),
             searched: vec![PathBuf::from("/models")],
         });
-        let msg = err.message("zh");
+        let msg = err.message();
         assert!(msg.contains("本地模型未找到"));
         assert!(msg.contains("base"));
     }
 
     #[test]
-    fn test_bilingual_messages_en() {
-        let err = PipelineError::Fatal(FatalError::ModelNotFound {
-            model: "base".to_string(),
-            searched: vec![PathBuf::from("/models")],
-        });
-        let msg = err.message("en");
-        assert!(msg.contains("Model 'base' not found"));
-    }
-
-    #[test]
     fn test_transcriber_error_messages() {
         let err = TranscriberError::MissingApiKey;
-        assert!(err.message("zh").contains("API 密钥未配置"));
-        assert!(err.message("en").contains("API key not configured"));
+        assert!(err.message().contains("API 密钥未配置"));
     }
 
     #[test]
     fn test_polisher_error_messages() {
         let err = PolisherError::RateLimited;
-        assert!(err.message("zh").contains("频率受限"));
-        assert!(err.message("en").contains("rate limited"));
+        assert!(err.message().contains("频率受限"));
     }
 }

@@ -2,7 +2,7 @@
 //!
 //! 模块划分：
 //! - `sink` — 事件接收端口（PipelineSink）与共享类型
-//!   （PipelineOutput / ProcessedResult）
+//!   （TranscriptionResult / DispatchOutcome）
 //! - `dispatcher` — 转写结果业务调度 seam（TranscriptionDispatch）
 //! - `builder` — PipelineBuilder 组件构造
 //! - `context` — PipelineContext 事件循环
@@ -31,7 +31,7 @@ pub use handlers::{
     dispatch_history_polish, handle_start_record, handle_stop_record, process_transcription_result,
     select_text,
 };
-pub use sink::{PipelineOutput, PipelineSink, ProcessedResult};
+pub use sink::{DispatchOutcome, PipelineSink, TranscriptionResult};
 
 use std::sync::Arc;
 
@@ -50,7 +50,7 @@ pub async fn run(
         Ok(ctx) => ctx,
         Err(e) => {
             tracing::error!(error = %e, "failed to build pipeline context");
-            sink.on_error(&e.message("zh"));
+            sink.on_error(&e.message());
             return;
         }
     };

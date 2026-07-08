@@ -5,12 +5,13 @@
 
 use std::sync::{Arc, Mutex};
 
+use crate::error::{KeyListenerError, OutputError};
 use crate::key_listener::KeyListener;
 use crate::output::Output;
 use crate::pipeline_controller::PipelineStatus;
 use crate::recorder::Recorder;
 
-use super::sink::{PipelineOutput, PipelineSink};
+use super::sink::{PipelineSink, TranscriptionResult};
 
 // ---------------------------------------------------------------------------
 // KeyListener fake
@@ -23,10 +24,13 @@ pub(super) struct FakeListener {
 impl KeyListener for FakeListener {
     fn start(
         &mut self,
-    ) -> anyhow::Result<(
-        tokio::sync::mpsc::UnboundedReceiver<crate::key_listener::KeyEvent>,
-        &'static str,
-    )> {
+    ) -> Result<
+        (
+            tokio::sync::mpsc::UnboundedReceiver<crate::key_listener::KeyEvent>,
+            &'static str,
+        ),
+        KeyListenerError,
+    > {
         let (_, rx) = tokio::sync::mpsc::unbounded_channel();
         Ok((rx, self.backend))
     }
@@ -74,7 +78,7 @@ impl Recorder for FakeRecorder {
 pub(super) struct MockSink {
     status_changes: Arc<Mutex<Vec<PipelineStatus>>>,
     errors: Arc<Mutex<Vec<String>>>,
-    results: Arc<Mutex<Vec<PipelineOutput>>>,
+    results: Arc<Mutex<Vec<TranscriptionResult>>>,
 }
 
 impl MockSink {
@@ -98,7 +102,7 @@ impl PipelineSink for MockSink {
     fn on_error(&self, message: &str) {
         self.errors.lock().unwrap().push(message.to_string());
     }
-    fn on_transcription_result(&self, output: &PipelineOutput) {
+    fn on_transcription_result(&self, output: &TranscriptionResult) {
         self.results.lock().unwrap().push(output.clone());
     }
     fn on_progress(&self, _: &str, _: Option<f32>) {}
@@ -126,7 +130,7 @@ impl FakeOutput {
 }
 
 impl Output for FakeOutput {
-    fn write_clipboard(&self, text: &str) -> anyhow::Result<()> {
+    fn write_clipboard(&self, text: &str) -> Result<(), OutputError> {
         self.clipboard_writes.lock().unwrap().push(text.to_string());
         Ok(())
     }

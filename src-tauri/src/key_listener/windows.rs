@@ -6,7 +6,7 @@
 
 use super::{KeyEvent, KeyListener};
 use crate::config::KeyListenerConfig;
-use anyhow::Result;
+use crate::error::KeyListenerError;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
@@ -74,15 +74,15 @@ pub struct WindowsListener {
 }
 
 impl WindowsListener {
-    pub fn new(cfg: &KeyListenerConfig) -> Result<Self> {
+    pub fn new(cfg: &KeyListenerConfig) -> Result<Self, KeyListenerError> {
         let target_vk = cfg
             .windows_vk
             .or_else(|| vk_from_key_name(&cfg.key_name))
             .ok_or_else(|| {
-                anyhow::anyhow!(
-                    "unsupported activation key '{}' on Windows; capture a key or choose from supported names",
+                KeyListenerError::UnsupportedKey(format!(
+                    "'{}' on Windows; capture a key or choose from supported names",
                     cfg.key_name
-                )
+                ))
             })?;
 
         Ok(Self {
@@ -92,7 +92,9 @@ impl WindowsListener {
         })
     }
 
-    pub fn start(&mut self) -> Result<(mpsc::UnboundedReceiver<KeyEvent>, &'static str)> {
+    pub fn start(
+        &mut self,
+    ) -> Result<(mpsc::UnboundedReceiver<KeyEvent>, &'static str), KeyListenerError> {
         let (tx, rx) = mpsc::unbounded_channel();
         let (ready_tx, ready_rx) = std::sync::mpsc::sync_channel::<Result<(), String>>(1);
         let target_vk = self.target_vk;
@@ -154,11 +156,15 @@ impl WindowsListener {
             Ok(Ok(())) => Ok((rx, BACKEND_NAME)),
             Ok(Err(message)) => {
                 self.join_hook_thread();
-                anyhow::bail!("key listener start: {message}")
+                return Err(KeyListenerError::StartFailed(format!(
+                    "key listener start: {message}"
+                )));
             }
             Err(_) => {
                 self.stop_hook_thread();
-                anyhow::bail!("key listener start: timed out waiting for WH_KEYBOARD_LL hook")
+                return Err(KeyListenerError::StartFailed(
+                    "key listener start: timed out waiting for WH_KEYBOARD_LL hook".to_string(),
+                ));
             }
         }
     }
@@ -194,7 +200,9 @@ impl Drop for WindowsListener {
 }
 
 impl KeyListener for WindowsListener {
-    fn start(&mut self) -> Result<(mpsc::UnboundedReceiver<KeyEvent>, &'static str)> {
+    fn start(
+        &mut self,
+    ) -> Result<(mpsc::UnboundedReceiver<KeyEvent>, &'static str), KeyListenerError> {
         self.start()
     }
 }

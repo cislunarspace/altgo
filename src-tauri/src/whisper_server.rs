@@ -22,8 +22,8 @@ use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 use tokio::sync::OnceCell;
 
 use crate::error::TranscriberError;
+use crate::resource::effective_threads;
 use crate::resource::expand_tilde;
-use crate::thread_config::effective_threads;
 use crate::transcriber::{LocalWhisper, TranscribeResult, Transcriber};
 
 /// 就绪探测总预算 —— large 模型从磁盘冷载入可能数十秒。

@@ -24,6 +24,8 @@ pub struct KeyEvent {
     pub pressed: bool,
 }
 
+use crate::error::KeyListenerError;
+
 /// 持续监听激活键的 trait seam。
 ///
 /// 由平台 adapter 实现（`X11Listener`、`WindowsListener`）。
@@ -32,7 +34,7 @@ pub trait KeyListener: Send {
     /// 开始监听，返回事件通道与后端标识（如 `"xinput"` / `"wh_keyboard_ll"`）。
     fn start(
         &mut self,
-    ) -> anyhow::Result<(tokio::sync::mpsc::UnboundedReceiver<KeyEvent>, &'static str)>;
+    ) -> Result<(tokio::sync::mpsc::UnboundedReceiver<KeyEvent>, &'static str), KeyListenerError>;
 }
 
 #[cfg(test)]
@@ -47,7 +49,7 @@ mod tests {
     impl KeyListener for FakeListener {
         fn start(
             &mut self,
-        ) -> anyhow::Result<(tokio::sync::mpsc::UnboundedReceiver<KeyEvent>, &'static str)>
+        ) -> Result<(tokio::sync::mpsc::UnboundedReceiver<KeyEvent>, &'static str), KeyListenerError>
         {
             let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
             let _ = tx.send(KeyEvent { pressed: true });
