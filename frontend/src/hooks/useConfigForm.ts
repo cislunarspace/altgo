@@ -20,7 +20,7 @@ export interface AppConfig {
   hasPolisherApiKey: boolean;
 }
 
-function saveRequestBody(c: AppConfig) {
+export function saveRequestBody(c: AppConfig) {
   return {
     keyName: c.keyName,
     linuxEvdevCode: c.linuxEvdevCode,
@@ -38,7 +38,7 @@ function saveRequestBody(c: AppConfig) {
   };
 }
 
-function normalizeConfig(c: AppConfig): AppConfig {
+export function normalizeConfig(c: AppConfig): AppConfig {
   return {
     ...c,
     linuxEvdevCode: c.linuxEvdevCode ?? null,
