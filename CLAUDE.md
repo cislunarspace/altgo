@@ -75,12 +75,12 @@ Key Listener → State Machine → Recorder → Transcriber → Polisher → Out
 - **`config_store.rs`** —— `Config` 的持久化封装；所有变更经 `apply_patch` 原子校验并写盘。
 - **`state_machine.rs`** —— 5 状态枚举（`Idle`、`PotentialPress`、`Recording`、`WaitSecondClick`、`ContinuousRecording`）。长按录音，双击进入连续模式。提供同步接口（`process`、`poll_timeout`、`next_deadline`），由 `voice_pipeline` 的 `tokio::select!` 主循环驱动。
 - **`audio.rs`** —— 线程安全的 PCM 缓冲区（`Mutex<Vec<u8>>`），WAV 编码/解码（44 字节头 + PCM）。
-- **`error.rs`** —— 类型化管道错误（`PipelineError`），区分致命（停管道）与可恢复（降级），中英双语消息。
+- **`error.rs`** —— 类型化错误枚举（`PipelineError`、`OutputError`、`KeyListenerError`、`ModelError`、`ConfigError`、`HistoryError`），区分致命（停管道）与可恢复（降级）。
 - **`transcriber.rs`** —— 转写后端 trait 与实现：`WhisperApi`（HTTP multipart 上传至兼容 OpenAI 的端点）、`LocalWhisper`（一次性 `whisper-cli` 子进程）。本地默认走常驻后端（见 `whisper_server.rs`）。
 - **`whisper_server.rs`** —— 常驻 whisper-server 管理（`ResidentWhisper`）：管道启动时拉起一次，模型常驻内存，逐句走本地 HTTP；二进制缺失、端口冲突、就绪超时或运行期崩溃均自动回退到一次性 `LocalWhisper`。
 - **`polisher.rs`** —— 使用 LLM 对文本进行 4 档润色（`none`/`light`/`medium`/`heavy`），支持 OpenAI 兼容聊天 API 与 Anthropic Messages API 两种协议。指数退避重试（3 次）。`polisher/protocol.rs` 定义 API 协议类型（`ApiProtocol`）。
 - **`prompt_store.rs`** —— 润色 prompt 模板管理：从 `resources/prompts/` 组合 `base.txt` + 各档后缀，文件变动时热重载（去抖 500ms）。
-- **`voice_pipeline/`** —— 核心处理流水线（录音→转写→润色）的单一深模块。`sink.rs` 定义 `PipelineSink` 接缝（状态变更、错误、结果、进度、按键后端通知）与 `PipelineOutput` / `ProcessedResult`；`dispatcher.rs` 是 sink 注入的业务 seam（剪贴板写入 + 历史追加，归到 `TranscriptionDispatch` trait），生产实现 `TranscriptionDispatcherImpl` 转调 `process_transcription_result`；`handlers.rs` 留有 `dispatch_history_polish` 编排 `store.get + formatter.polish + store.polish_entry`。
+- **`voice_pipeline/`** —— 核心处理流水线（录音→转写→润色）的单一深模块。`sink.rs` 定义 `PipelineSink` 接缝（状态变更、错误、结果、进度、按键后端通知）与 `TranscriptionResult` / `DispatchOutcome`；`dispatcher.rs` 是 sink 注入的业务 seam（剪贴板写入 + 历史追加，归到 `TranscriptionDispatch` trait），生产实现 `TranscriptionDispatcherImpl` 转调 `process_transcription_result`；`handlers.rs` 留有 `dispatch_history_polish` 编排 `store.get + formatter.polish + store.polish_entry`。
 - **`pipeline_controller.rs`** —— 流水线生命周期与状态跟踪（`PipelineStatus`：Idle/Recording/Processing 等），对应 `start`/`stop`/`get_status`。
 - **`tauri_sink.rs`** —— `PipelineSink` 的 Tauri 适配器：把管道事件转成前端事件，并把悬浮窗操作委托给 `OverlayManager`。剪贴板/历史业务由 `TranscriptionDispatch` trait 注入（构造时一次性决定），本模块不再持有 `Output` 或 `HistoryStore`。
 - **`model.rs`** —— whisper.cpp GGML 模型管理（下载、切换、存储在 `~/.config/altgo/models/`）。
