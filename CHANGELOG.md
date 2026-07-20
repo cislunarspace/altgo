@@ -1,5 +1,17 @@
 # Changelog
 
+## v2.5.0 (2026-07-20)
+
+### Features
+
+- **MiMo ASR 语音识别后端**：新增 `engine="mimo"`，接入小米 MiMo-V2.5-ASR 云端 API，支持 wav/mp3、中英文自动检测；Settings 引擎切换新增「MiMo ASR (小米)」选项，选中自动填充 API 地址。
+- **模型预设选择器**：转写和润色设置可按服务商预设快速填充——润色预设含 DeepSeek、Kimi、智谱、通义、OpenAI、Anthropic、SiliconFlow，语音识别预设含 MiMo ASR、OpenAI Whisper、本地 whisper.cpp；每个预设带推荐模型目录，支持搜索和展开详情。
+- **whisper GPU 加速构建**：release 工作流安装 CUDA toolkit，本地 whisper 编译启用 GPU。
+
+### Fixes
+
+- **悬浮窗动画全面修复**：相位切换的闪烁、跳变、黑晕。窗口改固定尺寸（520×180），切换不再 resize，消除合成黑边与位移跳变；crossfade 只做淡出、不带位移；transitionend 只响应容器自身事件；先发结果文本再切 done，杜绝空 island 闪烁；hidden 延迟 220ms 再 hide，退出动画真正可见，并用代际计数防止竞态；去掉 box-shadow——半透明阴影叠在透明窗口上会被合成器预乘成黑影。
+
 ## v2.4.5 (2026-07-20)
 
 ### Refactor
