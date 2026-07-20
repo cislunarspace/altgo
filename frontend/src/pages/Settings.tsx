@@ -19,6 +19,13 @@ import {
   Keyboard,
 } from "lucide-react";
 import { useTheme, type ThemePref } from "../ThemeContext";
+import { ProviderPresetSelector } from "../components/ProviderPresetSelector";
+import {
+  polisherPresets,
+  transcriberPresets,
+  type ProviderPreset,
+  type ModelCatalogEntry,
+} from "../config/modelPresets";
 
 const KEY_PRESETS: { value: string; labelKey: string }[] = [
   { value: "Alt_R", labelKey: "settings.key_preset_right_alt" },
@@ -42,7 +49,7 @@ function formatSize(bytes: number): string {
 }
 
 export default function Settings() {
-  const { t, setLang } = useTranslation();
+  const { t, lang, setLang } = useTranslation();
   const { themePref, setTheme } = useTheme();
   const [polishOpen, setPolishOpen] = useState(false);
   const [advancedPath, setAdvancedPath] = useState(false);
@@ -296,6 +303,18 @@ export default function Settings() {
             </>
           ) : config.engine === "api" ? (
             <>
+              <ProviderPresetSelector
+                presets={transcriberPresets.filter((p) => p.apiFormat !== "mimo_asr")}
+                modelType="transcriber"
+                currentApiBaseUrl={config.apiBaseUrl}
+                currentModel={config.model}
+                lang={lang}
+                t={t}
+                onSelect={(preset: ProviderPreset, model?: ModelCatalogEntry) => {
+                  update("apiBaseUrl", preset.apiBaseUrl);
+                  update("model", model?.model || preset.defaultModel);
+                }}
+              />
               <div className="settings-field">
                 <span className="settings-field-label-text">{t("settings.api_url")}</span>
                 <div className="settings-field-control">
@@ -471,6 +490,21 @@ export default function Settings() {
           </button>
           {polishOpen && (
             <div className="settings-section-body">
+              <ProviderPresetSelector
+                presets={polisherPresets}
+                modelType="polisher"
+                currentApiBaseUrl={config.polishApiBaseUrl}
+                currentModel={config.polishModel}
+                lang={lang}
+                t={t}
+                onSelect={(preset: ProviderPreset, model?: ModelCatalogEntry) => {
+                  update("polishApiBaseUrl", preset.apiBaseUrl);
+                  update("polishModel", model?.model || preset.defaultModel);
+                  if (!config.polisherApiKey && preset.apiKeyUrl) {
+                    // 提示用户需要填写 API Key
+                  }
+                }}
+              />
               <div className="settings-field">
                 <span className="settings-field-label-text">{t("settings.polish_level")}</span>
                 <div className="settings-field-control">
