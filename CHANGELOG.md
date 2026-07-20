@@ -1,5 +1,30 @@
 # Changelog
 
+## v2.4.5 (2026-07-20)
+
+### Refactor
+
+- **架构审计修复（#84-#95）**：统一错误处理路径、类型重命名对齐领域语言、CSS 拆分为独立模块。
+- **model 深模块化**（#66-#70）：Output 路径合并、五项架构优化，消除过度工程。
+- **OverlaySink 解耦**：提取 trait 接口，TauriPipelineSink 与浮窗实现分离。
+- **HistoryStore 注入**：消除对 Tauri 全局状态的依赖，构造时注入。
+- **dead code 清理**：删除未使用的 notify 输出路径（#63）、三处死代码（#64）、废止的 PowerShell 脚本。
+
+### Style
+
+- **CSS token 统一**：transition 收敛、中文间距适配，样式系统规范化。
+
+### Tests
+
+- 补齐前端测试覆盖：StatusIndicator、useConfigForm、overlay 模块。
+- 补齐 TauriPipelineSink 单元测试。
+
+### Docs
+
+- 更新 CLAUDE.md 反映 error.rs 和 voice_pipeline 新类型名。
+- 同步写作规范至 CLAUDE.md 和 AGENTS.md。
+- 精简 README，去除冗余结构。
+
 ## v2.4.4 (2026-06-19)
 
 ### Fixes
