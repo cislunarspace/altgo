@@ -90,3 +90,16 @@ body {
   outline: 2px solid var(--color-accent);
   outline-offset: 2px;
 }
+
+/* ============================================
+   CJK letter-spacing
+   ============================================ */
+
+/* tracking-wide 是为英文大写小标题设计的；中文界面下字距松散，恢复正常字距 */
+:lang(zh) .layout-subtitle,
+:lang(zh) .settings-section-title,
+:lang(zh) .settings-section-toggle,
+:lang(zh) .home-result-label,
+:lang(zh) .settings-model-card-badge {
+  letter-spacing: normal;
+}

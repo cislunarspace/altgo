@@ -136,6 +136,8 @@
   font-size: var(--text-sm);
   color: var(--color-text-muted);
   margin: var(--space-4) 0;
+  padding: var(--space-10) 0;
+  text-align: center;
 }
 
 .history-list {

@@ -177,7 +177,7 @@ export default function Settings() {
             <>
               <div className="settings-field">
                 <span className="settings-field-label-text">{t("settings.language")}</span>
-                <div className="settings-field-control">
+                <div className="settings-field-control settings-field-control--narrow">
                   <input
                     type="text"
                     className="settings-input"
@@ -318,7 +318,7 @@ export default function Settings() {
               </div>
               <div className="settings-field">
                 <span className="settings-field-label-text">{t("settings.language")}</span>
-                <div className="settings-field-control">
+                <div className="settings-field-control settings-field-control--narrow">
                   <input
                     type="text"
                     className="settings-input"

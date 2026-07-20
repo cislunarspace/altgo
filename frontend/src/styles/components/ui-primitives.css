@@ -25,7 +25,10 @@
   color: var(--color-text);
   font-size: var(--text-sm);
   font-family: inherit;
-  transition: all var(--duration-normal) var(--ease-out);
+  transition:
+    border-color var(--duration-normal) var(--ease-out),
+    background-color var(--duration-normal) var(--ease-out),
+    box-shadow var(--duration-normal) var(--ease-out);
 }
 
 .input-field:focus {
@@ -52,7 +55,10 @@
   color: var(--color-text);
   font-size: var(--text-sm);
   font-family: inherit;
-  transition: all var(--duration-normal) var(--ease-out);
+  transition:
+    border-color var(--duration-normal) var(--ease-out),
+    background-color var(--duration-normal) var(--ease-out),
+    box-shadow var(--duration-normal) var(--ease-out);
   cursor: pointer;
   appearance: none;
 }
