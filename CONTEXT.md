@@ -35,7 +35,7 @@ A single transcription record: `id`, `createdAtMs`, `rawText` (Whisper output), 
 ## Output
 
 **Overlay**
-The floating status window shown during recording, processing, and result display. Positioned on the primary monitor via `xrandr` geometry. Managed by `TauriPipelineSink` on status transitions through an `OverlaySink` abstraction; `TauriPipelineSink` only describes intent ("recording" / "processing" / "hidden" / "done"), the overlay manager translates that to window size/position/show/hide.
+The floating status window shown during recording, processing, and result display. Positioned on the primary monitor via `xrandr` geometry. Managed by `TauriPipelineSink` on status transitions through an `OverlaySink` abstraction; `TauriPipelineSink` only describes intent ("recording" / "processing" / "hidden" / "done"), the overlay manager translates that to window size/position/show/hide. The window uses one fixed size for all phases — resizing a transparent window mid-session causes compositor black fringes on Linux, so phase changes only swap frontend content (CSS crossfade). `hidden` is emitted first and the actual window hide is delayed (~220ms) so the exit animation is visible. On the transcription-result path, `transcription-result` is emitted before the `done` overlay state so the frontend never renders an empty island. The island uses no `box-shadow` — translucent shadows over the transparent window composite into a dark halo on some Linux compositors.
 
 **Polisher**
 The optional LLM post-processing step. Controlled by `PolishLevel` (`none`/`light`/`medium`/`heavy`). Communicates with any OpenAI-compatible chat API.

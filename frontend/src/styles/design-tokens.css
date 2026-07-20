@@ -112,11 +112,10 @@
   --overlay-btn-close-hover: rgba(255, 255, 255, 0.12);
   --overlay-processing-track: rgba(255, 255, 255, 0.14);
   --overlay-copied-fg: #6ee7b7;
-  /* Smaller blur radius keeps depth without the 40px transparent shadow that
-     compositors premultiply into a dark halo during opacity changes. */
-  --overlay-shadow:
-    0 1px 2px rgba(0, 0, 0, 0.2),
-    0 6px 18px rgba(0, 0, 0, 0.22);
+  /* 不用 box-shadow：半透明阴影叠在透明窗口上，部分 Linux 合成器会把它
+     预乘成黑影（2026-07 在 mutter/X11 实测复现）。层次靠实色 surface +
+     细 border 表达。 */
+  --overlay-shadow: none;
 
   --readiness-warn-border: rgba(251, 191, 36, 0.4);
   --readiness-warn-bg: rgba(251, 191, 36, 0.09);
@@ -190,9 +189,8 @@
   --overlay-btn-close-hover: rgba(24, 24, 27, 0.1);
   --overlay-processing-track: rgba(24, 24, 27, 0.12);
   --overlay-copied-fg: #059669;
-  --overlay-shadow:
-    0 1px 2px rgba(0, 0, 0, 0.05),
-    0 6px 18px rgba(0, 0, 0, 0.08);
+  /* 不用 box-shadow：原因见 dark 主题同名变量的注释。 */
+  --overlay-shadow: none;
 
   --readiness-warn-border: rgba(217, 119, 6, 0.35);
   --readiness-warn-bg: rgba(217, 119, 6, 0.08);
