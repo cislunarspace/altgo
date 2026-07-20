@@ -115,7 +115,7 @@ impl Default for RecorderConfig {
 #[derive(Debug, Deserialize, Clone, serde::Serialize)]
 #[serde(default)]
 pub struct TranscriberConfig {
-    /// 引擎类型：`"local"`（本地 whisper.cpp）或 `"api"`（Whisper API）
+    /// 引擎类型：`"local"`（本地 whisper.cpp）、`"api"`（Whisper API）或 `"mimo"`（小米 MiMo ASR）
     pub engine: String,
     /// API 密钥（可通过 `ALTGO_TRANSCRIBER_API_KEY` 环境变量覆盖）
     pub api_key: String,

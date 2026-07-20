@@ -57,6 +57,21 @@ impl PipelineBuilder {
                 cfg.beam_size,
                 cfg.timeout,
             )),
+            "mimo" => {
+                let base_url = if cfg.api_base_url.is_empty() || cfg.api_base_url.contains("openai.com") {
+                    "https://api.xiaomimimo.com/v1".to_string()
+                } else {
+                    cfg.api_base_url.clone()
+                };
+                let api = crate::transcriber::MimoAsr::new(
+                    cfg.api_key.clone(),
+                    base_url,
+                    cfg.language.clone(),
+                    cfg.timeout,
+                )
+                .map_err(PipelineError::fatal_transcriber)?;
+                Box::new(api)
+            }
             _ => {
                 let api = crate::transcriber::WhisperApi::new(
                     cfg.api_key.clone(),

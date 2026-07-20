@@ -16,12 +16,12 @@ min_press_duration_ms = 100         # 最短按下时长（毫秒），过滤 IM
 sample_rate = 16000
 
 [transcriber]
-engine = "local"                     # "api"（OpenAI Whisper API）或 "local"（whisper.cpp）
-api_key = ""                        # API 模式下的 API Key
-api_base_url = ""                   # API 模式下的 base URL
+engine = "local"                     # "local"（whisper.cpp）、"api"（Whisper API）或 "mimo"（小米 MiMo ASR）
+api_key = ""                        # API/Mimo 模式下的 API Key
+api_base_url = ""                   # API 模式：Whisper API base URL；Mimo 模式：https://api.xiaomimimo.com/v1
 model = ""                          # API 模式：模型名（如 "whisper-1"）；本地模式：GGML 模型文件路径
 whisper_path = ""                   # whisper-cli 路径，留空则自动查找 PATH
-language = "zh"                     # 语言提示，如 "zh"（中文）、"en"（英文）
+language = "zh"                     # 语言提示，如 "zh"（中文）、"en"（英文）、"auto"（自动检测）
 timeout_seconds = 30
 temperature = 0.0                   # API 引擎专用：Whisper API temperature（0.0-1.0），越低越确定性
 prompt = ""                         # API 引擎专用：Whisper API 提示词，提供领域词汇以提升识别率
@@ -29,6 +29,7 @@ threads = 0                         # 本地引擎线程数；0 = 自动取满 C
 beam_size = 0                       # 本地引擎 beam search 宽度；<=1 走贪心解码（最快），调高更准但更慢
 # 本地模式（engine="local"）会自动拉起常驻 whisper-server：模型只载入一次内存，
 # 之后每句话走本地 HTTP，省掉重复冷载入。whisper-server 缺失时自动回退到一次性 whisper-cli。
+# Mimo 模式（engine="mimo"）使用小米 MiMo-V2.5-ASR 云端 API，响应速度快，适合实时转写。
 
 [polisher]
 protocol = "openai"                 # "openai"（OpenAI 兼容 API）或 "anthropic"（Anthropic Messages API）

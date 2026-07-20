@@ -75,6 +75,39 @@ detect_accel_flags() {
         local nvcc_path
         nvcc_path="$(command -v nvcc 2>/dev/null || true)"
         flags="${flags} -DGGML_CUDA=ON -DGGML_CUDA_NO_VMM=ON -DCMAKE_CUDA_COMPILER=${nvcc_path}"
+
+        # 查找 cublas 库和头文件（CUDA 12/13 可能安装在非标准路径）
+        local cublas_lib="${CUDA_cublas_LIBRARY:-}"
+        if [ -z "$cublas_lib" ]; then
+            # 查找 libcublas.so（支持 CUDA 12 和 13 的路径）
+            cublas_lib="$(find /usr/lib/x86_64-linux-gnu/libcublas /usr/local/cuda* -name "libcublas.so" 2>/dev/null | head -1)"
+            # 如果没找到，尝试版本化的符号链接
+            if [ -z "$cublas_lib" ]; then
+                for ver in 12 13; do
+                    local lib="/usr/lib/x86_64-linux-gnu/libcublas.so.${ver}"
+                    if [ -f "$lib" ]; then
+                        cublas_lib="$lib"
+                        break
+                    fi
+                done
+            fi
+        fi
+        if [ -n "$cublas_lib" ]; then
+            echo "[INFO] Found cublas at: $cublas_lib" >&2
+            flags="${flags} -DCUDA_cublas_LIBRARY=${cublas_lib}"
+        fi
+        # 查找 cublas 头文件
+        local cublas_inc=""
+        for dir in /usr/include/libcublas/13 /usr/include/libcublas/12 /usr/local/cuda/include /usr/include/cuda; do
+            if [ -f "$dir/cublas_v2.h" ]; then
+                cublas_inc="$dir"
+                break
+            fi
+        done
+        if [ -n "$cublas_inc" ]; then
+            echo "[INFO] Found cublas headers at: $cublas_inc" >&2
+            flags="${flags} -DCMAKE_CUDA_FLAGS=-I${cublas_inc}"
+        fi
     else
         echo "[INFO] CUDA not detected — CPU-only build" >&2
     fi
@@ -135,9 +168,12 @@ build_whisper_from_source() {
         echo "[OK] Reusing whisper.cpp source cache (${tag})"
     fi
 
-    # 若构建选项（如 CUDA 是否可用）相比上次变化，强制重新配置。
+    # 若构建选项（如 CUDA 是否可用）相比上次变化，或 CMakeCache 不存在，强制重新配置。
     local need_reconfigure=0
-    if [[ ! -f "${buildopts_file}" ]] || [[ "$(cat "${buildopts_file}" 2>/dev/null)" != "${cmake_flags}" ]]; then
+    if [[ ! -f "${cache}/build/CMakeCache.txt" ]]; then
+        need_reconfigure=1
+        echo "[INFO] CMakeCache not found — forcing reconfigure"
+    elif [[ ! -f "${buildopts_file}" ]] || [[ "$(cat "${buildopts_file}" 2>/dev/null)" != "${cmake_flags}" ]]; then
         need_reconfigure=1
         echo "[INFO] Build options changed or new — forcing reconfigure"
     fi
@@ -221,15 +257,19 @@ bundle_cuda_libs() {
     if [[ -n "${nvcc_dir}" ]]; then
         cuda_lib_dirs+=("${nvcc_dir}/lib64" "${nvcc_dir}/targets/x86_64-linux/lib")
     fi
+    # 添加常见 CUDA 安装路径（包括 CI 环境中的版本化路径）
+    for cuda_ver in 12.6 12 13.2 13; do
+        cuda_lib_dirs+=("/usr/local/cuda-${cuda_ver}/lib64" "/usr/local/cuda-${cuda_ver}/targets/x86_64-linux/lib")
+    done
     cuda_lib_dirs+=(/usr/local/cuda/lib64 /usr/local/cuda/targets/x86_64-linux/lib /usr/lib/x86_64-linux-gnu)
     local needed=(libcudart.so libcublas.so libcublasLt.so)
     for lib in "${needed[@]}"; do
         local found=""
         for dir in "${cuda_lib_dirs[@]}"; do
-            if [[ -z "${dir}" ]]; then continue; fi
+            if [[ -z "${dir}" || ! -d "${dir}" ]]; then continue; fi
             local candidate=""
             # 优先复制带版本号的真实 so 文件（如 libcudart.so.12），保留符号链接关系。
-            candidate="$(find "${dir}" -maxdepth 1 -name "${lib}"'*' -not -type l | sort -V | tail -1)"
+            candidate="$(find "${dir}" -maxdepth 1 -name "${lib}"'*' -not -type l 2>/dev/null | sort -V | tail -1)"
             if [[ -n "${candidate}" && -f "${candidate}" ]]; then
                 found="${candidate}"
                 break

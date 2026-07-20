@@ -5,9 +5,11 @@
 //! - `WhisperApi`：通过 HTTP multipart 请求调用兼容 OpenAI 的 Whisper API
 //! - `LocalWhisper`：通过子进程调用本地 `whisper-cli` 二进制文件
 //! - `ResidentWhisper`：常驻 whisper-server + whisper-cli 回退
+//! - `MimoAsr`：通过 HTTP JSON 请求调用小米 MiMo-V2.5-ASR API
 //!
 //! 所有实现都返回 `TranscribeResult`（文本 + 语言信息），进度通过闭包回调上报。
 
+use base64::Engine;
 use crate::error::TranscriberError;
 use crate::resource::effective_threads;
 use crate::resource::expand_tilde;
@@ -151,6 +153,159 @@ impl WhisperApi {
         Ok(TranscribeResult {
             text: result.text,
             language: result.language.unwrap_or_default(),
+        })
+    }
+}
+
+/// MiMo-V2.5-ASR API 语音识别器。
+///
+/// 通过 HTTP JSON 请求调用小米 MiMo ASR API，使用 OpenAI 兼容的 chat.completions 格式。
+#[derive(Clone, Debug)]
+pub struct MimoAsr {
+    api_key: String,
+    api_base_url: String,
+    language: String,
+    client: Client,
+}
+
+impl MimoAsr {
+    pub fn new(
+        api_key: String,
+        api_base_url: String,
+        language: String,
+        timeout: Duration,
+    ) -> Result<Self, TranscriberError> {
+        let client = Client::builder().timeout(timeout).build().map_err(|e| {
+            TranscriberError::HttpError(format!("failed to build HTTP client: {}", e))
+        })?;
+        Ok(Self {
+            api_key,
+            api_base_url,
+            language,
+            client,
+        })
+    }
+
+    /// 通过 MiMo ASR API 识别音频数据，返回识别结果。
+    pub async fn transcribe(
+        &self,
+        audio_data: &[u8],
+    ) -> Result<TranscribeResult, TranscriberError> {
+        if audio_data.is_empty() {
+            return Err(TranscriberError::EmptyAudio);
+        }
+        if self.api_key.is_empty() {
+            return Err(TranscriberError::MissingApiKey);
+        }
+
+        let url = format!("{}/v1/chat/completions", self.api_base_url);
+
+        // 将音频数据编码为 base64
+        let audio_base64 = base64::engine::general_purpose::STANDARD.encode(audio_data);
+        let audio_data_uri = format!("data:audio/wav;base64,{}", audio_base64);
+
+        let language = if self.language.is_empty() {
+            "auto".to_string()
+        } else {
+            self.language.clone()
+        };
+
+        let body = serde_json::json!({
+            "model": "mimo-v2.5-asr",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "input_audio",
+                            "input_audio": {
+                                "data": audio_data_uri
+                            }
+                        }
+                    ]
+                }
+            ],
+            "asr_options": {
+                "language": language
+            }
+        });
+
+        let resp = self
+            .client
+            .post(&url)
+            .header("api-key", &self.api_key)
+            .header("Content-Type", "application/json")
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| TranscriberError::HttpError(e.to_string()))?;
+
+        let status = resp.status();
+        if !status.is_success() {
+            let body = resp
+                .text()
+                .await
+                .unwrap_or_else(|_| "failed to read error body".to_string());
+            return Err(TranscriberError::ApiError {
+                status: status.as_u16(),
+                body,
+            });
+        }
+
+        let result: serde_json::Value = resp
+            .json()
+            .await
+            .map_err(|e| TranscriberError::JsonError(e.to_string()))?;
+
+        // 从 OpenAI 兼容的响应格式中提取文本
+        let text = result
+            .get("choices")
+            .and_then(|c| c.get(0))
+            .and_then(|c| c.get("message"))
+            .and_then(|m| m.get("content"))
+            .and_then(|c| c.as_str())
+            .unwrap_or("")
+            .to_string();
+
+        if text.is_empty() {
+            return Err(TranscriberError::ApiError {
+                status: 200,
+                body: "empty transcription result".to_string(),
+            });
+        }
+
+        // 尝试从响应中提取检测到的语言，否则使用请求参数（auto 时返回空）
+        let detected_language = result
+            .get("language")
+            .and_then(|l| l.as_str())
+            .unwrap_or("")
+            .to_string();
+
+        let language = if detected_language.is_empty() {
+            if language == "auto" { String::new() } else { language }
+        } else {
+            detected_language
+        };
+
+        Ok(TranscribeResult { text, language })
+    }
+}
+
+impl Transcriber for MimoAsr {
+    fn transcribe<'life0, 'life1>(
+        &'life0 self,
+        audio: &'life1 [u8],
+        _on_progress: Arc<dyn Fn(f32) + Send + Sync>,
+    ) -> Pin<Box<dyn Future<Output = Result<TranscribeResult, TranscriberError>> + Send + 'life0>>
+    where
+        'life1: 'life0,
+    {
+        Box::pin(async move {
+            let result = MimoAsr::transcribe(self, audio).await;
+            if result.is_ok() {
+                (_on_progress)(1.0);
+            }
+            result
         })
     }
 }
