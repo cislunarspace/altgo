@@ -111,7 +111,7 @@ export default function Settings() {
     <div className="settings-page settings-page--v2">
       <div
         className={`settings-readiness ${
-          config.engine === "api"
+          config.engine === "api" || config.engine === "mimo"
             ? "settings-readiness--neutral"
             : localReady
               ? "settings-readiness--ok"
@@ -119,7 +119,7 @@ export default function Settings() {
         }`}
       >
         <div className="settings-readiness-icon">
-          {config.engine === "api" ? (
+          {config.engine === "api" || config.engine === "mimo" ? (
             <Sparkles size={18} />
           ) : localReady ? (
             <CheckCircle2 size={18} />
@@ -131,16 +131,20 @@ export default function Settings() {
           <strong className="settings-readiness-title">
             {config.engine === "api"
               ? t("settings.readiness_api")
-              : localReady
-                ? t("settings.readiness_local_ok")
-                : t("settings.readiness_local_need")}
+              : config.engine === "mimo"
+                ? t("settings.readiness_mimo")
+                : localReady
+                  ? t("settings.readiness_local_ok")
+                  : t("settings.readiness_local_need")}
           </strong>
           <p className="settings-readiness-desc">
             {config.engine === "api"
               ? t("settings.readiness_api_desc")
-              : localBlocked
-                ? t("settings.readiness_path_missing")
-                : t("settings.readiness_local_desc")}
+              : config.engine === "mimo"
+                ? t("settings.readiness_mimo_desc")
+                : localBlocked
+                  ? t("settings.readiness_path_missing")
+                  : t("settings.readiness_local_desc")}
           </p>
           {config.engine === "local" && resolvedPath && (
             <code className="settings-readiness-path">{resolvedPath}</code>
@@ -170,6 +174,18 @@ export default function Settings() {
               onClick={() => update("engine", "api")}
             >
               {t("settings.engine_api")}
+            </button>
+            <button
+              type="button"
+              className={`settings-engine-btn ${config.engine === "mimo" ? "is-active" : ""}`}
+              onClick={() => {
+                update("engine", "mimo");
+                if (!config.apiBaseUrl || config.apiBaseUrl.includes("openai.com")) {
+                  update("apiBaseUrl", "https://api.xiaomimimo.com/v1");
+                }
+              }}
+            >
+              {t("settings.engine_mimo")}
             </button>
           </div>
 
@@ -278,7 +294,7 @@ export default function Settings() {
                 </div>
               )}
             </>
-          ) : (
+          ) : config.engine === "api" ? (
             <>
               <div className="settings-field">
                 <span className="settings-field-label-text">{t("settings.api_url")}</span>
@@ -329,7 +345,36 @@ export default function Settings() {
                 </div>
               </div>
             </>
-          )}
+          ) : config.engine === "mimo" ? (
+            <>
+              <div className="settings-field">
+                <span className="settings-field-label-text">{t("settings.api_key")}</span>
+                <div className="settings-field-control">
+                  <input
+                    type="password"
+                    className="settings-input"
+                    value={config.transcriberApiKey}
+                    onChange={(e) => update("transcriberApiKey", e.target.value)}
+                    placeholder={config.hasTranscriberApiKey ? "tp-***" : "tp-..."}
+                  />
+                </div>
+              </div>
+              <div className="settings-field">
+                <span className="settings-field-label-text">{t("settings.language")}</span>
+                <div className="settings-field-control settings-field-control--narrow">
+                  <select
+                    className="settings-input"
+                    value={config.language}
+                    onChange={(e) => update("language", e.target.value)}
+                  >
+                    <option value="auto">auto (自动检测)</option>
+                    <option value="zh">zh (中文)</option>
+                    <option value="en">en (英文)</option>
+                  </select>
+                </div>
+              </div>
+            </>
+          ) : null}
         </section>
 
         <section className="settings-section">
