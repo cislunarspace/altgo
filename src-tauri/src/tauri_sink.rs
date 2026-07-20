@@ -102,10 +102,12 @@ impl PipelineSink for TauriPipelineSink {
 
                     emit_pipeline_status(&app, &status, PipelineStatus::Done);
 
+                    // 先送结果文本再切 done：前端收到 done 时若还没有结果，
+                    // 会渲染出空 island（闪烁）。
+                    let _ = app.emit("transcription-result", &res.text);
+
                     // 通过 OverlaySink 切换到 done 状态
                     overlay.set_state(OverlayState::done());
-
-                    let _ = app.emit("transcription-result", &res.text);
                 }
                 None => {
                     emit_pipeline_status(&app, &status, PipelineStatus::Idle);

@@ -70,7 +70,7 @@ export function computePhaseTransition(
   };
 }
 
-function Overlay() {
+export function Overlay() {
   const { t } = useTranslation();
 
   // Current visual phase — driven entirely by overlay-state event from Rust.
@@ -88,6 +88,8 @@ function Overlay() {
 
   // Whether we are in an exit transition (CSS class toggle).
   const [isExiting, setIsExiting] = useState(false);
+  // Crossfade（相位间切换）只做淡出，不带退出位移；exit（隐藏）才滑出。
+  const [isCrossfading, setIsCrossfading] = useState(false);
 
   // Track previous phase for transition direction.
   const prevPhaseRef = useRef<Phase>(null);
@@ -118,9 +120,11 @@ function Overlay() {
       switch (transition.action) {
         case "show":
           setIsExiting(false);
+          setIsCrossfading(false);
           setPhase(transition.phase!);
           break;
         case "exit":
+          setIsCrossfading(false);
           setIsExiting(true);
           break;
         case "crossfade":
@@ -130,6 +134,7 @@ function Overlay() {
             setResult(null);
             setCopied(false);
           }
+          setIsCrossfading(true);
           setIsExiting(true);
           prevPhaseRef.current = transition.enterPhase ?? null;
           requestAnimationFrame(() => {
@@ -137,6 +142,7 @@ function Overlay() {
               if (!active) return;
               crossfadeTimerRef.current = null;
               setIsExiting(false);
+              setIsCrossfading(false);
               setPhase(transition.enterPhase!);
             }, transition.delay);
           });
@@ -180,7 +186,10 @@ function Overlay() {
   }, []);
 
   // Listen for CSS transition end to fully clear hidden state.
-  const handleTransitionEnd = () => {
+  // 只响应容器自身的 transitionend；子元素（进度条、按钮等）的
+  // transition 结束会冒泡上来，不得因此提前清除内容。
+  const handleTransitionEnd = (event: React.TransitionEvent) => {
+    if (event.target !== event.currentTarget) return;
     if (isExiting) {
       setIsExiting(false);
       if (prevPhaseRef.current === "hidden") {
@@ -209,7 +218,13 @@ function Overlay() {
     }
   };
 
-  const containerClass = `island-container ${isExiting ? "island-exit" : "island-enter"}`;
+  const containerClass = `island-container ${
+    isExiting ? (isCrossfading ? "island-crossfade" : "island-exit") : "island-enter"
+  }`;
+
+  // done 事件可能先于 transcription-result 到达；结果未到时继续显示
+  // processing 视图，避免渲染出没有内容的空 island（闪烁）。
+  const effectivePhase = phase === "done" && !result ? "processing" : phase;
 
   if (phase === "done" && result) {
     return (
@@ -257,7 +272,7 @@ function Overlay() {
   return (
     <div className={containerClass} onTransitionEnd={handleTransitionEnd}>
       <div className="island">
-        {phase === "recording" && (
+        {effectivePhase === "recording" && (
           <>
             <div className="recording-indicator">
               <div className="recording-glow" />
@@ -266,7 +281,7 @@ function Overlay() {
             <span className="label">{t("overlay.recording")}</span>
           </>
         )}
-        {phase === "processing" && (
+        {effectivePhase === "processing" && (
           <div className="island-processing-inner">
             <div className="island-processing-row">
               <div className="processing-indicator">

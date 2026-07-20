@@ -7,47 +7,76 @@
 //! - 本模块负责**窗口物理层**：emit `overlay-state` 事件、resize、reposition、show/hide
 //! - 前端负责**视觉层**：CSS transition / animation 处理 entry / exit / crossfade
 
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    Arc,
+};
+use std::time::Duration;
+
 use tauri::{LogicalSize, PhysicalPosition};
 
 use crate::overlay::seam::{OverlayError, OverlaySink, OverlayWindow};
 
 pub use crate::overlay::seam::{OverlayPhase, OverlayState};
 
-/// 各阶段对应的悬浮窗逻辑尺寸（CSS pixels）。
-const SIZE_RECORDING: (f64, f64) = (200.0, 48.0);
-const SIZE_PROCESSING: (f64, f64) = (268.0, 56.0);
-const SIZE_DONE: (f64, f64) = (520.0, 100.0);
+/// 悬浮窗的固定逻辑尺寸（CSS pixels）。
+///
+/// 所有相位共用同一窗口尺寸（取最大相位 done 的内容高度，加上底部锚定间距）。
+/// 相位切换只改前端内容，不再触碰窗口几何——透明窗口 resize 时新暴露的区域
+/// 在部分 Linux WM 上会合成出黑边，且窗口变形与前端 crossfade 错位会造成跳变。
+const OVERLAY_SIZE: (f64, f64) = (520.0, 180.0);
 
 /// 距屏幕底部的偏移（CSS pixels）。
 const BOTTOM_OFFSET: f64 = 80.0;
+
+/// hidden 事件发出后、真正 hide 之前的延迟，给前端 exit 动画留出播放时间
+/// （前端 --duration-normal 为 180ms，再加少量余量）。
+const HIDE_DELAY: Duration = Duration::from_millis(220);
 
 /// 悬浮窗管理器 —— 负责把 Overlay 状态意图翻译成窗口操作。
 #[derive(Clone)]
 pub struct OverlayManager<W: OverlayWindow> {
     window: W,
+    /// 代际计数：每次 set_state 递增。延迟 hide 执行前比对代际，
+    /// 防止「hide 延迟期间用户重新开始录音」时旧 hide 关掉新内容。
+    generation: Arc<AtomicU64>,
 }
 
-impl<W: OverlayWindow> OverlayManager<W> {
+impl<W: OverlayWindow + 'static> OverlayManager<W> {
     pub fn new(window: W) -> Self {
-        Self { window }
+        Self {
+            window,
+            generation: Arc::new(AtomicU64::new(0)),
+        }
     }
 
     /// 设置悬浮窗状态。
     ///
     /// 这是一个**原子意图**：调用方只需描述「现在应该显示什么阶段」，
     /// 本方法内部一次性完成 resize → reposition → prepare → show → emit。
+    /// 窗口尺寸是固定的，重复调用只是幂等的几何设置。
     pub fn set_state(&self, state: OverlayState) {
+        let seq = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
+
         if matches!(state.phase, OverlayPhase::Hidden) {
             if let Err(error) = self.window.emit_state(&state) {
                 tracing::warn!(%error, "overlay state emit failed");
             }
-            if let Err(error) = self.window.hide() {
-                tracing::warn!(%error, "overlay hide failed");
-            }
+            let window = self.window.clone();
+            let generation = Arc::clone(&self.generation);
+            std::thread::spawn(move || {
+                std::thread::sleep(HIDE_DELAY);
+                if generation.load(Ordering::SeqCst) != seq {
+                    return;
+                }
+                if let Err(error) = window.hide() {
+                    tracing::warn!(%error, "overlay hide failed");
+                }
+            });
             return;
         }
 
-        let (width, height) = dimensions_for_phase(state.phase);
+        let (width, height) = OVERLAY_SIZE;
         if let Err(error) = self.window.set_size(LogicalSize::new(width, height)) {
             tracing::warn!(%error, "overlay set_size failed");
         }
@@ -77,18 +106,9 @@ impl<W: OverlayWindow> OverlayManager<W> {
     }
 }
 
-impl<W: OverlayWindow + Send + Sync> OverlaySink for OverlayManager<W> {
+impl<W: OverlayWindow + Send + Sync + 'static> OverlaySink for OverlayManager<W> {
     fn set_state(&self, state: OverlayState) {
         OverlayManager::set_state(self, state);
-    }
-}
-
-fn dimensions_for_phase(phase: OverlayPhase) -> (f64, f64) {
-    match phase {
-        OverlayPhase::Recording => SIZE_RECORDING,
-        OverlayPhase::Processing => SIZE_PROCESSING,
-        OverlayPhase::Done => SIZE_DONE,
-        OverlayPhase::Hidden => SIZE_RECORDING,
     }
 }
 
@@ -219,20 +239,6 @@ mod tests {
     }
 
     #[test]
-    fn test_dimensions_for_phase() {
-        assert_eq!(
-            dimensions_for_phase(OverlayPhase::Recording),
-            SIZE_RECORDING
-        );
-        assert_eq!(
-            dimensions_for_phase(OverlayPhase::Processing),
-            SIZE_PROCESSING
-        );
-        assert_eq!(dimensions_for_phase(OverlayPhase::Done), SIZE_DONE);
-        assert_eq!(dimensions_for_phase(OverlayPhase::Hidden), SIZE_RECORDING);
-    }
-
-    #[test]
     fn test_visible_state_calls_window_in_order() {
         let window = RecordingOverlayWindow::new((0, 0, 1920, 1080), 1.0);
         let manager = OverlayManager::new(window.clone());
@@ -242,10 +248,10 @@ mod tests {
         assert_eq!(
             window.calls(),
             vec![
-                "size:200x48",
+                "size:520x180",
                 "primary_monitor_geometry",
                 "scale_factor",
-                "position:860,952",
+                "position:700,820",
                 "emit:recording",
                 "prepare_for_show",
                 "show",
@@ -254,13 +260,31 @@ mod tests {
     }
 
     #[test]
-    fn test_hidden_state_emits_then_hides_without_geometry() {
+    fn test_hidden_state_emits_then_hides_after_delay() {
         let window = RecordingOverlayWindow::new((0, 0, 1920, 1080), 1.0);
         let manager = OverlayManager::new(window.clone());
 
         manager.set_state(OverlayState::hidden());
 
+        // hide 是延迟执行的（给前端 exit 动画留时间），立即检查时不应出现。
+        assert_eq!(window.calls(), vec!["emit:hidden"]);
+
+        std::thread::sleep(HIDE_DELAY + Duration::from_millis(100));
         assert_eq!(window.calls(), vec!["emit:hidden", "hide"]);
+    }
+
+    #[test]
+    fn test_pending_hide_is_cancelled_by_newer_state() {
+        let window = RecordingOverlayWindow::new((0, 0, 1920, 1080), 1.0);
+        let manager = OverlayManager::new(window.clone());
+
+        // hidden 的延迟 hide 还没执行，用户又开始录音：
+        // 旧 hide 不得把新内容关掉。
+        manager.set_state(OverlayState::hidden());
+        manager.set_state(OverlayState::recording());
+
+        std::thread::sleep(HIDE_DELAY + Duration::from_millis(100));
+        assert!(!window.calls().contains(&"hide".to_string()));
     }
 
     #[test]
@@ -273,7 +297,7 @@ mod tests {
         assert_eq!(
             window.calls(),
             vec![
-                "size:200x48",
+                "size:520x180",
                 "primary_monitor_geometry",
                 "emit:recording",
                 "prepare_for_show",

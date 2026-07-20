@@ -25,13 +25,22 @@
   pointer-events: none;
 }
 
+/* 相位间 crossfade：只淡出内容，容器不动（不做位移，避免切换时上下跳变）。 */
+.island-crossfade {
+  pointer-events: none;
+}
+
 .island-enter .island,
 .island-enter .island-result {
   opacity: 1;
+  /* 新挂载的内容淡入；持续存在的元素重放此动画与 opacity transition 同向，无冲突。 */
+  animation: fade-in var(--duration-normal) var(--ease-out);
 }
 
 .island-exit .island,
-.island-exit .island-result {
+.island-exit .island-result,
+.island-crossfade .island,
+.island-crossfade .island-result {
   opacity: 0;
 }
 
