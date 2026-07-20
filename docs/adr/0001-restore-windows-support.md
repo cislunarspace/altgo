@@ -2,11 +2,11 @@
 
 **Date**: 2026-06-12
 **Status**: Accepted
-**Supersedes**: docs/superpowers/specs/2026-04-23-drop-windows-support-design.md
+**Supersedes**: (original file removed — was docs/superpowers/specs/2026-04-23-drop-windows-support-design.md)
 
 ## Context
 
-altgo was originally a cross-platform application supporting Linux and Windows. In April 2026, Windows support was removed (ADR in docs/superpowers/specs/2026-04-23-drop-windows-support-design.md) to reduce maintenance burden and simplify the codebase. The original Windows implementation used PowerShell subprocesses for key listening, clipboard, and notifications, which introduced security concerns (PowerShell injection) and reliability issues (dependence on Windows Execution Policy and anti-malware interference).
+altgo was originally a cross-platform application supporting Linux and Windows. In April 2026, Windows support was removed to reduce maintenance burden and simplify the codebase. The original Windows implementation used PowerShell subprocesses for key listening, clipboard, and notifications, which introduced security concerns (PowerShell injection) and reliability issues (dependence on Windows Execution Policy and anti-malware interference).
 
 The decision to restore Windows support was driven by user demand for Windows as a first-class target platform, with a commitment to long-term maintenance.
 

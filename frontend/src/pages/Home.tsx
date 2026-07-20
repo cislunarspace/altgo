@@ -9,7 +9,7 @@ import { useTranslation } from "../i18n";
 import { StatusIndicator } from "../components/StatusIndicator";
 import { Copy, Check } from "lucide-react";
 import { useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { copyToClipboard } from "../utils/clipboard";
 
 export default function Home() {
   const { t } = useTranslation();
@@ -22,12 +22,10 @@ export default function Home() {
 
   const handleCopy = async () => {
     if (transcription) {
-      try {
-        await invoke("copy_text", { text: transcription });
+      const ok = await copyToClipboard(transcription);
+      if (ok) {
         setCopied(true);
         setTimeout(() => setCopied(false), 2000);
-      } catch {
-        // Clipboard failed silently
       }
     }
   };

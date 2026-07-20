@@ -100,7 +100,7 @@ Key Listener → State Machine → Recorder → Transcriber → Polisher → Out
 ├── ThemeContext.tsx        # 主题 Provider
 ├── theme.ts                # 主题 token / 持久化
 ├── overlay.tsx             # 悬浮窗口组件
-├── overlay.css             # 浮窗样式（引入 overlay-base、motion）
+├── overlay.css             # 浮窗样式（由 overlay.tsx 在 TS 侧 import overlay-base、motion）
 ├── components/
 │   ├── Layout.tsx          # 布局组件
 │   └── StatusIndicator.tsx # 状态指示器
@@ -115,11 +115,18 @@ Key Listener → State Machine → Recorder → Transcriber → Polisher → Out
 ├── i18n/                   # 国际化
 └── styles/
     ├── global.css
-    ├── components.css
     ├── design-system.css
     ├── design-tokens.css   # 设计 token
     ├── motion.css          # 动效 / 过渡
-    └── overlay-base.css    # 共享浮窗布局
+    ├── layout.css          # 布局组件样式
+    ├── overlay-base.css    # 共享浮窗布局
+    ├── components/
+    │   ├── ui-primitives.css
+    │   └── status-indicator.css
+    └── pages/
+        ├── home.css
+        ├── history.css
+        └── settings.css
 ```
 
 ### 关键模式

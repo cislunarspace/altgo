@@ -3,7 +3,8 @@ import { useState, useEffect, useRef } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { Copy, X, Check } from "lucide-react";
-import { useOverlayTranslation } from "./i18n";
+import { useTranslation } from "./i18n";
+import { copyToClipboard } from "./utils/clipboard";
 import { applyThemeToDocument, getThemePref, installThemeListeners } from "./theme";
 import "./styles/overlay-base.css";
 import "./styles/motion.css";
@@ -14,10 +15,63 @@ interface OverlayState {
   phase: "recording" | "processing" | "done" | "hidden";
 }
 
-const CROSSFADE_DURATION_MS = 180;
+export type Phase = "recording" | "processing" | "done" | "hidden" | null;
+
+export const CROSSFADE_DURATION_MS = 180;
+
+export interface PhaseTransitionResult {
+  action: "show" | "crossfade" | "exit" | "none";
+  /** show: phase to display; exit→hidden: null to clear after animation */
+  phase?: Phase;
+  /** crossfade: current phase to keep during exit animation */
+  exitPhase?: Phase;
+  /** crossfade: phase to enter after delay */
+  enterPhase?: Phase;
+  /** crossfade: delay in ms before entering new phase */
+  delay?: number;
+}
+
+/**
+ * 纯函数：根据上一相位和新相位，决定下一步动作。
+ *
+ * - hidden/null → visible: 直接显示（show）
+ * - visible → hidden: 播放退出动画（exit）
+ * - visible → 不同 visible: crossfade（先 exit，延迟后切换）
+ * - visible → 相同 visible: 不动作（none）
+ * - hidden → hidden: 清除（show null）
+ * - null → hidden: 显示 null（清除状态，show）
+ */
+export function computePhaseTransition(
+  prevPhase: Phase,
+  newPhase: "recording" | "processing" | "done" | "hidden"
+): PhaseTransitionResult {
+  // 进入隐藏状态
+  if (newPhase === "hidden") {
+    if (prevPhase !== null && prevPhase !== "hidden") {
+      return { action: "exit" };
+    }
+    // hidden→hidden 或 null→hidden：清除
+    return { action: "show", phase: null };
+  }
+
+  // 进入可见状态
+  if (prevPhase === null || prevPhase === "hidden") {
+    return { action: "show", phase: newPhase };
+  }
+  if (prevPhase === newPhase) {
+    return { action: "none" };
+  }
+  // 可见→不同可见：crossfade
+  return {
+    action: "crossfade",
+    exitPhase: prevPhase,
+    enterPhase: newPhase,
+    delay: CROSSFADE_DURATION_MS,
+  };
+}
 
 function Overlay() {
-  const { t } = useOverlayTranslation();
+  const { t } = useTranslation();
 
   // Current visual phase — driven entirely by overlay-state event from Rust.
   const [phase, setPhase] = useState<string | null>(null);
@@ -36,7 +90,7 @@ function Overlay() {
   const [isExiting, setIsExiting] = useState(false);
 
   // Track previous phase for transition direction.
-  const prevPhaseRef = useRef<string | null>(null);
+  const prevPhaseRef = useRef<Phase>(null);
   const crossfadeTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -59,40 +113,45 @@ function Overlay() {
       clearCrossfadeTimer();
       const newPhase = event.payload.phase;
       const prev = prevPhaseRef.current;
+      const transition = computePhaseTransition(prev, newPhase);
 
-      if (newPhase === "hidden") {
-        // Play exit animation, then clear.
-        if (prev !== null && prev !== "hidden") {
-          setIsExiting(true);
-        } else {
-          setPhase(null);
+      switch (transition.action) {
+        case "show":
           setIsExiting(false);
-        }
-      } else {
-        // Entering a visible phase.
-        setTxProgress(null);
-        if (newPhase !== "done") {
-          setResult(null);
-          setCopied(false);
-        }
-        if (prev === null || prev === "hidden") {
-          // From hidden — direct show.
-          setIsExiting(false);
-          setPhase(newPhase);
-        } else if (prev !== newPhase) {
-          // Crossfade between visible phases.
+          setPhase(transition.phase!);
+          break;
+        case "exit":
           setIsExiting(true);
-          prevPhaseRef.current = newPhase;
+          break;
+        case "crossfade":
+          // 进入可见相位时清除转写状态
+          setTxProgress(null);
+          if (newPhase !== "done") {
+            setResult(null);
+            setCopied(false);
+          }
+          setIsExiting(true);
+          prevPhaseRef.current = transition.enterPhase ?? null;
           requestAnimationFrame(() => {
             crossfadeTimerRef.current = window.setTimeout(() => {
               if (!active) return;
               crossfadeTimerRef.current = null;
               setIsExiting(false);
-              setPhase(newPhase);
-            }, CROSSFADE_DURATION_MS);
+              setPhase(transition.enterPhase!);
+            }, transition.delay);
           });
           return;
-        }
+        case "none":
+          return;
+      }
+
+      // show/exit 分支也清除转写状态（进入非 done 的可见相位时）
+      if (newPhase !== "hidden" && newPhase !== "done") {
+        setTxProgress(null);
+        setResult(null);
+        setCopied(false);
+      } else if (newPhase === "done") {
+        setTxProgress(null);
       }
       prevPhaseRef.current = newPhase;
     });
@@ -134,12 +193,10 @@ function Overlay() {
 
   const handleCopy = async () => {
     if (result) {
-      try {
-        await invoke("copy_text", { text: result });
+      const ok = await copyToClipboard(result);
+      if (ok) {
         setCopied(true);
         setTimeout(() => setCopied(false), 2000);
-      } catch {
-        // Clipboard write failed — ignore silently
       }
     }
   };

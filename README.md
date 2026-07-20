@@ -143,7 +143,7 @@ cd frontend; npm install; cd ..
 
 ![首页转写中](figures/home-transcribing.png)
 
-![悬浮窗转写中](figures/悬浮窗转写中.png)
+![悬浮窗转写中](figures/overlay-transcribing.png)
 
 ### 按 Alt 没有反应？
 

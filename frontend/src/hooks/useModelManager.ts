@@ -48,8 +48,8 @@ export function useModelManager({ t }: UseModelManagerOptions): UseModelManagerR
   const progress = useModelDownloadProgress();
 
   const refreshModels = useCallback(() => {
-    invoke<ModelEntry[]>("list_models").then(setModels).catch(() => {});
-  }, []);
+    invoke<ModelEntry[]>("list_models").then(setModels).catch((e) => reportError(t, e));
+  }, [t]);
 
   const refreshResolved = useCallback((model: string, engine: string) => {
     if (engine !== "local" || !model.trim()) {
