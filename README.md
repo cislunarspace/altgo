@@ -14,7 +14,7 @@
 
 - **长按触发**：长按右 Alt 键进入录音模式，松开自动停止并处理
 - **双击切换**：双击右 Alt 键进入连续录音模式，再次单击停止
-- **本地 ASR**：以 **whisper.cpp** 为主；模型可在**设置**里下载并选用，`whisper-cli` 与 **ffmpeg** 等随 **官方预编译包** 一并提供，一般无需自行安装
+- **本地 ASR**：以 **whisper.cpp** 为主；模型可在**设置**里下载并选用，`whisper-cli` 随**官方预编译包**一并提供，一般无需自行安装。有 NVIDIA 显卡的用户安装 CUDA runtime（`libcublas` / `libcublasLt` / `libcudart`）后自动启用 GPU 加速，未安装则回退 CPU
 - **常驻转写提速**：本地模式下自动拉起常驻 **whisper-server**，模型只载入内存一次，之后每句话走本地 HTTP 转写，省去逐句重载模型的冷启动开销；若 whisper-server 不可用，自动回退到一次性 `whisper-cli`
 - **LLM 润色（可选）**：通过 **OpenAI 兼容 API** 或 **Anthropic Messages API** 调用任意厂商或本地部署的 LLM（如云端 API、Ollama、vLLM 等），对转写文本做 light / medium / heavy 等档位润色
 - **悬浮窗与剪贴板**：处理完成后写入剪贴板并弹出悬浮窗；可在悬浮窗内再次复制
@@ -40,7 +40,7 @@
 
 - **运行时**：需要 **WebView2 运行时**（MSI 安装包已内嵌引导，会自动安装；Windows 10 1803+ 和 Windows 11 通常已预装）。
 - **音频**：使用系统默认麦克风，无需额外配置。若应用无法识别录音设备，检查系统声音设置中是否有可用输入设备。
-- **无额外依赖**：`ffmpeg`、`whisper-cli` 等已随 MSI 一并打包，无需单独安装。
+- **无额外依赖**：`whisper-cli` 等已随 MSI 一并打包，无需单独安装。
 
 ## 安装
 
@@ -76,7 +76,7 @@
 
 ### 给开发者（从本仓库构建）
 
-克隆仓库后，在 **Linux** 上使用 **`make build`** 可一次性拉取 **whisper-cli、ffmpeg** 等到 `target/deps/bin/`，执行 `cargo tauri build`，并把依赖二进制拷贝到 `src-tauri/target/release/bin/`，与 CI/打包流程一致。**日常联调与验证同样建议以 `make build`（或下表 Windows 等价命令）为主**，确保与发布产物行为一致。
+克隆仓库后，在 **Linux** 上使用 **`make build`** 可一次性拉取 **whisper-cli** 等到 `target/deps/bin/`，执行 `cargo tauri build`，并把依赖二进制拷贝到 `src-tauri/target/release/bin/`，与 CI/打包流程一致。**日常联调与验证同样建议以 `make build`（或下表 Windows 等价命令）为主**，确保与发布产物行为一致。
 
 在 **Windows** 上无需安装 `make`：使用仓库里的 **`build.ps1` / `build.cmd`**（与 `make build` 同款流程）。需已安装 **Rust（cargo）**、**Node.js（npm）** 与 **PowerShell 7+（`pwsh`，推荐；否则 `build.cmd` 会回退到 Windows PowerShell 5.1）**。
 
@@ -100,7 +100,7 @@ cd frontend; npm install; cd ..
 
 若需快速改前端界面，可临时使用 `cargo tauri dev` 获得热重载；**完整链路（含捆绑二进制、与发布一致）仍以 `make build` / `.\build.ps1` 为准。**
 
-从源码自行构建且**未**走 `make deps-linux` 时，才需要自行保证 **ffmpeg** / **whisper-cli** 可被程序找到（例如加入 `PATH`）。
+从源码自行构建且**未**走 `make deps-linux` 时，才需要自行保证 **whisper-cli** 可被程序找到（例如加入 `PATH`）。
 
 ## 首次使用：应用内设置
 
@@ -207,7 +207,7 @@ sudo apt install build-essential curl wget file \
 
 | 目标 | 说明 |
 | ---- | ---- |
-| `make deps-linux` | 下载 whisper-cli、ffmpeg 等至 `target/deps/bin/` |
+| `make deps-linux` | 下载 whisper-cli 等至 `target/deps/bin/` |
 | `make build` | 依赖上述二进制后 `cargo tauri build`，并拷贝到 `src-tauri/target/release/bin/` |
 | `make install` | 安装可执行文件与 `/etc/altgo` 配置（通常需 `sudo`） |
 | `make run` | 构建后直接运行 |

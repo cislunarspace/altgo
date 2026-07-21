@@ -2,7 +2,7 @@
 # Download platform dependencies for altgo packaging.
 # Usage: ./scripts/download-deps.sh [x86_64|aarch64]
 #
-# Downloads ffmpeg (static) and builds whisper-cli into target/deps/bin/
+# Builds whisper-cli / whisper-server (with optional CUDA backend) into target/deps/bin/.
 
 set -euo pipefail
 
@@ -18,49 +18,6 @@ BIN_DIR="${DEPS_DIR}/bin"
 
 echo "Downloading dependencies for ${ARCH}..."
 mkdir -p "${BIN_DIR}"
-
-# ─── ffmpeg (static build) ────────────────────────────────────────────────────
-FFMPEG_VERSION="${FFMPEG_VERSION:-7.1.1}"
-FFMPEG_TARGET="${BIN_DIR}/ffmpeg"
-
-if [[ -f "${FFMPEG_TARGET}" ]]; then
-    echo "[OK] ffmpeg already exists at ${FFMPEG_TARGET}"
-else
-    echo "[INFO] Downloading ffmpeg ${FFMPEG_VERSION} (${ARCH})..."
-
-    if [[ "${ARCH}" == "x86_64" ]]; then
-        FFMPEG_URL="https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz"
-        # GitHub-hosted fallback (BtbN builds) — more CI-friendly when johnvansickle blocks runners.
-        FFMPEG_FALLBACK_URL="https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-gpl.tar.xz"
-    else
-        FFMPEG_URL="https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-arm64-static.tar.xz"
-        FFMPEG_FALLBACK_URL="https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linuxarm64-gpl.tar.xz"
-    fi
-
-    TMP_DIR=$(mktemp -d)
-    if ! curl --fail --progress-bar --retry 3 --retry-delay 2 -L -o "${TMP_DIR}/ffmpeg.tar.xz" "${FFMPEG_URL}"; then
-        echo "[WARN] Primary ffmpeg source failed, trying fallback..."
-        if ! curl --fail --progress-bar --retry 3 --retry-delay 2 -L -o "${TMP_DIR}/ffmpeg.tar.xz" "${FFMPEG_FALLBACK_URL}"; then
-            echo "[ERROR] ffmpeg download failed from both primary and fallback sources"
-            rm -rf "${TMP_DIR}"
-            exit 1
-        fi
-    fi
-    tar xf "${TMP_DIR}/ffmpeg.tar.xz" -C "${TMP_DIR}"
-
-    # Find the ffmpeg binary inside the extracted directory.
-    FFMPEG_BIN=$(find "${TMP_DIR}" -name "ffmpeg" -type f | head -1)
-    if [[ -z "${FFMPEG_BIN}" ]]; then
-        echo "[ERROR] ffmpeg binary not found in archive"
-        rm -rf "${TMP_DIR}"
-        exit 1
-    fi
-
-    cp "${FFMPEG_BIN}" "${FFMPEG_TARGET}"
-    chmod +x "${FFMPEG_TARGET}"
-    rm -rf "${TMP_DIR}"
-    echo "[OK] ffmpeg downloaded to ${FFMPEG_TARGET}"
-fi
 
 # ─── Detect and compose CMake acceleration flags ──────────────────────────────
 detect_accel_flags() {
@@ -116,6 +73,34 @@ detect_accel_flags() {
     # 如需，可在此加：-DGGML_BLAS=ON -DGGML_BLAS_VENDOR=OpenBLAS
 
     printf '%s' "${flags# }"
+}
+
+# ─── 把目录里的 .so 精简成"单文件、文件名 = SONAME"形态 ─────────────────────
+# whisper.cpp / ggml 构建产物是 libfoo.so → libfoo.so.X → libfoo.so.X.Y.Z 三层软链，
+# 同一份数据被引用三次。Tauri 打包时会解引用软链，把每个 .so 复制成三份独立副本，
+# 把包体积撑大三倍（libggml-cuda 单份 131M → 三份 393M）。
+#
+# 链接器加载库时只认内嵌 SONAME（如 libwhisper.so.1），按该名字在 rpath 目录查找；
+# 所以只保留"名为 SONAME 的真文件"即可，软链和完整版本号文件都是多余的。
+trim_so_to_soname() {
+    local dir="$1"
+    local changed=0
+    # 先收集所有真文件（非软链）的 SONAME，把真文件重命名为 SONAME 名。
+    while IFS= read -r -d '' so; do
+        local soname
+        soname="$(patchelf --print-soname "${so}" 2>/dev/null || true)"
+        [[ -z "${soname}" ]] && continue
+        local target="${dir}/${soname}"
+        if [[ "${so}" != "${target}" ]]; then
+            mv -f "${so}" "${target}"
+            changed=1
+        fi
+    done < <(find "${dir}" -maxdepth 1 -name '*.so*' ! -type l -print0)
+    # 真文件就位后，剩下的 .so* 都是软链（指向已不存在的原名），全部删掉。
+    find "${dir}" -maxdepth 1 -name '*.so*' -type l -delete
+    if [[ "${changed}" -eq 1 ]]; then
+        echo "[OK] trimmed .so symlinks (Tauri would otherwise triplicate them)"
+    fi
 }
 
 # ─── Build whisper-cli from source (persistent cache) ─────────────────────────
@@ -220,6 +205,14 @@ build_whisper_from_source() {
     find "${cache}/build/src" -maxdepth 1 -name 'libwhisper.so*' -exec cp -a {} "${BIN_DIR}/" \;
     find "${cache}/build/ggml/src" -maxdepth 2 -name 'libggml*.so*' -exec cp -a {} "${BIN_DIR}/" \;
 
+    # 把每个 .so 精简成"单文件、文件名 = SONAME"形态：
+    # whisper.cpp 默认产出 libfoo.so → libfoo.so.X → libfoo.so.X.Y.Z 三层软链。
+    # Tauri 打包时会解引用软链，把同一份 .so 复制成三份独立副本——libggml-cuda
+    # 单份 131M，三份就是 393M，把 deb 撑到 340M+。
+    # 链接器加载时只看内嵌 SONAME（如 libwhisper.so.1），按该名字在 rpath 查找；
+    # 所以只保留"名为 SONAME 的真文件"即可，软链和完整版本号文件都是多余的。
+    trim_so_to_soname "${BIN_DIR}"
+
     cp -f "${whisper_bin}" "${target}"
     chmod +x "${target}"
     patchelf --set-rpath '$ORIGIN' "${target}"
@@ -234,56 +227,16 @@ build_whisper_from_source() {
         echo "[WARN] whisper-server not found at ${server_bin}; resident backend will fall back to whisper-cli"
     fi
 
-    # 若启用了 CUDA，还需捆绑 CUDA runtime 动态库（NVIDIA EULA 允许随应用分发）。
-    if [[ "${cmake_flags}" == *"GGML_CUDA=ON"* ]]; then
-        echo "[INFO] Bundling CUDA runtime libraries..."
-        bundle_cuda_libs
-    fi
+    # CUDA runtime（libcublas / libcublasLt / libcudart）不随包分发：
+    # - 这些库很大（libcublasLt 单份就近 500M），打成 deb 会把包撑到 1.5G。
+    # - libggml-cuda.so 通过 dlopen 按需加载，未安装 CUDA 的机器加载失败会自动回退 CPU。
+    # - 有 NVIDIA 显卡的用户自行安装 CUDA runtime 即可启用 GPU 加速。
 
     # 对所有真实文件（跳过符号链接）统一设 $ORIGIN。
     find "${BIN_DIR}" -maxdepth 1 -name '*.so*' ! -type l -exec patchelf --set-rpath '$ORIGIN' {} \;
 
     cd "${REPO_ROOT}"
     echo "[OK] whisper-cli built from source"
-}
-
-# ─── Bundle NVIDIA CUDA runtime libraries ─────────────────────────────────────
-# libcuda.so.1 是驱动库，不允许分发，且通过 -DGGML_CUDA_NO_VMM=ON 已去掉硬依赖；
-# 以下三个 runtime 库允许随应用分发（NVIDIA CUDA Toolkit EULA）。
-bundle_cuda_libs() {
-    local cuda_lib_dirs=()
-    local nvcc_dir
-    nvcc_dir="$(command -v nvcc 2>/dev/null | xargs dirname | xargs dirname)"
-    if [[ -n "${nvcc_dir}" ]]; then
-        cuda_lib_dirs+=("${nvcc_dir}/lib64" "${nvcc_dir}/targets/x86_64-linux/lib")
-    fi
-    # 添加常见 CUDA 安装路径（包括 CI 环境中的版本化路径）
-    for cuda_ver in 12.6 12 13.2 13; do
-        cuda_lib_dirs+=("/usr/local/cuda-${cuda_ver}/lib64" "/usr/local/cuda-${cuda_ver}/targets/x86_64-linux/lib")
-    done
-    cuda_lib_dirs+=(/usr/local/cuda/lib64 /usr/local/cuda/targets/x86_64-linux/lib /usr/lib/x86_64-linux-gnu)
-    local needed=(libcudart.so libcublas.so libcublasLt.so)
-    for lib in "${needed[@]}"; do
-        local found=""
-        for dir in "${cuda_lib_dirs[@]}"; do
-            if [[ -z "${dir}" || ! -d "${dir}" ]]; then continue; fi
-            local candidate=""
-            # 优先复制带版本号的真实 so 文件（如 libcudart.so.12），保留符号链接关系。
-            candidate="$(find "${dir}" -maxdepth 1 -name "${lib}"'*' -not -type l 2>/dev/null | sort -V | tail -1)"
-            if [[ -n "${candidate}" && -f "${candidate}" ]]; then
-                found="${candidate}"
-                break
-            fi
-        done
-        if [[ -n "${found}" ]]; then
-            # 若已有同名文件，先移除再复制（支持升级）
-            rm -f "${BIN_DIR}/$(basename "${found}")"
-            cp -L "${found}" "${BIN_DIR}/"
-            echo "[OK] bundled CUDA runtime: $(basename "${found}")"
-        else
-            echo "[WARN] CUDA runtime library ${lib}* not found — GPU backend may fail on target machine without it"
-        fi
-    done
 }
 
 # ─── whisper-cli (Linux) ─────────────────────────────────────────────────────

@@ -1,6 +1,6 @@
 //! 运行时捆绑资源定位模块。
 //!
-//! 查找与主程序一同安装的捆绑二进制文件（ffmpeg、whisper-cli）。
+//! 查找与主程序一同安装的捆绑二进制文件（whisper-cli、whisper-server）。
 //! 当这些工具未安装在系统 PATH 中时，回退到捆绑位置。
 
 use std::path::PathBuf;

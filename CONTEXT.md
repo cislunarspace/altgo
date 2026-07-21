@@ -7,6 +7,21 @@ This file defines the vocabulary used throughout the altgo codebase. Use these t
 **Voice Pipeline**
 The end-to-end processing chain: key press → recording → transcription → polishing → output. Driven by the state machine; managed at runtime by `PipelineController`.
 
+**Transcription Engine**
+The backend that converts WAV audio to text. Three implementations: `ResidentWhisper` (local whisper.cpp with GPU support), `WhisperApi` (OpenAI-compatible HTTP API), `MimoAsr` (Xiaomi MiMo-V2.5-ASR cloud API). Selected via `engine` field in `TranscriberConfig`.
+
+**MiMo ASR**
+Xiaomi's cloud speech recognition service. Uses OpenAI-compatible `chat.completions` endpoint with `input_audio` content type. Supports wav/mp3, auto language detection (zh/en), and returns text via standard chat completion response format. Endpoint: `https://api.xiaomimimo.com/v1`.
+
+**Provider Preset**
+A pre-configured API provider template containing: name, base URL, API format, recommended models, and category. Used to quick-fill settings for both transcription and polishing engines. Stored in `frontend/src/config/modelPresets.ts`.
+
+**Model Catalog**
+A list of recommended models associated with a Provider Preset. Each entry includes model ID, display name, description, context window, and input modalities (text/audio/image). Users can select from catalog instead of manually typing model names.
+
+**Provider Category**
+Classification of API providers: `official` (OpenAI, Anthropic), `cn_official` (DeepSeek, Kimi, Zhipu), `mimo` (Xiaomi), `aggregator` (SiliconFlow, OpenRouter), `custom` (local whisper). Determines display order and grouping in the preset selector UI.
+
 **Pipeline Status**
 The lifecycle phase of the voice pipeline at any instant: `Idle`, `Recording`, `Processing`, or `Done`. Represented as `PipelineStatus` enum throughout the Rust backend; serialised to lowercase string on the IPC boundary for the frontend.
 

@@ -15,10 +15,6 @@ script: |
   cp "@CMAKE_CURRENT_BINARY_DIR@/altgo" "@APPDIR@/usr/bin/altgo"
   chmod 755 "@APPDIR@/usr/bin/altgo"
 
-  # Copy ffmpeg
-  cp "@DEPS_DIR@/bin/ffmpeg" "@APPDIR@/usr/bin/ffmpeg"
-  chmod 755 "@APPDIR@/usr/bin/ffmpeg"
-
   # Copy whisper-cli
   cp "@DEPS_DIR@/bin/whisper-cli" "@APPDIR@/usr/bin/whisper-cli"
   chmod 755 "@APPDIR@/usr/bin/whisper-cli"

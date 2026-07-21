@@ -11,9 +11,9 @@ ensure-frontend-deps:
 		cd "$(REPO_ROOT)/frontend" && npm install; \
 	fi
 
-# 仅在缺少 ffmpeg / whisper-cli 时跑 download-deps（避免每次 make build 都 git clone）
+# 仅在缺少 whisper-cli 时跑 download-deps（避免每次 make build 都 git clone）
 ensure-binary-deps:
-	@if [ ! -x "$(REPO_ROOT)/target/deps/bin/whisper-cli" ] || [ ! -x "$(REPO_ROOT)/target/deps/bin/ffmpeg" ]; then \
+	@if [ ! -x "$(REPO_ROOT)/target/deps/bin/whisper-cli" ]; then \
 		$(MAKE) deps-linux; \
 	fi
 

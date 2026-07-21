@@ -42,7 +42,7 @@ jobs:
         run: npm test
         working-directory: frontend
 
-      - name: Download bundled binaries (ffmpeg, whisper-cli)
+      - name: Download bundled binaries (whisper-cli)
         run: bash packaging/scripts/download-deps.sh x86_64
 
       - name: Check formatting

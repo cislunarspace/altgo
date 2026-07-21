@@ -1,5 +1,4 @@
 {
   "_comment": "Cross-platform version constants. Mirror values from packaging/scripts/versions.sh so Windows packaging scripts don't need to source a bash file.",
-  "whisperCppVersion": "1.8.4",
-  "ffmpegVersion": "7.1.1"
+  "whisperCppVersion": "1.8.4"
 }

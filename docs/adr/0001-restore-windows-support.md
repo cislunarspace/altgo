@@ -41,7 +41,7 @@ We will restore Windows support as a **first-class target platform**, using **na
 
 ### Binary Dependencies
 
-- `whisper-cli.exe` and `ffmpeg.exe` downloaded via `packaging/scripts/download-deps-windows.ps1`
+- `whisper-cli.exe` downloaded via `packaging/scripts/download-deps-windows.ps1`
 - Version unified via `packaging/scripts/versions.sh`
 
 ### CI/CD
