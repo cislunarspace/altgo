@@ -27,8 +27,8 @@
       {
         "label": "overlay",
         "url": "overlay.html",
-        "width": 200,
-        "height": 48,
+        "width": 520,
+        "height": 180,
         "decorations": false,
         "transparent": true,
         "alwaysOnTop": true,
