@@ -1,5 +1,17 @@
 # Changelog
 
+## v2.5.1 (2026-07-21)
+
+### Packaging
+
+- **移除 ffmpeg 依赖**：删除所有 ffmpeg 下载/打包/文档引用，`whisper-cli` 成为唯一的捆绑二进制。
+- **CUDA runtime 不再随包分发**：改为用户自行安装 CUDA runtime 启用 GPU，未安装时自动回退 CPU，避免 deb 包膨胀到 1.5G。
+- **`.so` 软链精简**：新增 `trim_so_to_soname()` 消除 Tauri 打包时 `.so` 三份复制膨胀（libggml-cuda 单份 131M → 避免 393M）。
+
+### Docs
+
+- **CONTEXT.md 术语扩充**：补充 Transcription Engine、MiMo ASR、Provider Preset、Model Catalog、Provider Category。
+
 ## v2.5.0 (2026-07-20)
 
 ### Features
