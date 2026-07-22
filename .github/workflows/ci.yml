@@ -56,3 +56,32 @@ jobs:
         run: cargo tauri build --bundles deb
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Windows 只验证不打包：fmt + clippy + test，拦住 cfg(windows) 代码的问题
+  # （Linux job 编译不到那段）。tauri_sink 测试仅 Windows 编译（#100），
+  # 其 CI 覆盖由本 job 承接。
+  windows-check:
+    name: Windows Check
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: x86_64-pc-windows-msvc
+
+      - name: Check formatting
+        run: cargo fmt --manifest-path=src-tauri/Cargo.toml --all -- --check
+
+      - name: Clippy
+        run: cargo clippy --manifest-path=src-tauri/Cargo.toml -- -D warnings
+
+      # tauri_sink 测试的 fixture 要构建真实 Wry app，tao 要求 EventLoop 在
+      # 主线程初始化（Windows/Linux 同样限制），libtest 在工作线程跑用例，
+      # 这批测试在任何平台的 cargo test 下都无法运行，精确跳过。
+      - name: Run tests
+        run: cargo test --manifest-path=src-tauri/Cargo.toml --lib -- --skip tauri_sink

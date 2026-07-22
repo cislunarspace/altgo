@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!-- 应用 manifest：exe 与 lib 测试二进制共用（build.rs 以 /MANIFESTINPUT 注入）。
+     内容与 tauri-build 的默认 manifest 相同：声明 comctl32 v6 依赖。
+     rfd（tauri-plugin-dialog 的依赖）静态导入 TaskDialogIndirect，
+     该函数只有 comctl32 v6 导出，缺此 manifest 的进程启动即 0xc0000139。 -->
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+  <dependency>
+    <dependentAssembly>
+      <assemblyIdentity
+        type="win32"
+        name="Microsoft.Windows.Common-Controls"
+        version="6.0.0.0"
+        processorArchitecture="*"
+        publicKeyToken="6595b64144ccf1df"
+        language="*" />
+    </dependentAssembly>
+  </dependency>
+</assembly>

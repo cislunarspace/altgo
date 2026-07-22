@@ -7,7 +7,27 @@ const PLACEHOLDER: &str = "00_tauri_deps_placeholder.txt";
 
 fn main() {
     sync_deps_bin_placeholder();
-    tauri_build::build();
+
+    // exe 和 lib 测试二进制都链接 rfd（tauri-plugin-dialog 的依赖），其静态
+    // 导入 TaskDialogIndirect 只有 comctl32 v6 才导出。tauri-build 默认以
+    // 资源形式给 exe 嵌入 manifest，测试二进制没有，进程启动即
+    // STATUS_ENTRYPOINT_NOT_FOUND（0xc0000139），Windows 上整个测试套件
+    // 无法运行。改为关掉 tauri-build 的 manifest 资源嵌入（避免与链接参数
+    // 产生重复资源 CVT1100），统一用 /MANIFESTINPUT 链接参数注入同一份
+    // manifest，exe 与测试二进制同时覆盖。
+    let attrs = tauri_build::Attributes::new()
+        .windows_attributes(tauri_build::WindowsAttributes::new_without_app_manifest());
+    tauri_build::try_build(attrs).expect("failed to run tauri-build");
+
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
+        let manifest = PathBuf::from(
+            std::env::var_os("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR must be set"),
+        )
+        .join("windows-app-manifest.xml");
+        println!("cargo:rerun-if-changed={}", manifest.display());
+        println!("cargo:rustc-link-arg=/MANIFEST:EMBED");
+        println!("cargo:rustc-link-arg=/MANIFESTINPUT:{}", manifest.display());
+    }
 }
 
 fn sync_deps_bin_placeholder() {
