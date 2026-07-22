@@ -1,5 +1,15 @@
 # Changelog
 
+## v2.5.3 (2026-07-22)
+
+### CI
+
+- **新增 Windows Check job**：CI 在 windows-latest 跑 fmt + clippy + test（不打包），`cfg(windows)` 代码结束零覆盖（#98）。
+- **修复 Windows 上 `cargo test` 无法运行**：rfd 静态导入 `TaskDialogIndirect` 需要 comctl32 v6 manifest，测试二进制此前启动即 0xc0000139；改为 build.rs 统一向 exe 与测试注入 manifest。
+- **tauri_sink 测试平台 gate**：tao 要求 EventLoop 在主线程初始化，libtest 下各平台均无法运行，改为仅 Windows 编译并精确 skip；fixture 重做见 #104（#100）。
+- **抽 `setup-linux-build` composite action**：CI 与 release 的 apt 依赖、`download-deps.sh`、tauri-cli 安装收敛到单点维护，CUDA 安装改为 `enable-cuda` 输入（#99）。
+- **deploy-docs 改为 CI 成功后再部署**，避免红 CI 也发文档站（#97）。
+
 ## v2.5.2 (2026-07-21)
 
 ### Fixes
