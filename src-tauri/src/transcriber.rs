@@ -9,10 +9,10 @@
 //!
 //! 所有实现都返回 `TranscribeResult`（文本 + 语言信息），进度通过闭包回调上报。
 
-use base64::Engine;
 use crate::error::TranscriberError;
 use crate::resource::effective_threads;
 use crate::resource::expand_tilde;
+use base64::Engine;
 use regex::Regex;
 use reqwest::Client;
 use serde::Deserialize;
@@ -282,7 +282,11 @@ impl MimoAsr {
             .to_string();
 
         let language = if detected_language.is_empty() {
-            if language == "auto" { String::new() } else { language }
+            if language == "auto" {
+                String::new()
+            } else {
+                language
+            }
         } else {
             detected_language
         };

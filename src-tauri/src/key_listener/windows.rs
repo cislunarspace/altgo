@@ -156,15 +156,15 @@ impl WindowsListener {
             Ok(Ok(())) => Ok((rx, BACKEND_NAME)),
             Ok(Err(message)) => {
                 self.join_hook_thread();
-                return Err(KeyListenerError::StartFailed(format!(
+                Err(KeyListenerError::StartFailed(format!(
                     "key listener start: {message}"
-                )));
+                )))
             }
             Err(_) => {
                 self.stop_hook_thread();
-                return Err(KeyListenerError::StartFailed(
+                Err(KeyListenerError::StartFailed(
                     "key listener start: timed out waiting for WH_KEYBOARD_LL hook".to_string(),
-                ));
+                ))
             }
         }
     }
