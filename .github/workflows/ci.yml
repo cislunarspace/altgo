@@ -80,5 +80,8 @@ jobs:
       - name: Clippy
         run: cargo clippy --manifest-path=src-tauri/Cargo.toml -- -D warnings
 
+      # tauri_sink 测试的 fixture 要构建真实 Wry app，tao 要求 EventLoop 在
+      # 主线程初始化（Windows/Linux 同样限制），libtest 在工作线程跑用例，
+      # 这批测试在任何平台的 cargo test 下都无法运行，精确跳过。
       - name: Run tests
-        run: cargo test --manifest-path=src-tauri/Cargo.toml --lib
+        run: cargo test --manifest-path=src-tauri/Cargo.toml --lib -- --skip tauri_sink
