@@ -50,7 +50,7 @@ jobs:
         run: cargo build --release --manifest-path=src-tauri/Cargo.toml
 
       - name: Run tests
-        run: cargo test --manifest-path=src-tauri/Cargo.toml --lib -- --skip tauri_sink
+        run: cargo test --manifest-path=src-tauri/Cargo.toml --lib
 
       - name: Build Tauri GUI
         run: cargo tauri build --bundles deb
