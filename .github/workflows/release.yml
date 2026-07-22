@@ -17,19 +17,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev patchelf libasound2-dev build-essential cmake
-
-      - name: Install CUDA toolkit
-        run: |
-          wget -q https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.1-1_all.deb
-          sudo dpkg -i cuda-keyring_1.1-1_all.deb
-          sudo apt-get update
-          sudo apt-get install -y cuda-nvcc-12-6 cuda-cudart-dev-12-6 libcublas-dev-12-6
-          echo "/usr/local/cuda-12.6/bin" >> $GITHUB_PATH
-
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-unknown-linux-gnu
@@ -37,8 +24,9 @@ jobs:
         with:
           key: x86_64-unknown-linux-gnu-release-cuda
 
-      - name: Install Tauri CLI
-        run: cargo install tauri-cli --version "^2" --locked
+      - uses: ./.github/actions/setup-linux-build
+        with:
+          enable-cuda: 'true'
 
       - uses: actions/setup-node@v4
         with:
@@ -47,9 +35,6 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
         working-directory: frontend
-
-      - name: Download bundled binaries
-        run: bash packaging/scripts/download-deps.sh x86_64
 
       - name: Build deb
         run: cargo tauri build --bundles deb
@@ -69,19 +54,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev patchelf libasound2-dev build-essential cmake rpm
-
-      - name: Install CUDA toolkit
-        run: |
-          wget -q https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.1-1_all.deb
-          sudo dpkg -i cuda-keyring_1.1-1_all.deb
-          sudo apt-get update
-          sudo apt-get install -y cuda-nvcc-12-6 cuda-cudart-dev-12-6 libcublas-dev-12-6
-          echo "/usr/local/cuda-12.6/bin" >> $GITHUB_PATH
-
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-unknown-linux-gnu
@@ -89,8 +61,10 @@ jobs:
         with:
           key: x86_64-unknown-linux-gnu-release-rpm-cuda
 
-      - name: Install Tauri CLI
-        run: cargo install tauri-cli --version "^2" --locked
+      - uses: ./.github/actions/setup-linux-build
+        with:
+          enable-cuda: 'true'
+          extra-packages: 'rpm'
 
       - uses: actions/setup-node@v4
         with:
@@ -99,9 +73,6 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
         working-directory: frontend
-
-      - name: Download bundled binaries
-        run: bash packaging/scripts/download-deps.sh x86_64
 
       - name: Build rpm
         run: cargo tauri build --bundles rpm
@@ -121,25 +92,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev patchelf libasound2-dev build-essential cmake flatpak flatpak-builder
+      - uses: dtolnay/rust-toolchain@stable
 
-      - name: Install CUDA toolkit
-        run: |
-          wget -q https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.1-1_all.deb
-          sudo dpkg -i cuda-keyring_1.1-1_all.deb
-          sudo apt-get update
-          sudo apt-get install -y cuda-nvcc-12-6 cuda-cudart-dev-12-6 libcublas-dev-12-6
-          echo "/usr/local/cuda-12.6/bin" >> $GITHUB_PATH
+      - uses: ./.github/actions/setup-linux-build
+        with:
+          enable-cuda: 'true'
+          extra-packages: 'flatpak flatpak-builder'
 
       - name: Install Flatpak SDK
         run: |
           sudo flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
           sudo flatpak install -y --noninteractive flathub org.freedesktop.Platform//23.08 org.freedesktop.Sdk//23.08
-
-      - uses: dtolnay/rust-toolchain@stable
 
       - uses: actions/setup-node@v4
         with:
@@ -149,13 +112,8 @@ jobs:
         run: npm ci
         working-directory: frontend
 
-      - name: Download bundled binaries
-        run: bash packaging/scripts/download-deps.sh x86_64
-
       - name: Build Tauri binary (no bundle)
-        run: |
-          cargo install tauri-cli --version "^2" --locked
-          cargo tauri build --no-bundle
+        run: cargo tauri build --no-bundle
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
