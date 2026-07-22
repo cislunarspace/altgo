@@ -128,7 +128,10 @@ impl PipelineSink for TauriPipelineSink {
     }
 }
 
-#[cfg(test)]
+// 测试 fixture 需要构建真实 Wry app。Linux 上 tao::EventLoop 只能在主线程
+// 初始化，而 libtest 在工作线程跑用例，构建必然 panic，故整个测试模块只在
+// Windows 编译运行（CI 由 windows-check job 覆盖，见 ci.yml）。
+#[cfg(all(test, windows))]
 mod tests {
     use super::*;
     use crate::overlay::seam::OverlayPhase;
