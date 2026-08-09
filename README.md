@@ -18,7 +18,6 @@
 - **常驻转写提速**：本地模式下自动拉起常驻 **whisper-server**，模型只载入内存一次，之后每句话走本地 HTTP 转写，省去逐句重载模型的冷启动开销；若 whisper-server 不可用，自动回退到一次性 `whisper-cli`
 - **LLM 润色（可选）**：通过 **OpenAI 兼容 API** 或 **Anthropic Messages API** 调用任意厂商或本地部署的 LLM（如云端 API、Ollama、vLLM 等），对转写文本做 light / medium / heavy 等档位润色
 - **悬浮窗与剪贴板**：处理完成后写入剪贴板并弹出悬浮窗；可在悬浮窗内再次复制
-- **桌面通知**：处理完成时弹出系统通知（可在设置中开关）
 - **系统托盘**：常驻托盘图标，左键显示/隐藏主窗口，右键菜单提供退出选项
 - **转写历史**：所有成功转写自动保存到本地 `history.json`；支持查看列表、复制、删除单条、清空全部，以及对任意记录**再次润色**
 
@@ -34,7 +33,7 @@
   # 注销并重新登录，或重启后再试
   ```
 
-- **其余系统组件**（桌面、音频、通知相关库）由 **`.deb` 依赖**自动处理，缺什么按安装器提示补装即可。
+- **其余系统组件**（桌面、音频相关库）由 **`.deb` 依赖**自动处理，缺什么按安装器提示补装即可。
 
 ### Windows
 
@@ -110,7 +109,6 @@ cd frontend; npm install; cd ..
 - **润色**：选择是否启用以及轻/中/重度；选择 API 协议（OpenAI 兼容 或 Anthropic）；填写地址、模型名与密钥（适用于云端或本地网关如 Ollama 等）。
 - **外观**：浅色 / 深色 / 跟随系统；**界面语言**。
 - **录音 / 触发键**：预设左右 Alt 或 **「按下以设置」** 捕获快捷键。
-- **输出**：开关桌面通知、剪贴板行为等。
 - 点击 **保存**；多数情况下管道会自动重载，无需重启应用。
 
 跟着界面走即可完成日常使用。
@@ -167,7 +165,7 @@ cd frontend; npm install; cd ..
 ## 架构
 
 ```text
-按键事件 → 状态机 → 录音 → whisper.cpp 转写 → 可选 LLM 润色 → 悬浮窗展示 + 剪贴板 + 通知 + 历史记录持久化
+按键事件 → 状态机 → 录音 → whisper.cpp 转写 → 可选 LLM 润色 → 悬浮窗展示 + 剪贴板 + 历史记录持久化
 ```
 
 altgo 基于 **Tauri**，前端 **React**，核心逻辑 **Rust**。关键模块包括：
@@ -179,7 +177,7 @@ altgo 基于 **Tauri**，前端 **React**，核心逻辑 **Rust**。关键模块
 | `recorder` | 音频采集（Linux: parecord / Windows: cpal-WASAPI） |
 | `transcriber` | 本地常驻 whisper-server（回退 `whisper-cli`）或 OpenAI 兼容 API 转写 |
 | `polisher` | OpenAI 兼容 API 或 Anthropic Messages API 润色 |
-| `output` | 剪贴板写入（Linux: xclip/xsel/wl-copy / Windows: arboard）、桌面通知 |
+| `output` | 剪贴板写入（Linux: xclip/xsel/wl-copy / Windows: arboard） |
 | `history` | 本地 `history.json` 的追加 / 列表 / 删除 / 更新 |
 | `model` | GGML 模型下载与管理 |
 
