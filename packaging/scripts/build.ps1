@@ -1,4 +1,4 @@
-# 与 Linux 上 `make build` 等价：按需拉取 ffmpeg / whisper-cli → cargo tauri build → 拷贝到 src-tauri/target/release/bin/
+# 与 Linux 上 `make build` 等价：按需拉取 whisper-cli → cargo tauri build → 拷贝到 src-tauri/target/release/bin/
 # 在仓库根目录执行：pwsh packaging/scripts/build.ps1
 # 亦可使用根目录的 .\build.ps1
 
@@ -10,11 +10,10 @@ Set-Location $RepoRoot
 
 $BinDeps = Join-Path $RepoRoot "target/deps/bin"
 $Placeholder = "00_tauri_deps_placeholder.txt"
-$Ffmpeg = Join-Path $BinDeps "ffmpeg.exe"
 $Whisper = Join-Path $BinDeps "whisper-cli.exe"
 
-if (-not (Test-Path $Ffmpeg) -or -not (Test-Path $Whisper)) {
-    Write-Host "[INFO] Missing ffmpeg.exe or whisper-cli.exe under target/deps/bin — running download-deps.ps1" `
+if (-not (Test-Path $Whisper)) {
+    Write-Host "[INFO] Missing whisper-cli.exe under target/deps/bin — running download-deps.ps1" `
         -ForegroundColor Cyan
     & (Join-Path $ScriptDir "download-deps-windows.ps1")
 }

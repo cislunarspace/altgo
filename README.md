@@ -2,9 +2,9 @@
 
 **无需打字，言出法随** — 语音转文字桌面工具（Linux + Windows）
 
-按住右 Alt 键说话，松开后在本地用 **whisper.cpp** 转写，可选通过 **OpenAI 兼容 API 或 Anthropic Messages API** 调用 LLM 润色；成功后**会尝试将结果写入系统剪贴板**，并在**悬浮窗**中展示，便于核对；也可在悬浮窗内再次点击复制（例如剪贴板工具不可用或需二次确认时）。所有转写文本（原始 + 润色后）会自动保存到本地**历史记录**，随时可查、可复制、可再次润色。
+按住右 Alt 键说话，松开后在本地用 **whisper.cpp** 转写，可选通过 **OpenAI 兼容 API 或 Anthropic Messages API** 调用 LLM 润色。结果写入系统剪贴板，同时在**悬浮窗**中展示便于核对；若剪贴板写入失败或想再次确认，可在悬浮窗内点按复制。所有转写文本（原始 + 润色后）自动保存到本地**历史记录**，随时可查、可复制、可再次润色。
 
-**在线文档**：[https://cislunarspace.github.io/altgo/](https://cislunarspace.github.io/altgo/)（源码在 [`docs-site/`](docs-site/)，由 GitHub Pages 部署）。
+**在线文档**：[cislunarspace.github.io/altgo](https://cislunarspace.github.io/altgo/)（源码在 [`docs-site/`](docs-site/)，由 GitHub Pages 部署）。
 
 支持 **Linux**（Ubuntu 20.04+）和 **Windows**（MSI 安装包，GitHub Releases 提供）。不支持 macOS。
 
@@ -18,7 +18,6 @@
 - **常驻转写提速**：本地模式下自动拉起常驻 **whisper-server**，模型只载入内存一次，之后每句话走本地 HTTP 转写，省去逐句重载模型的冷启动开销；若 whisper-server 不可用，自动回退到一次性 `whisper-cli`
 - **LLM 润色（可选）**：通过 **OpenAI 兼容 API** 或 **Anthropic Messages API** 调用任意厂商或本地部署的 LLM（如云端 API、Ollama、vLLM 等），对转写文本做 light / medium / heavy 等档位润色
 - **悬浮窗与剪贴板**：处理完成后写入剪贴板并弹出悬浮窗；可在悬浮窗内再次复制
-- **桌面通知**：处理完成时可伴随通知提示（依配置）
 - **系统托盘**：常驻托盘图标，左键显示/隐藏主窗口，右键菜单提供退出选项
 - **转写历史**：所有成功转写自动保存到本地 `history.json`；支持查看列表、复制、删除单条、清空全部，以及对任意记录**再次润色**
 
@@ -34,7 +33,7 @@
   # 注销并重新登录，或重启后再试
   ```
 
-- **其余系统组件**（如与桌面、音频、通知相关的库）由 **`.deb` 的依赖关系** 或发行说明处理：缺什么按安装器提示补装即可，不必手工对照长清单。
+- **其余系统组件**（桌面、音频相关库）由 **`.deb` 依赖**自动处理，缺什么按安装器提示补装即可。
 
 ### Windows
 
@@ -48,29 +47,28 @@
 
 #### Linux
 
-1. 前往 [Releases](../../releases) 下载 **`.deb`** 或 **AppImage**。
-2. 安装 **`.deb`**（Ubuntu / Debian 系）：
-   - **推荐**用 `apt` 从本地文件安装，会**自动处理**依赖（如 GTK / WebKit、系统托盘、剪贴板工具等）：
+1. 前往 [Releases](https://github.com/cislunarspace/altgo/releases) 下载对应发行版的安装包：
+   - **`.deb`**（Ubuntu / Debian 系）
+   - **`.rpm`**（Fedora / RHEL 系）
+   - **`.flatpak`**（任意发行版，需已安装 Flatpak）
+2. 安装（按下载的格式选其一）：
+   - **`.deb`**：推荐用 `apt` 从本地文件安装，会自动处理依赖（GTK / WebKit、系统托盘、剪贴板工具等）：
 
      ```bash
      sudo apt install /path/to/altgo_*_amd64.deb
      ```
 
      将路径换成你保存 deb 的实际位置；在 deb 所在目录时也可写 `sudo apt install ./altgo_*.deb`。
-   - **不建议只用** `sudo dpkg -i …`：dpkg 不会拉取依赖，容易因缺包导致安装不完整。若已用 dpkg 装到一半失败，执行 `sudo apt install -f` 补全依赖。
-   - **AppImage**：赋予执行权限即可运行，无需安装：
-
-     ```bash
-     chmod +x /path/to/altgo-*.AppImage
-     /path/to/altgo-*.AppImage
-     ```
+     不建议只用 `sudo dpkg -i …`：dpkg 不拉依赖，容易缺包；若已装到一半失败，用 `sudo apt install -f` 补全。
+   - **`.rpm`**：`sudo dnf install /path/to/altgo-*.rpm`（自动拉依赖）；无 dnf 时用 `sudo rpm -i …`，需自行保证依赖。
+   - **`.flatpak`**：`flatpak install --user /path/to/altgo-x86_64.flatpak`，首次安装会自动拉取 Flatpak 运行时；之后从应用菜单启动，或 `flatpak run com.github.altgo`。
 
 3. **务必**完成 [系统要求](#linux) 中的 **`input` 组** 步骤（与按键监听相关，安装包无法代劳）。
 4. 启动应用，在 **[设置](#首次使用应用内设置)** 里完成转写模型与可选润色等；**不要**一上来编辑配置文件。
 
 #### Windows
 
-1. 前往 [Releases](../../releases) 下载 **`.msi`** 安装包。
+1. 前往 [Releases](https://github.com/cislunarspace/altgo/releases) 下载 **`.msi`** 安装包。
 2. 双击运行 MSI，按向导完成安装。首次安装时若系统缺少 **WebView2 运行时**，安装程序会自动下载并安装（需联网）。
 3. 启动应用，在 **[设置](#首次使用应用内设置)** 里完成转写模型与可选润色等。
 
@@ -111,7 +109,6 @@ cd frontend; npm install; cd ..
 - **润色**：选择是否启用以及轻/中/重度；选择 API 协议（OpenAI 兼容 或 Anthropic）；填写地址、模型名与密钥（适用于云端或本地网关如 Ollama 等）。
 - **外观**：浅色 / 深色 / 跟随系统；**界面语言**。
 - **录音 / 触发键**：预设左右 Alt 或 **「按下以设置」** 捕获快捷键。
-- **输出**：开关桌面通知、剪贴板行为等。
 - 点击 **保存**；多数情况下管道会自动重载，无需重启应用。
 
 跟着界面走即可完成日常使用。
@@ -168,7 +165,7 @@ cd frontend; npm install; cd ..
 ## 架构
 
 ```text
-按键事件 → 状态机 → 录音 → whisper.cpp 转写 → 可选 LLM 润色 → 悬浮窗展示 + 剪贴板 + 通知 + 历史记录持久化
+按键事件 → 状态机 → 录音 → whisper.cpp 转写 → 可选 LLM 润色 → 悬浮窗展示 + 剪贴板 + 历史记录持久化
 ```
 
 altgo 基于 **Tauri**，前端 **React**，核心逻辑 **Rust**。关键模块包括：
@@ -180,7 +177,7 @@ altgo 基于 **Tauri**，前端 **React**，核心逻辑 **Rust**。关键模块
 | `recorder` | 音频采集（Linux: parecord / Windows: cpal-WASAPI） |
 | `transcriber` | 本地常驻 whisper-server（回退 `whisper-cli`）或 OpenAI 兼容 API 转写 |
 | `polisher` | OpenAI 兼容 API 或 Anthropic Messages API 润色 |
-| `output` | 剪贴板写入（Linux: xclip/xsel/wl-copy / Windows: arboard）、桌面通知 |
+| `output` | 剪贴板写入（Linux: xclip/xsel/wl-copy / Windows: arboard） |
 | `history` | 本地 `history.json` 的追加 / 列表 / 删除 / 更新 |
 | `model` | GGML 模型下载与管理 |
 
@@ -225,7 +222,7 @@ cargo test --manifest-path=src-tauri/Cargo.toml
 
 ## 相关文档
 
-- **用户向站点**：[https://cislunarspace.github.io/altgo/](https://cislunarspace.github.io/altgo/) · 源码 [`docs-site/`](docs-site/)
+- **用户向站点**：[cislunarspace.github.io/altgo](https://cislunarspace.github.io/altgo/) · 源码 [`docs-site/`](docs-site/)
 - [CONTRIBUTING.md](CONTRIBUTING.md)（含 **CI / Release / GitHub Pages** 维护说明）
 - [CLAUDE.md](CLAUDE.md)（面向 AI/贡献者的架构速览）
 - [docs/](docs/)（维护者用的设计与计划归档，见 [`docs/README.md`](docs/README.md)）
