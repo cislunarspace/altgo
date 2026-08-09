@@ -1,5 +1,17 @@
 # Changelog
 
+## v2.5.4 (2026-08-09)
+
+### Docs
+
+- **README 文本润色**：精简开头与若干冗余表述，统一在线文档链接文本。
+- **安装章节对齐实际产物**：release 实际提供 deb / rpm / Flatpak / MSI，README 此前提了从未上架的 AppImage；改为列出三种 Linux 格式并补 rpm / Flatpak 安装命令，Releases 链接改用完整 URL。
+- **清理过时的 AppImage / ffmpeg 引用**：docs-site（quick-start、usage、首页）与 CONTRIBUTING 同步更新；CONTRIBUTING 删除指向已不存在的 `appimage.yml` workflow 的条目。
+
+### Fixes
+
+- **`build.ps1` 的 ffmpeg 残留检查**：v2.5.1 移除 ffmpeg 后漏改，`ffmpeg.exe` 检查恒为缺失、每次构建白跑一遍 `download-deps-windows.ps1`；改为只检查 `whisper-cli.exe`。
+
 ## v2.5.3 (2026-07-22)
 
 ### CI
