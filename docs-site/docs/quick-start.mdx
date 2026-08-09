@@ -7,7 +7,7 @@ title: 快速开始
 
 本软件支持 **Linux**（Ubuntu 20.04+）和 **Windows**。Linux 目前仅在 **Ubuntu 20.04** 上做过测试与部署验证；其他发行版可能可用但未保证。Windows 通过 MSI 安装包提供。
 
-**官方预编译包**（deb / AppImage）会尽量把 **ffmpeg**、**whisper-cli** 等与程序一并打包，安装后**开箱即用**，无需再为录音、转写单独安装这些二进制。
+**官方预编译包**（deb / rpm / Flatpak）会把 **whisper-cli** 与程序一并打包，安装后**开箱即用**，无需再为转写单独安装二进制。
 
 ## Linux：安装前必做（input 组）
 
@@ -23,7 +23,7 @@ sudo usermod -aG input "$USER"
 
 ### Linux
 
-1. 从 [Releases](https://github.com/cislunarspace/altgo/releases) 安装 **`.deb`** 或使用 **AppImage**（`chmod +x` 后运行）。
+1. 从 [Releases](https://github.com/cislunarspace/altgo/releases) 下载对应发行版的安装包：**`.deb`**（Ubuntu/Debian）、**`.rpm`**（Fedora/RHEL）或 **`.flatpak`**。
 2. 完成上文 **input 组**。
 3. 启动应用，打开 **设置**：
    - 在 **转写** 中选用 **本地** 或 **API**（若需要），下载并启用模型，或填写高级路径；
@@ -58,7 +58,7 @@ make build
 
 若需快速改前端 UI，可临时使用 `cargo tauri dev`；完整链路仍以 `make build` 为准。
 
-**Windows**：用 `.\build.ps1` 或 `build.cmd` 替代 `make build`（自动下载 whisper-cli、ffmpeg 后 `cargo tauri build --bundles msi`）。需已安装 Rust（MSVC 工具链）、Node.js、PowerShell 7+。
+**Windows**：用 `.\build.ps1` 或 `build.cmd` 替代 `make build`（自动下载 whisper-cli 后 `cargo tauri build --bundles msi`）。需已安装 Rust（MSVC 工具链）、Node.js、PowerShell 7+。
 
 ## 高级：仅当你要手改配置文件时
 
