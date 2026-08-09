@@ -10,12 +10,18 @@ on:
       force:
         description: '强制重建并覆盖（即使该版本 release 已存在）'
         required: false
-        default: 'false'
+        type: boolean
+        default: false
   push:
     branches: [master]
     paths:
       - 'packaging/scripts/versions.sh'
       - 'packaging/scripts/versions.json'
+
+# 单次编译约 50 分钟，避免同一版本并发重复构建（后上传者覆盖先者，纯浪费）。
+concurrency:
+  group: whisper-prebuild
+  cancel-in-progress: false
 
 env:
   CARGO_TERM_COLOR: always
@@ -27,6 +33,10 @@ jobs:
   prebuild:
     name: Prebuild whisper deps (Linux x86_64 + CUDA)
     runs-on: ubuntu-22.04
+    env:
+      # 本 job 是"源码重建"，必须绕过 download-deps.sh 的预编译下载路径，
+      # 否则 force 重建会从 release 拉回旧产物而非真正重编。
+      ALTGO_WHISPER_SKIP_PREBUILT: '1'
     steps:
       - uses: actions/checkout@v4
 

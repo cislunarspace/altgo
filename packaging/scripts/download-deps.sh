@@ -103,6 +103,67 @@ trim_so_to_soname() {
     fi
 }
 
+# ─── 下载预编译 whisper 产物（优先路径）────────────────────────────────────
+# whisper-prebuild workflow 已把 whisper.cpp + CUDA 产物打成 tarball，上传到
+# release `whisper-deps-<WHISPER_CPP_VERSION>`。release 各 job 下载它即可，省去
+# 每个 job 装 CUDA toolkit + 源码编译（单次约 50 分钟）。
+# 仅 x86_64 提供预编译；aarch64 或显式跳过（ALTGO_WHISPER_SKIP_PREBUILT=1）时
+# 返回非 0，调用方回退源码编译。
+download_prebuilt_whisper() {
+    if [[ "${ARCH}" != "x86_64" ]]; then
+        echo "[INFO] 预编译仅提供 x86_64（当前 ${ARCH}）— 走源码编译"
+        return 1
+    fi
+    # whisper-prebuild 的 force 重建必须绕过下载，否则 fresh runner 会拉到旧产物，
+    # "强制重建"名存实亡。该 workflow 在 job 级设 ALTGO_WHISPER_SKIP_PREBUILT=1。
+    if [[ "${ALTGO_WHISPER_SKIP_PREBUILT:-0}" == "1" ]]; then
+        echo "[INFO] ALTGO_WHISPER_SKIP_PREBUILT=1 — 跳过预编译，走源码编译"
+        return 1
+    fi
+
+    local tag="whisper-deps-${WHISPER_CPP_VERSION}"
+    local asset="whisper-deps-${WHISPER_CPP_VERSION}-x86_64.tar.gz"
+    local url="https://github.com/cislunarspace/altgo/releases/download/${tag}/${asset}"
+
+    echo "[INFO] 下载预编译 whisper 产物: ${url}"
+    local tmp
+    tmp="$(mktemp)"
+    if ! curl --fail --location --progress-bar \
+        --connect-timeout 30 \
+        --max-time 600 \
+        --retry 2 \
+        --retry-delay 3 \
+        -o "${tmp}" "${url}"; then
+        rm -f "${tmp}"
+        echo "[INFO] 预编译下载失败（release 不存在或网络问题）— 回退源码编译"
+        return 1
+    fi
+
+    # tarball 内层是 bin/（见 whisper-prebuild.yml 的 tar -C target/deps -czf ... bin），
+    # 解压到 DEPS_DIR 即还原 target/deps/bin/。
+    if ! tar xzf "${tmp}" -C "${DEPS_DIR}"; then
+        rm -f "${tmp}"
+        echo "[ERROR] 预编译 tarball 解压失败 — 回退源码编译"
+        return 1
+    fi
+    rm -f "${tmp}"
+
+    # 校验 5 类产物齐全（与 whisper-prebuild.yml 的 verify 步骤一致）。
+    local ok=1
+    [[ -x "${BIN_DIR}/whisper-cli" ]] || ok=0
+    [[ -x "${BIN_DIR}/whisper-server" ]] || ok=0
+    [[ "$(find "${BIN_DIR}" -maxdepth 1 -name 'libwhisper.so*' ! -type l | wc -l)" -ge 1 ]] || ok=0
+    [[ "$(find "${BIN_DIR}" -maxdepth 1 -name 'libggml.so*' ! -type l | wc -l)" -ge 1 ]] || ok=0
+    [[ "$(find "${BIN_DIR}" -maxdepth 1 -name 'libggml-cuda.so*' ! -type l | wc -l)" -ge 1 ]] || ok=0
+    if [[ "${ok}" -ne 1 ]]; then
+        echo "[ERROR] 预编译产物校验不全 — 回退源码编译"
+        return 1
+    fi
+
+    echo "[OK] 预编译 whisper 产物就绪 (${tag})"
+    return 0
+}
+
 # ─── Build whisper-cli from source (persistent cache) ─────────────────────────
 # 使用 GitHub 源码归档 tar.gz + target/deps/whisper.cpp-src，避免 git clone 在网络差时长时间无输出/卡住。
 # 版本变化、缓存损坏或构建选项变化时重新下载/重新配置；日常仅增量 cmake build。
@@ -247,6 +308,8 @@ WHISPER_TARGET="${BIN_DIR}/whisper-cli"
 
 if [[ -f "${WHISPER_TARGET}" ]]; then
     echo "[OK] whisper-cli already exists at ${WHISPER_TARGET}"
+elif download_prebuilt_whisper; then
+    echo "[OK] whisper-cli obtained from prebuilt release"
 else
     echo "[INFO] Building whisper-cli v${WHISPER_VERSION} from source (${ARCH})..."
     build_whisper_from_source "${WHISPER_TARGET}"
