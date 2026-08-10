@@ -1,98 +1,98 @@
-# Domain Glossary
+# 领域术语表
 
-This file defines the vocabulary used throughout the altgo codebase. Use these terms exactly in code, documentation, and architectural discussions.
+本文件定义 altgo 代码库中使用的术语。写代码、文档和架构讨论时，请原样使用这些词。
 
-## Core Pipeline
+## 核心流水线
 
-**Voice Pipeline**
-The end-to-end processing chain: key press → recording → transcription → polishing → output. Driven by the state machine; managed at runtime by `PipelineController`.
+**语音流水线（Voice Pipeline）**
+端到端处理链：按键 → 录音 → 转写 → 润色 → 输出。由状态机驱动，运行时由 `PipelineController` 管理。
 
-**Transcription Engine**
-The backend that converts WAV audio to text. Three implementations: `ResidentWhisper` (local whisper.cpp with GPU support), `WhisperApi` (OpenAI-compatible HTTP API), `MimoAsr` (Xiaomi MiMo-V2.5-ASR cloud API). Selected via `engine` field in `TranscriberConfig`.
+**转写引擎（Transcription Engine）**
+把 WAV 音频转成文本的后端。三种实现：`ResidentWhisper`（本地 whisper.cpp，支持 GPU）、`WhisperApi`（OpenAI 兼容 HTTP API）、`MimoAsr`（小米 MiMo-V2.5-ASR 云 API）。通过 `TranscriberConfig` 的 `engine` 字段选择。
 
 **MiMo ASR**
-Xiaomi's cloud speech recognition service. Uses OpenAI-compatible `chat.completions` endpoint with `input_audio` content type. Supports wav/mp3, auto language detection (zh/en), and returns text via standard chat completion response format. Endpoint: `https://api.xiaomimimo.com/v1`.
+小米的云端语音识别服务。走 OpenAI 兼容的 `chat.completions` 端点，用 `input_audio` 内容类型。支持 wav/mp3，自动检测语言（zh/en），按标准聊天补全响应格式返回文本。端点：`https://api.xiaomimimo.com/v1`。
 
-**Provider Preset**
-A pre-configured API provider template containing: name, base URL, API format, recommended models, and category. Used to quick-fill settings for both transcription and polishing engines. Stored in `frontend/src/config/modelPresets.ts`.
+**提供商预设（Provider Preset）**
+预配置的 API 提供商模板，包含名称、base URL、API 格式、推荐模型与分类。用于快速填充转写与润色引擎的设置。存放在 `frontend/src/config/modelPresets.ts`。
 
-**Model Catalog**
-A list of recommended models associated with a Provider Preset. Each entry includes model ID, display name, description, context window, and input modalities (text/audio/image). Users can select from catalog instead of manually typing model names.
+**模型目录（Model Catalog）**
+与某提供商预设关联的推荐模型列表。每条含模型 ID、显示名、描述、上下文窗口与输入模态（文本/音频/图像）。用户可从目录中挑选，无需手动输入模型名。
 
-**Provider Category**
-Classification of API providers: `official` (OpenAI, Anthropic), `cn_official` (DeepSeek, Kimi, Zhipu), `mimo` (Xiaomi), `aggregator` (SiliconFlow, OpenRouter), `custom` (local whisper). Determines display order and grouping in the preset selector UI.
+**提供商分类（Provider Category）**
+API 提供商的分类：`official`（OpenAI、Anthropic）、`cn_official`（DeepSeek、Kimi、智谱）、`mimo`（小米）、`aggregator`（SiliconFlow、OpenRouter）、`custom`（本地 whisper）。决定预设选择器 UI 中的显示顺序与分组。
 
-**Pipeline Status**
-The lifecycle phase of the voice pipeline at any instant: `Idle`, `Recording`, `Processing`, or `Done`. Represented as `PipelineStatus` enum throughout the Rust backend; serialised to lowercase string on the IPC boundary for the frontend.
+**管道状态（Pipeline Status）**
+语音管道任意时刻的生命周期阶段：`Idle`、`Recording`、`Processing`、`Done`、`Stopped`。在 Rust 后端以 `PipelineStatus` 枚举表示，跨 IPC 边界序列化为小写字符串给前端。
 
 **PipelineController**
-Owns the pipeline run handle and the shared `PipelineStatus` arc. Responsible for start, stop, and restart. Does not know how to spawn a pipeline — callers inject a spawn closure so this module stays free of Tauri and sink dependencies. Lives in `pipeline_controller.rs`.
+拥有管道运行句柄与共享的 `PipelineStatus` Arc。负责 start、stop、restart。不知道如何生成管道——调用方注入 spawn 闭包，使本模块不依赖 Tauri 与 sink。位于 `pipeline_controller.rs`。
 
 **PipelineSink**
-The trait that receives events from the running pipeline: status changes, progress, errors, and transcription results. `TauriPipelineSink` in `tauri_sink.rs` is the single concrete adapter in production use. The transcription-result path delegates business work (clipboard write + history append) to a `TranscriptionDispatch` trait object injected at construction; the sink itself only emits Tauri events and toggles overlay state.
+接收运行中管道事件的 trait：状态变更、进度、错误、转写结果。`tauri_sink.rs` 的 `TauriPipelineSink` 是生产环境唯一的实体适配器。转写结果路径把业务工作（剪贴板写入 + 历史追加）委托给构造时注入的 `TranscriptionDispatch` trait 对象；sink 本身只发 Tauri 事件并切换浮窗状态。
 
-## Configuration
+## 配置
 
 **ConfigStore**
-Holds the live in-memory config behind a `Mutex` alongside the backing file path. Exposes `snapshot`, `snapshot_blocking`, and `apply_patch`. All config mutations go through `apply_patch`, which validates and persists atomically. Lives in `config_store.rs`.
+在 `Mutex` 后持有内存中的活动配置，连同文件路径。暴露 `snapshot`、`snapshot_blocking`、`apply_patch`。所有配置变更都经 `apply_patch` 校验并写盘。校验失败时内存已部分应用、不落盘（非原子回滚）。位于 `config_store.rs`。
 
 **ConfigPatch**
-A partial update to the config: all fields optional, absent fields left unchanged. The `linux_evdev_code` field uses a three-state deserialiser to distinguish absent (no change) from JSON `null` (clear the stored code). This is the type accepted by `save_config` over IPC.
+配置的部分更新：所有字段可选，未提供的字段保持不变。`linux_evdev_code` 字段用三态反序列化器区分缺省（不修改）与 JSON `null`（清除已存代码）。这是 `save_config` 经 IPC 接受的类型。
 
-## History
+## 历史
 
 **HistoryStore**
-Wraps the history JSON file and exposes named operations: `list`, `count`, `append`, `delete`, `clear`, `get`, `update_text`. Callers never handle the file path or module-private helpers. Lives in `history.rs`. Each instance is cheap to clone (it contains only a `PathBuf`).
+包装历史 JSON 文件，暴露具名操作：`list`、`count`、`append`、`delete`、`clear`、`get`、`update_text`。调用方从不接触文件路径或模块私有辅助函数。位于 `history.rs`。每个实例克隆便宜（只含一个 `PathBuf`）。
 
-**HistoryEntry**
-A single transcription record: `id`, `createdAtMs`, `rawText` (Whisper output), `text` (polished or same as raw). Audio is never stored.
+**历史条目（HistoryEntry）**
+单条转写记录：`id`、`createdAtMs`、`rawText`（whisper 输出）、`text`（润色后，或与原文相同）。永不存音频。
 
-## Output
+## 输出
 
-**Overlay**
-The floating status window shown during recording, processing, and result display. Positioned on the primary monitor via `xrandr` geometry. Managed by `TauriPipelineSink` on status transitions through an `OverlaySink` abstraction; `TauriPipelineSink` only describes intent ("recording" / "processing" / "hidden" / "done"), the overlay manager translates that to window size/position/show/hide. The window uses one fixed size for all phases — resizing a transparent window mid-session causes compositor black fringes on Linux, so phase changes only swap frontend content (CSS crossfade). `hidden` is emitted first and the actual window hide is delayed (~220ms) so the exit animation is visible. On the transcription-result path, `transcription-result` is emitted before the `done` overlay state so the frontend never renders an empty island. The island uses no `box-shadow` — translucent shadows over the transparent window composite into a dark halo on some Linux compositors.
+**悬浮窗（Overlay）**
+录音、处理与结果显示时出现的悬浮状态窗口。定位在主显示器（Windows 用 `GetMonitorInfoW` 取显示器几何）。状态切换时由 `TauriPipelineSink` 经 `OverlaySink` 抽象管理；`TauriPipelineSink` 只描述意图（"recording" / "processing" / "hidden" / "done"），浮窗管理器把它转成窗口尺寸、位置、显示与隐藏。窗口在全部阶段使用一个固定尺寸——会话中调整透明窗口尺寸会在 Linux 合成器上产生黑色边缘，所以阶段切换只替换前端内容（CSS 交叉淡入）。`hidden` 先发出，实际隐藏延迟约 220ms 以便退出动画可见。转写结果路径上，`transcription-result` 在 `done` 浮窗状态之前发出，前端不会渲染出空 island。island 不使用 `box-shadow`——半透明阴影叠加在透明窗口上会在某些 Linux 合成器上合成出暗色光晕。
 
-**Polisher**
-The optional LLM post-processing step. Controlled by `PolishLevel` (`none`/`light`/`medium`/`heavy`). Communicates with any OpenAI-compatible chat API.
+**润色器（Polisher）**
+可选的 LLM 后处理步骤。由 `PolishLevel`（`none`/`light`/`medium`/`heavy`）控制。与任意 OpenAI 兼容聊天 API 或 Anthropic Messages API 通信。
 
 **PromptStore**
-Manages prompt template files for the Polisher: loads from `resources/prompts/`, composes base + level-specific suffix into complete system prompts, validates on first use, and hot-reloads when files change. Validation errors degrade gracefully—polishing continues with raw transcription text and an overlay error message.
+管理润色器的 prompt 模板文件：从 `resources/prompts/` 加载，把 base + 各档后缀组合成完整系统 prompt，首次使用时校验。启动时加载一次，改文件需重启。校验失败时降级（退回自定义或内置 prompt，润色继续用原文）。
 
-**Prompt Template**
-A text file in `resources/prompts/`: either `base.txt` (shared instruction + Chinese writing guidance) or `{level}-suffix.txt` (level-specific instruction appended to base). Runtime composition produces the complete system prompt sent to the LLM.
+**Prompt 模板（Prompt Template）**
+`resources/prompts/` 中的文本文件：`base.txt`（共享指令 + 中文写作指导）或 `{level}-suffix.txt`（追加到 base 之后的各档指令）。运行时组合产生发给 LLM 的完整系统 prompt。
 
-**System Prompt**
-The complete prompt text sent to the LLM for polishing, composed at runtime from `base.txt` + `{level}-suffix.txt`. Cached in memory and reloaded when template files change.
+**系统 prompt（System Prompt）**
+发给 LLM 用于润色的完整 prompt 文本，组合自 `base.txt` + `{level}-suffix.txt`，缓存于内存，启动时加载一次。
 
-## Recording
+## 录音
 
-**Recorder Output Format**
-The audio format the Voice Pipeline expects a recorder to return as WAV bytes. The configured `sample_rate` describes the target recorder output sample rate (default 16kHz); output is always mono 16-bit PCM. Platform recorders may adapt native device formats into this target shape where practical.
+**录音输出格式（Recorder Output Format）**
+语音管道期望录音器以 WAV 字节返回的音频格式。配置的 `sample_rate` 描述目标录音输出采样率（默认 16kHz）；输出总是单声道 16 位 PCM。平台录音器在可行处把原生设备格式适配成这一目标形态。
 
-**Windows Recording Format Adaptation**
-On Windows, the recorder captures from the default WASAPI input device and adapts common device sample formats (`i16`, `u16`, `f32`) into signed 16-bit PCM. Multi-channel input is downmixed to mono when the target output is mono. If the device cannot capture at the target sample rate, the recorder resamples the captured audio to the target rate before returning WAV bytes.
+**Windows 录音格式适配（Windows Recording Format Adaptation）**
+在 Windows 上，录音器从默认 WASAPI 输入设备捕获，把常见设备采样格式（`i16`、`u16`、`f32`）适配为有符号 16 位 PCM。目标输出为单声道时，多声道输入下混为单声道。设备无法以目标采样率捕获时，录音器在返回 WAV 字节前把音频重采样到目标采样率。
 
-## Key Input
+## 按键输入
 
-**KeyListener**
-The interface for continuously monitoring the configured activation key and emitting `KeyEvent`s while the pipeline is running. Implemented by platform adapters (`X11Listener` on Linux, `WindowsListener` on Windows). The pipeline consumes it as `Box<dyn KeyListener>` so the same lifecycle code runs on both platforms.
-_Avoid_: key listener (lowercase, when referring to the concept), platform listener.
+**按键监听器（KeyListener）**
+管道运行期间持续监听配置的激活键并发出 `KeyEvent` 的接口。由平台适配器实现（Linux 为 `X11Listener`，Windows 为 `WindowsListener`）。管道以 `Box<dyn KeyListener>` 消费它，两边平台运行同一套生命周期代码。
+_Avoid_: key listener（指概念时小写）、platform listener。
 
-**KeyCapture**
-The interface for one-shot capture of any physical key during Settings configuration, returning the key identifiers needed by `KeyListenerConfig` (`key_name`, `linux_evdev_code`, `windows_vk`). Implemented by platform adapters that reuse the same low-level input mechanism as `KeyListener` but expose a synchronous blocking API.
-_Avoid_: capture mode, key capture mode.
+**按键捕获（KeyCapture）**
+设置配置期间一次性捕获任意物理键的**函数**（无 trait 抽象，按平台 cfg 分派；Linux 用 evtest，Windows 用 WH_KEYBOARD_LL hook），返回 `KeyListenerConfig` 所需的键标识符（`key_name`、`linux_evdev_code`、`windows_vk`）。平台实现复用与 `KeyListener` 相同的底层输入机制，但暴露同步阻塞式 API。
+_Avoid_: capture mode、key capture mode。
 
-**Activation Key**
-The physical key held to start recording. Configured per-device as either an X11 keysym name (`key_name`) or an evdev scancode (`linux_evdev_code`). The evdev path is preferred on Wayland. On Windows, configured via Windows virtual key code (`windows_vk`); falls back to `key_name` if absent. If the user edits `key_name` through Settings after a Windows capture, `windows_vk` is cleared so the new `key_name` takes effect.
+**激活键（Activation Key）**
+按住即开始录音的物理键。按设备配置为 X11 keysym 名（`key_name`）或 evdev 扫描码（`linux_evdev_code`）。Wayland 上优先 evdev 路径。在 Windows 上经 Windows 虚拟键码（`windows_vk`）配置；缺省时回退 `key_name`。若用户在 Windows 捕获后通过设置修改 `key_name`，`windows_vk` 会被清除，使新的 `key_name` 生效。
 
 **Windows VK**
-Windows virtual key code (`i32`) identifying the activation key on the Windows platform. Stored in config as `windows_vk`. Captured at runtime via a low-level keyboard hook (`WH_KEYBOARD_LL`) in capture mode. Preferred over `key_name` when running on Windows, unless it has just been cleared by a manual `key_name` edit.
+在 Windows 平台上标识激活键的 Windows 虚拟键码（`i32`）。配置中以 `windows_vk` 存储。捕获模式下经低级键盘钩子（`WH_KEYBOARD_LL`）在运行时捕获。在 Windows 上优先于 `key_name`，除非刚被手动编辑 `key_name` 清除。
 
-**Windows VK Name Map**
-A small mapping from X11-style keysym names to Windows virtual-key codes, used as a fallback when `windows_vk` is absent. Supports the keys most commonly chosen as the activation key: `Alt_L`, `Alt_R`, `Control_L`, `Control_R`, `Shift_L`, `Shift_R`, `space`, `Return`, `Tab`, `Escape`, and `F1`–`F12`. Unknown names cause `WindowsListener::new` to fail fast with a clear error, so users know immediately instead of wondering why the key does not trigger recording.
+**Windows VK 名称映射（Windows VK Name Map）**
+从 X11 风格 keysym 名到 Windows 虚拟键码的小映射，用作 `windows_vk` 缺省时的回退。支持最常选作激活键的键：`Alt_L`、`Alt_R`、`Control_L`、`Control_R`、`Shift_L`、`Shift_R`、`space`、`Return`、`Tab`、`Escape`、`F1`–`F12`。未知名称使 `WindowsListener::new` 快速失败并给出清晰错误，用户能立即知道原因，而不是困惑为何按键不触发录音。
 
-**Windows Capture Mode**
-When the user presses a key during Windows activation-key capture, the low-level hook returns the Windows virtual-key code. The response stores it as `windows_vk` and presents an X11-style `key_name` (e.g. `Alt_R`) so the displayed activation key remains consistent across platforms. The capture implementation lives in `key_listener::windows` and is re-exported through `key_capture` as `CaptureActivationResponse`.
+**Windows 捕获模式（Windows Capture Mode）**
+用户在 Windows 激活键捕获期间按下键时，低级钩子返回 Windows 虚拟键码。响应以 `windows_vk` 存储，并给出 X11 风格 `key_name`（如 `Alt_R`），使显示的激活键跨平台一致。捕获实现在 `key_listener::windows`，经 `key_capture` 以 `CaptureActivationResponse` 重新导出。
 
-**State Machine**
-The 5-state FSM (`Idle → PotentialPress → Recording → WaitSecondClick → ContinuousRecording`) that translates raw key events into `StartRecord` / `StopRecord` commands for the pipeline.
+**状态机（State Machine）**
+把原始按键事件翻译成管道 `StartRecord` / `StopRecord` 命令的 5 状态 FSM（`Idle → PotentialPress → Recording → WaitSecondClick → ContinuousRecording`）。

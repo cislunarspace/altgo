@@ -150,8 +150,12 @@ mod tests {
     struct RecordingOverlayWindow {
         calls: Arc<Mutex<Vec<String>>>,
         monitor: Result<(i32, i32, i32, i32), String>,
-        scale: f64,
+        scale: Result<f64, String>,
         prepare_fails: bool,
+        hide_fails: bool,
+        set_size_fails: bool,
+        emit_fails: bool,
+        set_position_fails: bool,
     }
 
     impl RecordingOverlayWindow {
@@ -159,8 +163,12 @@ mod tests {
             Self {
                 calls: Arc::new(Mutex::new(Vec::new())),
                 monitor: Ok(monitor),
-                scale,
+                scale: Ok(scale),
                 prepare_fails: false,
+                hide_fails: false,
+                set_size_fails: false,
+                emit_fails: false,
+                set_position_fails: false,
             }
         }
 
@@ -168,8 +176,12 @@ mod tests {
             Self {
                 calls: Arc::new(Mutex::new(Vec::new())),
                 monitor: Err("no monitor".into()),
-                scale,
+                scale: Ok(scale),
                 prepare_fails: false,
+                hide_fails: false,
+                set_size_fails: false,
+                emit_fails: false,
+                set_position_fails: false,
             }
         }
 
@@ -177,8 +189,45 @@ mod tests {
             Self {
                 calls: Arc::new(Mutex::new(Vec::new())),
                 monitor: Ok(monitor),
-                scale,
+                scale: Ok(scale),
                 prepare_fails: true,
+                hide_fails: false,
+                set_size_fails: false,
+                emit_fails: false,
+                set_position_fails: false,
+            }
+        }
+
+        fn with_scale_error() -> Self {
+            Self {
+                calls: Arc::new(Mutex::new(Vec::new())),
+                monitor: Ok((0, 0, 1920, 1080)),
+                scale: Err("no scale".into()),
+                prepare_fails: false,
+                hide_fails: false,
+                set_size_fails: false,
+                emit_fails: false,
+                set_position_fails: false,
+            }
+        }
+
+        fn with_operation_error(
+            monitor: (i32, i32, i32, i32),
+            scale: f64,
+            hide_fails: bool,
+            set_size_fails: bool,
+            emit_fails: bool,
+            set_position_fails: bool,
+        ) -> Self {
+            Self {
+                calls: Arc::new(Mutex::new(Vec::new())),
+                monitor: Ok(monitor),
+                scale: Ok(scale),
+                prepare_fails: false,
+                hide_fails,
+                set_size_fails,
+                emit_fails,
+                set_position_fails,
             }
         }
 
@@ -194,16 +243,25 @@ mod tests {
     impl OverlayWindow for RecordingOverlayWindow {
         fn emit_state(&self, state: &OverlayState) -> Result<(), OverlayError> {
             self.record(format!("emit:{}", state.phase.as_str()));
+            if self.emit_fails {
+                return Err(OverlayError::EmitFailed("forced".into()));
+            }
             Ok(())
         }
 
         fn set_size(&self, size: LogicalSize<f64>) -> Result<(), OverlayError> {
             self.record(format!("size:{:.0}x{:.0}", size.width, size.height));
+            if self.set_size_fails {
+                return Err(OverlayError::SetSizeFailed("forced".into()));
+            }
             Ok(())
         }
 
         fn set_position(&self, position: PhysicalPosition<i32>) -> Result<(), OverlayError> {
             self.record(format!("position:{},{}", position.x, position.y));
+            if self.set_position_fails {
+                return Err(OverlayError::SetPositionFailed("forced".into()));
+            }
             Ok(())
         }
 
@@ -222,12 +280,15 @@ mod tests {
 
         fn hide(&self) -> Result<(), OverlayError> {
             self.record("hide");
+            if self.hide_fails {
+                return Err(OverlayError::HideFailed("forced".into()));
+            }
             Ok(())
         }
 
         fn scale_factor(&self) -> Result<f64, OverlayError> {
             self.record("scale_factor");
-            Ok(self.scale)
+            self.scale.clone().map_err(OverlayError::ScaleFactorFailed)
         }
 
         fn primary_monitor_geometry(&self) -> Result<(i32, i32, i32, i32), OverlayError> {
@@ -328,5 +389,128 @@ mod tests {
         let position = position_overlay(&window, 200.0, 48.0).unwrap();
 
         assert_eq!(position, PhysicalPosition::new(1820, 1954));
+    }
+
+    #[test]
+    fn test_hide_failure_warns_but_continues() {
+        let window = RecordingOverlayWindow::with_operation_error(
+            (0, 0, 1920, 1080),
+            1.0,
+            true,
+            false,
+            false,
+            false,
+        );
+        let manager = OverlayManager::new(window.clone());
+
+        manager.set_state(OverlayState::hidden());
+        std::thread::sleep(HIDE_DELAY + Duration::from_millis(100));
+
+        assert!(window.calls().contains(&"emit:hidden".to_string()));
+        assert!(window.calls().contains(&"hide".to_string()));
+    }
+
+    #[test]
+    fn test_set_size_failure_warns_but_continues() {
+        let window = RecordingOverlayWindow::with_operation_error(
+            (0, 0, 1920, 1080),
+            1.0,
+            false,
+            true,
+            false,
+            false,
+        );
+        let manager = OverlayManager::new(window.clone());
+
+        manager.set_state(OverlayState::recording());
+
+        assert!(window.calls().contains(&"size:520x180".to_string()));
+        assert!(window.calls().contains(&"show".to_string()));
+    }
+
+    #[test]
+    fn test_emit_state_failure_warns_but_continues() {
+        let window = RecordingOverlayWindow::with_operation_error(
+            (0, 0, 1920, 1080),
+            1.0,
+            false,
+            false,
+            true,
+            false,
+        );
+        let manager = OverlayManager::new(window.clone());
+
+        manager.set_state(OverlayState::recording());
+
+        assert!(window.calls().contains(&"emit:recording".to_string()));
+        assert!(window.calls().contains(&"show".to_string()));
+    }
+
+    #[test]
+    fn test_set_position_failure_warns_but_continues() {
+        let window = RecordingOverlayWindow::with_operation_error(
+            (0, 0, 1920, 1080),
+            1.0,
+            false,
+            false,
+            false,
+            true,
+        );
+        let manager = OverlayManager::new(window.clone());
+
+        manager.set_state(OverlayState::recording());
+
+        assert!(window.calls().contains(&"position:700,820".to_string()));
+        assert!(window.calls().contains(&"show".to_string()));
+    }
+
+    #[test]
+    fn test_scale_factor_failure_returns_err() {
+        let window = RecordingOverlayWindow::with_scale_error();
+        let result = position_overlay(&window, 520.0, 180.0);
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_negative_x_coordinate_clamped() {
+        // Monitor narrower than the overlay width (scale 1.0).
+        let window = RecordingOverlayWindow::new((0, 0, 500, 1080), 1.0);
+        let position = position_overlay(&window, 520.0, 180.0).unwrap();
+
+        // x is negative because physical_width > monitor_width; integer division yields -10.
+        assert_eq!(position.x, -10);
+    }
+
+    #[test]
+    fn test_hidden_hidden_cancels_first_hide() {
+        let window = RecordingOverlayWindow::new((0, 0, 1920, 1080), 1.0);
+        let manager = OverlayManager::new(window.clone());
+
+        manager.set_state(OverlayState::hidden());
+        std::thread::sleep(Duration::from_millis(50));
+        manager.set_state(OverlayState::hidden());
+
+        std::thread::sleep(HIDE_DELAY + Duration::from_millis(100));
+        let calls = window.calls();
+        assert_eq!(
+            calls.iter().filter(|c| *c == "hide").count(),
+            1,
+            "expected exactly one hide after generation bump, got {:?}",
+            calls
+        );
+    }
+
+    #[test]
+    fn test_position_overlay_non_integer_rounds() {
+        let window = RecordingOverlayWindow::new((0, 0, 1920, 1080), 1.5);
+        let position = position_overlay(&window, 520.0, 180.0).unwrap();
+
+        let physical_width = (520.0f64 * 1.5).round() as i32; // 780
+        let physical_height = (180.0f64 * 1.5).round() as i32; // 270
+        let offset = (80.0f64 * 1.5).round() as i32; // 120
+        let expected_x = (1920 - physical_width) / 2; // 570
+        let expected_y = 1080 - physical_height - offset; // 690
+        assert_eq!(position, PhysicalPosition::new(expected_x, expected_y));
     }
 }

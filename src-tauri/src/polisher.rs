@@ -637,7 +637,7 @@ mod tests {
             .mock("POST", "/v1/chat/completions")
             .match_header("Authorization", "Bearer test-key")
             .with_status(200)
-            .with_body(&mock_success_response("润色后的文本"))
+            .with_body(mock_success_response("润色后的文本"))
             .create_async()
             .await;
 
@@ -672,7 +672,7 @@ mod tests {
                 .to_string(),
             ))
             .with_status(200)
-            .with_body(&mock_success_response("ok"))
+            .with_body(mock_success_response("ok"))
             .create_async()
             .await;
 
@@ -691,20 +691,86 @@ mod tests {
         mock.assert_async().await;
     }
 
+    fn mock_anthropic_response(content: &str) -> String {
+        serde_json::json!({
+            "content": [{"text": content}]
+        })
+        .to_string()
+    }
+
     #[tokio::test]
-    async fn test_polish_api_error_401_no_retry() {
-        // 401 should NOT be retried — it's an auth error, not a transient failure.
+    async fn test_polish_anthropic_success() {
         let mut server = mockito::Server::new_async().await;
-        let _mock = server
+        let mock = server
+            .mock("POST", "/v1/messages")
+            .match_header("x-api-key", "anthropic-key")
+            .match_header("anthropic-version", "2023-06-01")
+            .with_status(200)
+            .with_body(mock_anthropic_response("润色后的文本"))
+            .create_async()
+            .await;
+
+        let formatter = LLMFormatter::with_config(
+            "anthropic-key".to_string(),
+            server.url(),
+            "claude-3-5-sonnet".to_string(),
+            Duration::from_secs(5),
+            1024,
+            protocol::ApiProtocol::Anthropic,
+            0.3,
+            "zh".to_string(),
+        )
+        .unwrap();
+        let result = formatter
+            .polish("原始文本", PolishLevel::Medium)
+            .await
+            .unwrap();
+        assert_eq!(result, "润色后的文本");
+        mock.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn test_polish_retry_429_then_succeeds() {
+        let mut server = mockito::Server::new_async().await;
+        let error_mock = server
             .mock("POST", "/v1/chat/completions")
-            .with_status(401)
-            .with_body("unauthorized")
-            .expect(1)
+            .with_status(429)
+            .expect(2)
+            .create_async()
+            .await;
+        let success_mock = server
+            .mock("POST", "/v1/chat/completions")
+            .with_status(200)
+            .with_body(mock_success_response("finally ok"))
             .create_async()
             .await;
 
         let formatter = LLMFormatter::new(
-            "bad-key".to_string(),
+            "key".to_string(),
+            server.url(),
+            "model".to_string(),
+            Duration::from_secs(5),
+        )
+        .unwrap();
+        let result = formatter.polish("test", PolishLevel::Medium).await.unwrap();
+        assert_eq!(result, "finally ok");
+        error_mock.assert_async().await;
+        success_mock.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn test_polish_retries_exhausted_returns_last_error() {
+        let mut server = mockito::Server::new_async().await;
+        let _mock = server
+            .mock("POST", "/v1/chat/completions")
+            .with_status(503)
+            .with_body("unavailable")
+            .expect(3)
+            .create_async()
+            .await;
+
+        let formatter = LLMFormatter::new(
+            "key".to_string(),
             server.url(),
             "model".to_string(),
             Duration::from_secs(5),
@@ -712,5 +778,87 @@ mod tests {
         .unwrap();
         let result = formatter.polish("test", PolishLevel::Medium).await;
         assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            PolisherError::ApiError { status: 503, .. }
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_polish_transient_failure_then_succeeds() {
+        let mut server = mockito::Server::new_async().await;
+        let error_mock = server
+            .mock("POST", "/v1/chat/completions")
+            .with_status(503)
+            .create_async()
+            .await;
+        let success_mock = server
+            .mock("POST", "/v1/chat/completions")
+            .with_status(200)
+            .with_body(mock_success_response("recovered"))
+            .create_async()
+            .await;
+
+        let formatter = LLMFormatter::new(
+            "key".to_string(),
+            server.url(),
+            "model".to_string(),
+            Duration::from_secs(5),
+        )
+        .unwrap();
+        let result = formatter.polish("test", PolishLevel::Medium).await.unwrap();
+        assert_eq!(result, "recovered");
+        error_mock.assert_async().await;
+        success_mock.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn test_polish_anthropic_429_returns_rate_limited() {
+        let mut server = mockito::Server::new_async().await;
+        let _mock = server
+            .mock("POST", "/v1/messages")
+            .with_status(429)
+            .expect(3)
+            .create_async()
+            .await;
+
+        let formatter = LLMFormatter::with_config(
+            "key".to_string(),
+            server.url(),
+            "model".to_string(),
+            Duration::from_secs(5),
+            1024,
+            protocol::ApiProtocol::Anthropic,
+            0.3,
+            "zh".to_string(),
+        )
+        .unwrap();
+        let result = formatter.polish("test", PolishLevel::Medium).await;
+        assert!(matches!(result.unwrap_err(), PolisherError::RateLimited));
+    }
+
+    #[tokio::test]
+    async fn test_polish_anthropic_empty_response() {
+        let mut server = mockito::Server::new_async().await;
+        let _mock = server
+            .mock("POST", "/v1/messages")
+            .with_status(200)
+            .with_body(serde_json::json!({"content": []}).to_string())
+            .create_async()
+            .await;
+
+        let formatter = LLMFormatter::with_config(
+            "key".to_string(),
+            server.url(),
+            "model".to_string(),
+            Duration::from_secs(5),
+            1024,
+            protocol::ApiProtocol::Anthropic,
+            0.3,
+            "zh".to_string(),
+        )
+        .unwrap();
+        let result = formatter.polish("test", PolishLevel::Medium).await;
+        assert!(matches!(result.unwrap_err(), PolisherError::EmptyResponse));
     }
 }

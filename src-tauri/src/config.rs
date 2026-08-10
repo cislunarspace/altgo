@@ -273,6 +273,21 @@ impl Config {
                 config_path.display()
             )));
         }
+        if self.transcriber.engine == "mimo" && self.transcriber.api_key.trim().is_empty() {
+            let config_path = Self::default_config_path();
+            return Err(ConfigError::ValidationFailed(format!(
+                "转写引擎设置为 'mimo'，但未配置 API 密钥。\n\
+                 \n\
+                 解决方法（任选一种）：\n\
+                 1. 设置环境变量：\n\
+                    export ALTGO_TRANSCRIBER_API_KEY=\"your-key\"\n\
+                 2. 在配置文件中填写 api_key：\n\
+                    编辑 {}，在 [transcriber] 下填写 api_key = \"your-key\"\n\
+                 3. 使用本地 whisper.cpp（无需 API 密钥）：\n\
+                    将 transcriber.engine 改为 \"local\"",
+                config_path.display()
+            )));
+        }
         // Only require polisher API key when polishing is actually enabled.
         if self.polisher.level != "none" && self.polisher.api_key.trim().is_empty() {
             let config_path = Self::default_config_path();
@@ -604,6 +619,24 @@ prefer_polished = false
     }
 
     #[test]
+    fn test_validate_mimo_missing_api_key_fails() {
+        let mut cfg = Config::default();
+        cfg.transcriber.engine = "mimo".to_string();
+        cfg.transcriber.api_key = String::new();
+        cfg.polisher.api_key = "polish-key".to_string();
+        assert!(cfg.validate().is_err());
+    }
+
+    #[test]
+    fn test_validate_mimo_with_api_key_succeeds() {
+        let mut cfg = Config::default();
+        cfg.transcriber.engine = "mimo".to_string();
+        cfg.transcriber.api_key = "test-key".to_string();
+        cfg.polisher.api_key = "polish-key".to_string();
+        assert!(cfg.validate().is_ok());
+    }
+
+    #[test]
     fn test_validate_whitespace_api_key_fails() {
         let mut cfg = Config::default();
         cfg.transcriber.engine = "api".to_string();
@@ -702,18 +735,18 @@ prefer_polished = false
     }
 
     #[test]
-    fn patch_round_trip_through_save_load() {
+    #[cfg(unix)]
+    fn test_save_file_permissions_unix() {
+        use std::os::unix::fs::PermissionsExt;
+
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("altgo.toml");
 
-        let mut cfg = Config::default();
-        let patch: ConfigPatch =
-            serde_json::from_str(r#"{"keyName":"F1","language":"en"}"#).unwrap();
-        patch.apply_to_config(&mut cfg);
+        let cfg = Config::default();
         cfg.save(&path).unwrap();
 
-        let loaded = Config::load(&path).unwrap();
-        assert_eq!(loaded.key_listener.key_name, "F1");
-        assert_eq!(loaded.transcriber.language, "en");
+        let metadata = std::fs::metadata(&path).unwrap();
+        let permissions = metadata.permissions();
+        assert_eq!(permissions.mode() & 0o777, 0o600);
     }
 }

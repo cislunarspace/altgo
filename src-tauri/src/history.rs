@@ -181,7 +181,7 @@ mod tests {
     fn delete_and_clear() {
         let (_dir, store) = make_store();
         let e = store.append("r".into(), "t".into()).unwrap();
-        store.delete(&[e.id.clone()]).unwrap();
+        store.delete(std::slice::from_ref(&e.id)).unwrap();
         assert!(store.list().unwrap().is_empty());
         store.append("a".into(), "b".into()).unwrap();
         store.clear().unwrap();

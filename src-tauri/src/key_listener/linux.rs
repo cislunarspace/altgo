@@ -507,7 +507,6 @@ impl KeyListener for X11Listener {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::Duration;
 
     fn test_config() -> crate::config::KeyListenerConfig {
         crate::config::KeyListenerConfig {

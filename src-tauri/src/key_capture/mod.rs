@@ -4,23 +4,22 @@
 //! - `linux`（cfg）：evtest，阻塞 12s 等一次按键
 //! - `windows`（cfg）：独立 WH_KEYBOARD_LL 钩子，等待 WM_KEYDOWN 后记录 VK 码
 
+#[cfg(target_os = "linux")]
+mod linux;
 #[cfg(target_os = "windows")]
 mod windows;
 
-use serde::Serialize;
+#[cfg(target_os = "linux")]
+pub use linux::LinuxKeyCapture;
+#[cfg(target_os = "windows")]
+pub use windows::WindowsKeyCapture;
 
 #[cfg(target_os = "linux")]
-use std::io::BufRead;
-#[cfg(target_os = "linux")]
-use std::path::PathBuf;
-#[cfg(target_os = "linux")]
-use std::process::{Command, Stdio};
-#[cfg(target_os = "linux")]
-use std::sync::mpsc;
-#[cfg(target_os = "linux")]
-use std::thread;
-#[cfg(target_os = "linux")]
-use std::time::{Duration, Instant};
+pub type PlatformKeyCapture = LinuxKeyCapture;
+#[cfg(target_os = "windows")]
+pub type PlatformKeyCapture = WindowsKeyCapture;
+
+use serde::Serialize;
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -32,21 +31,12 @@ pub struct CaptureActivationResponse {
     pub windows_vk: Option<i32>,
 }
 
-#[cfg(target_os = "linux")]
-fn parse_ev_key_line(line: &str) -> Option<(u16, i32)> {
-    if !line.contains("EV_KEY") {
-        return None;
-    }
-    let code_tail = line.split("code ").nth(1)?;
-    let code_str = code_tail.split_whitespace().next()?;
-    let code = code_str.parse::<u16>().ok()?;
-    let value_tail = line.split("value ").nth(1)?;
-    let value_raw = value_tail
-        .trim()
-        .split(|c: char| c.is_whitespace() || c == ',')
-        .next()?;
-    let value = value_raw.parse::<i32>().ok()?;
-    Some((code, value))
+/// 平台激活键捕获的 trait seam。
+///
+/// 由平台 adapter 实现（`LinuxKeyCapture`、`WindowsKeyCapture`）。
+/// `capture()` 为同步阻塞方法，调用方负责在独立线程执行。
+pub trait KeyCapture: Send {
+    fn capture(&mut self) -> Result<CaptureActivationResponse, String>;
 }
 
 /// 将常见 evdev 码映射为 `xmodmap -pke` 中可能出现的 keysym 名称；未知则 `evdev_<code>`。
@@ -148,70 +138,6 @@ pub fn evdev_code_to_keysym_name(code: u16) -> String {
     }
 }
 
-#[cfg(target_os = "linux")]
-fn capture_evdev_press(timeout: Duration) -> Result<u16, String> {
-    let devices = crate::key_listener::list_keyboard_devices()
-        .map_err(|e| format!("keyboard devices: {}", e))?;
-    if devices.is_empty() {
-        return Err("未找到键盘设备（/dev/input）".into());
-    }
-
-    let (tx, rx) = mpsc::sync_channel::<u16>(1);
-    let deadline = Instant::now() + timeout;
-
-    for device in devices {
-        let tx = tx.clone();
-        let path: PathBuf = device;
-        thread::spawn(move || {
-            let mut child = match Command::new("evtest")
-                .arg(&path)
-                .stdout(Stdio::piped())
-                .stderr(Stdio::null())
-                .spawn()
-            {
-                Ok(c) => c,
-                Err(_) => return,
-            };
-            let stdout = match child.stdout.take() {
-                Some(s) => s,
-                None => return,
-            };
-            let reader = std::io::BufReader::new(stdout);
-            for line in reader.lines().map_while(Result::ok) {
-                let Some((code, value)) = parse_ev_key_line(&line) else {
-                    continue;
-                };
-                if value == 1 && tx.try_send(code).is_ok() {
-                    let _ = child.kill();
-                    return;
-                }
-            }
-        });
-    }
-
-    drop(tx);
-    let remaining = deadline.saturating_duration_since(Instant::now());
-    rx.recv_timeout(remaining).map_err(|_| {
-        "超时：未检测到按键（请确认对 /dev/input 有读权限，如在 input 组）".to_string()
-    })
-}
-
-#[cfg(target_os = "linux")]
-pub fn capture_activation_key_blocking() -> Result<CaptureActivationResponse, String> {
-    let code = capture_evdev_press(Duration::from_secs(12))?;
-    let key_name = evdev_code_to_keysym_name(code);
-    Ok(CaptureActivationResponse {
-        key_name,
-        linux_evdev_code: Some(code),
-        windows_vk: None,
-    })
-}
-
-#[cfg(target_os = "windows")]
-pub fn capture_activation_key_blocking() -> Result<CaptureActivationResponse, String> {
-    windows::capture_activation_key_blocking(std::time::Duration::from_secs(12))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -243,28 +169,10 @@ mod tests {
         assert_eq!(evdev_code_to_keysym_name(200), "evdev_200");
     }
 
-    #[cfg(target_os = "linux")]
     #[test]
-    fn parse_ev_key_line_extracts_code_and_value() {
-        let line = "Event: time 1234.567, type 1 (EV_KEY), code 56 (KEY_LEFTALT), value 1";
-        let (code, value) = parse_ev_key_line(line).unwrap();
-        assert_eq!(code, 56);
-        assert_eq!(value, 1);
-    }
-
-    #[cfg(target_os = "linux")]
-    #[test]
-    fn parse_ev_key_line_release() {
-        let line = "Event: time 1234.568, type 1 (EV_KEY), code 56 (KEY_LEFTALT), value 0";
-        let (code, value) = parse_ev_key_line(line).unwrap();
-        assert_eq!(code, 56);
-        assert_eq!(value, 0);
-    }
-
-    #[cfg(target_os = "linux")]
-    #[test]
-    fn parse_ev_key_line_non_ev_key_returns_none() {
-        let line = "Event: time 1234.567, type 3 (EV_ABS), code 0 (ABS_X), value 128";
-        assert!(parse_ev_key_line(line).is_none());
+    fn boxed_key_capture_trait_object() {
+        let mut capture: Box<dyn KeyCapture> = Box::new(PlatformKeyCapture::new());
+        let result = capture.capture();
+        assert!(result.is_err());
     }
 }
