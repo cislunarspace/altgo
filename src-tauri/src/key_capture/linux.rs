@@ -85,6 +85,8 @@ fn capture_evdev_press(timeout: Duration) -> Result<u16, String> {
                 };
                 if value == 1 && tx.try_send(code).is_ok() {
                     let _ = child.kill();
+                    // kill 后须 wait 回收，避免子进程变 zombie 积累
+                    let _ = child.wait();
                     return;
                 }
             }
