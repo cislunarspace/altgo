@@ -71,7 +71,7 @@ pub(crate) fn spawn_pipeline_thread(
                     .clone(),
             });
         let sink = tauri_sink::TauriPipelineSink::new(
-            app_handle.clone(),
+            Arc::new(tauri_sink::TauriEventEmitter::new(app_handle.clone())),
             pipeline_status,
             cfg_clone,
             dispatch,
