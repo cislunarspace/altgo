@@ -182,7 +182,9 @@ cd frontend && npm install
 - `config.rs`、`audio.rs`、`model.rs` 和 `history.rs` 有全面的测试。
 - `transcriber.rs` 和 `polisher.rs` 使用 `mockito` 进行 HTTP 级别的模拟。
 - 平台特定模块只有少量测试（仅构造/冒烟测试）。
-- **Windows 代码不在 CI 中测试**（仅 Linux CI 运行器）。Windows 特定代码路径在 Windows 机器上手动验证。发布工作流会构建 MSI，但不会在 Windows 上运行 `cargo test`。
+- CI 有 Linux `check` 与 Windows `windows-check` 两个 job，都会跑 `cargo test --lib`；release 发版前由独立 `test` job 再跑一遍测试。
+- Windows 专属代码路径会在 Windows runner 上编译与测试，但 GUI 端到端行为仍需在真机手动验证。
+- 完整测试套件画像与维护提示见 `docs/testing.md`。
 
 ## Agent 技能
 
