@@ -22,6 +22,9 @@ const GGML_MEDIUM_BYTES: u64 = 1533763059;
 
 const DOWNLOAD_ATTEMPTS: u32 = 3;
 
+/// 模型文件最小可接受大小（字节）。小于此值视为下载损坏。
+const MIN_MODEL_FILE_BYTES: u64 = 10 * 1024 * 1024;
+
 /// 国内常用 HF 镜像（与官方路径一致，仅替换域名）。
 const HF_MIRROR_BASE_URL: &str = "https://hf-mirror.com/ggerganov/whisper.cpp/resolve/main";
 
@@ -219,8 +222,17 @@ pub fn resolve_model_path(config_model: &str) -> Option<PathBuf> {
 /// 下载指定模型，通过回调报告进度。
 ///
 /// `on_progress` 参数为 `(downloaded_bytes, total_bytes)` 回调。
-pub async fn download_with_progress<F>(
+pub async fn download_with_progress<F>(name: &str, on_progress: F) -> Result<PathBuf, ModelError>
+where
+    F: FnMut(u64, u64),
+{
+    download_with_progress_to(name, model_download_bases(), models_dir(), on_progress).await
+}
+
+async fn download_with_progress_to<F>(
     name: &str,
+    bases: Vec<String>,
+    dir: PathBuf,
     mut on_progress: F,
 ) -> Result<PathBuf, ModelError>
 where
@@ -231,7 +243,6 @@ where
         .find(|m| m.name == name)
         .ok_or_else(|| ModelError::UnknownModel(name.to_string()))?;
 
-    let dir = models_dir();
     std::fs::create_dir_all(&dir)?;
 
     let dest = dir.join(info.filename);
@@ -240,7 +251,6 @@ where
         return Ok(dest);
     }
 
-    let bases = model_download_bases();
     let tmp_path = dest.with_extension("bin.tmp");
 
     let mut last_err: Option<ModelError> = None;
@@ -255,7 +265,7 @@ where
             match download_once_to_tmp(&url, info, &tmp_path, &mut on_progress).await {
                 Ok(()) => {
                     let file_size = std::fs::metadata(&tmp_path)?.len();
-                    if file_size < 10 * 1024 * 1024 {
+                    if file_size < MIN_MODEL_FILE_BYTES {
                         let _ = std::fs::remove_file(&tmp_path);
                         return Err(ModelError::DownloadFailed(format!(
                             "下载的模型文件过小 ({} bytes)，可能损坏",
@@ -396,5 +406,157 @@ mod tests {
     fn test_delete_missing_file_ok() {
         // 模型文件大概率不存在，删除应静默成功
         let _ = delete("tiny");
+    }
+
+    #[tokio::test]
+    async fn test_download_success_writes_dest_and_reports_progress() {
+        let mut server = mockito::Server::new_async().await;
+        let payload = vec![0u8; MIN_MODEL_FILE_BYTES as usize + 1];
+        let mock = server
+            .mock("GET", "/ggml-tiny.bin")
+            .with_status(200)
+            .with_header("content-type", "application/octet-stream")
+            .with_body(&payload)
+            .create_async()
+            .await;
+
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let dest = tmp_dir.path().join("ggml-tiny.bin");
+
+        let progress_calls = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let calls = progress_calls.clone();
+        let result = download_with_progress_to(
+            "tiny",
+            vec![server.url()],
+            tmp_dir.path().to_path_buf(),
+            move |d, t| calls.lock().unwrap().push((d, t)),
+        )
+        .await;
+
+        let path = result.unwrap();
+        assert_eq!(path, dest);
+        assert!(dest.exists());
+        assert_eq!(
+            std::fs::metadata(&dest).unwrap().len(),
+            payload.len() as u64
+        );
+        assert!(!dest.with_extension("bin.tmp").exists());
+        {
+            let calls = progress_calls.lock().unwrap();
+            assert!(!calls.is_empty());
+            assert!(calls.iter().any(|(d, _)| *d == payload.len() as u64));
+        }
+        mock.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn test_download_http_error_clears_tmp() {
+        let mut server = mockito::Server::new_async().await;
+        let mock = server
+            .mock("GET", "/ggml-tiny.bin")
+            .with_status(500)
+            .expect(3)
+            .create_async()
+            .await;
+
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let dest = tmp_dir.path().join("ggml-tiny.bin");
+
+        let result = download_with_progress_to(
+            "tiny",
+            vec![server.url()],
+            tmp_dir.path().to_path_buf(),
+            |_d, _t| {},
+        )
+        .await;
+
+        assert!(result.is_err());
+        assert!(!dest.exists());
+        assert!(!dest.with_extension("bin.tmp").exists());
+        mock.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn test_download_too_small_detected_as_corrupt() {
+        let mut server = mockito::Server::new_async().await;
+        let mock = server
+            .mock("GET", "/ggml-tiny.bin")
+            .with_status(200)
+            .with_body(vec![0u8; 1024])
+            .create_async()
+            .await;
+
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let dest = tmp_dir.path().join("ggml-tiny.bin");
+
+        let result = download_with_progress_to(
+            "tiny",
+            vec![server.url()],
+            tmp_dir.path().to_path_buf(),
+            |_d, _t| {},
+        )
+        .await;
+
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("文件过小") || err.contains("过小"));
+        assert!(!dest.exists());
+        assert!(!dest.with_extension("bin.tmp").exists());
+        mock.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn test_download_retries_then_succeeds() {
+        let mut server = mockito::Server::new_async().await;
+        let payload = vec![0u8; MIN_MODEL_FILE_BYTES as usize + 1];
+        let mock = server
+            .mock("GET", "/ggml-tiny.bin")
+            .with_status(500)
+            .expect_at_least(1)
+            .create_async()
+            .await;
+        let success_mock = server
+            .mock("GET", "/ggml-tiny.bin")
+            .with_status(200)
+            .with_body(&payload)
+            .create_async()
+            .await;
+
+        let tmp_dir = tempfile::tempdir().unwrap();
+
+        let result = download_with_progress_to(
+            "tiny",
+            vec![server.url()],
+            tmp_dir.path().to_path_buf(),
+            |_d, _t| {},
+        )
+        .await;
+
+        // mockito 同名 mock 按创建顺序匹配，只要最终成功即可验证重试语义。
+        assert!(result.is_ok());
+        assert_eq!(
+            std::fs::metadata(result.unwrap()).unwrap().len(),
+            payload.len() as u64
+        );
+        mock.assert_async().await;
+        success_mock.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn test_download_skips_when_dest_exists() {
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let dest = tmp_dir.path().join("ggml-tiny.bin");
+        std::fs::write(&dest, b"already here").unwrap();
+
+        let result = download_with_progress_to(
+            "tiny",
+            vec!["http://127.0.0.1:1".to_string()],
+            tmp_dir.path().to_path_buf(),
+            |_d, _t| {},
+        )
+        .await;
+
+        assert_eq!(result.unwrap(), dest);
+        assert_eq!(std::fs::read_to_string(&dest).unwrap(), "already here");
     }
 }

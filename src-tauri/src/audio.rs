@@ -70,6 +70,9 @@ pub fn encode_wav(
     if sample_rate == 0 {
         return Err(anyhow::anyhow!("Sample rate must be positive"));
     }
+    if channels == 0 {
+        return Err(anyhow::anyhow!("Channels must be positive"));
+    }
     if bits_per_sample == 0 {
         return Err(anyhow::anyhow!("Bits per sample must be positive"));
     }
@@ -279,5 +282,127 @@ mod tests {
     #[test]
     fn test_encode_wav_zero_sample_rate() {
         assert!(encode_wav(&[0u8; 10], 0, 1, 16).is_err());
+    }
+
+    #[test]
+    fn test_encode_wav_zero_channels() {
+        assert!(encode_wav(&[0u8; 10], 16000, 0, 16).is_err());
+    }
+
+    #[test]
+    fn test_encode_wav_zero_bits_per_sample() {
+        assert!(encode_wav(&[0u8; 10], 16000, 1, 0).is_err());
+    }
+
+    #[test]
+    fn test_encode_wav_stereo() {
+        let pcm = vec![0u8; 100];
+        let wav = encode_wav(&pcm, 16000, 2, 16).unwrap();
+
+        assert_eq!(u32::from_le_bytes(wav[28..32].try_into().unwrap()), 64000); // byte rate
+        assert_eq!(u16::from_le_bytes(wav[32..34].try_into().unwrap()), 4); // block align
+    }
+
+    #[test]
+    fn test_decode_wav_no_data_chunk() {
+        // Minimal WAV with fmt chunk but no data chunk (at least 44 bytes long).
+        let mut wav = Vec::new();
+        wav.extend_from_slice(b"RIFF");
+        wav.extend_from_slice(&42u32.to_le_bytes()); // file size after this point
+        wav.extend_from_slice(b"WAVE");
+        wav.extend_from_slice(b"fmt ");
+        wav.extend_from_slice(&16u32.to_le_bytes());
+        wav.extend_from_slice(&1u16.to_le_bytes());
+        wav.extend_from_slice(&1u16.to_le_bytes());
+        wav.extend_from_slice(&16000u32.to_le_bytes());
+        wav.extend_from_slice(&32000u32.to_le_bytes());
+        wav.extend_from_slice(&2u16.to_le_bytes());
+        wav.extend_from_slice(&16u16.to_le_bytes());
+        // Pad with 14 bytes of filler so total length is >= 44 without a data chunk.
+        wav.extend_from_slice(b"junk");
+        wav.extend_from_slice(&6u32.to_le_bytes());
+        wav.extend_from_slice(&[0x00; 6]);
+
+        assert_eq!(wav.len(), 50);
+        assert_eq!(decode_wav_to_f32(&wav), Err("No data chunk found in WAV"));
+    }
+
+    #[test]
+    fn test_decode_wav_truncated_data_chunk() {
+        // data chunk claims 100 bytes but only 4 bytes follow.
+        let mut wav = Vec::new();
+        wav.extend_from_slice(b"RIFF");
+        wav.extend_from_slice(&42u32.to_le_bytes());
+        wav.extend_from_slice(b"WAVE");
+        wav.extend_from_slice(b"fmt ");
+        wav.extend_from_slice(&16u32.to_le_bytes());
+        wav.extend_from_slice(&1u16.to_le_bytes());
+        wav.extend_from_slice(&1u16.to_le_bytes());
+        wav.extend_from_slice(&16000u32.to_le_bytes());
+        wav.extend_from_slice(&32000u32.to_le_bytes());
+        wav.extend_from_slice(&2u16.to_le_bytes());
+        wav.extend_from_slice(&16u16.to_le_bytes());
+        wav.extend_from_slice(b"data");
+        wav.extend_from_slice(&100u32.to_le_bytes());
+        wav.extend_from_slice(&[0x00, 0x01, 0xFF, 0xFF]);
+
+        let decoded = decode_wav_to_f32(&wav).unwrap();
+        // Only two complete samples are available.
+        assert_eq!(decoded.len(), 2);
+    }
+
+    #[test]
+    fn test_decode_wav_odd_chunk_padding() {
+        // Place an odd-sized 'junk' chunk before data; decoder must skip the padding byte.
+        let mut wav = Vec::new();
+        wav.extend_from_slice(b"RIFF");
+        // file size = 4 (WAVE) + 8 + 16 (fmt) + 8 + 3 (junk) + 1 (pad) + 8 + 4 (data) = 50
+        wav.extend_from_slice(&50u32.to_le_bytes());
+        wav.extend_from_slice(b"WAVE");
+        wav.extend_from_slice(b"fmt ");
+        wav.extend_from_slice(&16u32.to_le_bytes());
+        wav.extend_from_slice(&1u16.to_le_bytes());
+        wav.extend_from_slice(&1u16.to_le_bytes());
+        wav.extend_from_slice(&16000u32.to_le_bytes());
+        wav.extend_from_slice(&32000u32.to_le_bytes());
+        wav.extend_from_slice(&2u16.to_le_bytes());
+        wav.extend_from_slice(&16u16.to_le_bytes());
+        wav.extend_from_slice(b"junk");
+        wav.extend_from_slice(&3u32.to_le_bytes());
+        wav.extend_from_slice(&[0x01, 0x02, 0x03]); // odd length -> pad byte follows
+        wav.push(0x00); // padding
+        wav.extend_from_slice(b"data");
+        wav.extend_from_slice(&4u32.to_le_bytes());
+        wav.extend_from_slice(&0i32.to_le_bytes());
+
+        let decoded = decode_wav_to_f32(&wav).unwrap();
+        assert_eq!(decoded.len(), 2);
+    }
+
+    #[test]
+    fn test_decode_wav_with_list_chunk() {
+        // data chunk preceded by a LIST chunk.
+        let mut wav = Vec::new();
+        wav.extend_from_slice(b"RIFF");
+        // WAVE + fmt(24) + LIST(12) + data(8+4) = 4+24+12+12 = 52
+        wav.extend_from_slice(&52u32.to_le_bytes());
+        wav.extend_from_slice(b"WAVE");
+        wav.extend_from_slice(b"fmt ");
+        wav.extend_from_slice(&16u32.to_le_bytes());
+        wav.extend_from_slice(&1u16.to_le_bytes());
+        wav.extend_from_slice(&1u16.to_le_bytes());
+        wav.extend_from_slice(&16000u32.to_le_bytes());
+        wav.extend_from_slice(&32000u32.to_le_bytes());
+        wav.extend_from_slice(&2u16.to_le_bytes());
+        wav.extend_from_slice(&16u16.to_le_bytes());
+        wav.extend_from_slice(b"LIST");
+        wav.extend_from_slice(&4u32.to_le_bytes());
+        wav.extend_from_slice(b"adtl");
+        wav.extend_from_slice(b"data");
+        wav.extend_from_slice(&4u32.to_le_bytes());
+        wav.extend_from_slice(&0i32.to_le_bytes());
+
+        let decoded = decode_wav_to_f32(&wav).unwrap();
+        assert_eq!(decoded.len(), 2);
     }
 }

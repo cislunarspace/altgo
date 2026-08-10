@@ -314,32 +314,115 @@ mod tests {
     }
 
     #[test]
-    fn test_spurious_quick_release_rejected() {
+    fn test_recording_pressed_event_ignored() {
+        let threshold = Duration::from_millis(200);
+        let interval = Duration::from_millis(200);
+        let min_press = Duration::from_millis(1);
+        let mut sm = Machine::new(threshold, interval, min_press);
+
+        sm.process(press());
+        std::thread::sleep(threshold + Duration::from_millis(5));
+        assert_eq!(sm.poll_timeout(), Some(Command::StartRecord));
+        assert_eq!(sm.state, State::Recording);
+
+        // Another pressed event while already recording must be ignored.
+        assert_eq!(sm.process(press()), None);
+        assert_eq!(sm.state, State::Recording);
+
+        assert_eq!(sm.process(release()), Some(Command::StopRecord));
+        assert_eq!(sm.state, State::Idle);
+    }
+
+    #[test]
+    fn test_wait_second_click_release_ignored() {
+        let threshold = Duration::from_millis(200);
+        let interval = Duration::from_millis(200);
+        let min_press = Duration::from_millis(1);
+        let mut sm = Machine::new(threshold, interval, min_press);
+
+        sm.process(press());
+        std::thread::sleep(Duration::from_millis(110));
+        assert_eq!(sm.process(release()), None);
+        assert_eq!(sm.state, State::WaitSecondClick);
+
+        // Additional release events in WaitSecondClick must be ignored.
+        assert_eq!(sm.process(release()), None);
+        assert_eq!(sm.state, State::WaitSecondClick);
+    }
+
+    #[test]
+    fn test_next_deadline_none_in_idle_recording_continuous() {
+        let threshold = Duration::from_millis(200);
+        let interval = Duration::from_millis(200);
+        let min_press = Duration::from_millis(1);
+        let mut sm = Machine::new(threshold, interval, min_press);
+
+        assert!(sm.next_deadline().is_none());
+
+        sm.process(press());
+        std::thread::sleep(threshold + Duration::from_millis(5));
+        sm.poll_timeout();
+        assert_eq!(sm.state, State::Recording);
+        assert!(sm.next_deadline().is_none());
+
+        sm.process(release());
+        assert_eq!(sm.state, State::Idle);
+
+        // Transition into ContinuousRecording and check deadline is None.
+        sm.process(press());
+        std::thread::sleep(Duration::from_millis(110));
+        sm.process(release());
+        assert_eq!(sm.process(press()), Some(Command::StartRecord));
+        assert_eq!(sm.state, State::ContinuousRecording);
+        assert!(sm.next_deadline().is_none());
+    }
+
+    #[test]
+    fn test_min_press_duration_boundary() {
         let threshold = Duration::from_millis(300);
         let interval = Duration::from_millis(300);
-
-        let mut sm = Machine {
-            state: State::Idle,
-            long_press_threshold: threshold,
-            double_click_interval: interval,
-            min_press_duration: Duration::from_millis(1),
-            press_time: None,
-            continuous_hold: false,
-            idle_suppress_press_until_release: false,
-        };
+        // A min_press_duration equal to the threshold makes short presses rejected.
+        let min_press = threshold;
+        let mut sm = Machine::new(threshold, interval, min_press);
 
         assert_eq!(sm.process(press()), None);
 
-        assert_eq!(sm.process(release()), None);
-        // State must return to Idle, not stay in PotentialPress.
-        assert_eq!(sm.state, State::Idle);
-
-        assert!(sm.press_time.is_none());
-
-        assert_eq!(sm.poll_timeout(), None);
-
-        // A subsequent spurious release must not advance to WaitSecondClick.
+        // Release immediately: duration is strictly less than min_press_duration.
         assert_eq!(sm.process(release()), None);
         assert_eq!(sm.state, State::Idle);
+
+        // Verify exactly min_press_duration is accepted: sleep at least that long.
+        assert_eq!(sm.process(press()), None);
+        std::thread::sleep(min_press + Duration::from_millis(5));
+        assert_eq!(sm.process(release()), None);
+        assert_eq!(sm.state, State::WaitSecondClick);
+    }
+
+    #[test]
+    fn test_idle_suppress_press_until_release_reset() {
+        let threshold = Duration::from_millis(200);
+        let interval = Duration::from_millis(200);
+        let min_press = Duration::from_millis(1);
+        let mut sm = Machine::new(threshold, interval, min_press);
+
+        // Enter continuous recording and stop it, which sets the suppress flag.
+        sm.process(press());
+        std::thread::sleep(Duration::from_millis(110));
+        sm.process(release());
+        assert_eq!(sm.process(press()), Some(Command::StartRecord));
+        assert_eq!(sm.process(release()), None);
+        assert_eq!(sm.process(press()), Some(Command::StopRecord));
+        assert_eq!(sm.state, State::Idle);
+        assert!(sm.idle_suppress_press_until_release);
+
+        // Presses are ignored while the flag is set and the key is still down.
+        assert_eq!(sm.process(press()), None);
+        assert_eq!(sm.state, State::Idle);
+
+        // The release resets the flag; subsequent press is processed normally.
+        assert_eq!(sm.process(release()), None);
+        assert!(!sm.idle_suppress_press_until_release);
+        assert_eq!(sm.process(press()), None);
+        assert_eq!(sm.state, State::PotentialPress);
     }
 }

@@ -250,7 +250,48 @@ mod tests {
     }
 
     #[test]
-    fn resample_empty() {
-        assert!(resample(&[], 48000, 16000).unwrap().is_empty());
+    fn resample_upsample_length_ratio() {
+        // 1600 frames at 16kHz -> ~4800 frames at 48kHz (1:3)
+        let input: Vec<i16> = (0..1600).map(|i| (i % 1000) as i16).collect();
+        let out = resample(&input, 16000, 48000).unwrap();
+        assert!(
+            (out.len() as i64 - 4800).abs() <= 4,
+            "got len {}",
+            out.len()
+        );
+        assert!(!out.is_empty());
+    }
+
+    #[test]
+    fn resample_zero_sample_rate() {
+        assert!(resample(&[100, -100], 0, 16000).is_err());
+        assert!(resample(&[100, -100], 16000, 0).is_err());
+    }
+
+    #[test]
+    fn resample_single_sample() {
+        let out = resample(&[1000i16], 16000, 48000).unwrap();
+        // A single input frame yields three output frames at 3x upsampling.
+        assert_eq!(out.len(), 3);
+    }
+
+    #[test]
+    fn resample_output_delay_exceeds_input() {
+        // Very small input (5 frames at 16k -> ~15 frames at 48k) where
+        // resampler delay is larger than available output.
+        let input: Vec<i16> = (0..5).map(|i| (i * 100) as i16).collect();
+        let out = resample(&input, 16000, 48000).unwrap();
+        // Delay dominates: only a few (or zero) frames are emitted.
+        assert!(out.len() <= 15);
+    }
+
+    #[test]
+    fn f32_to_i16_nan() {
+        let out = f32_to_i16(&[f32::NAN, -f32::NAN, 0.0]);
+        assert_eq!(out.len(), 3);
+        // NaN cannot be clamped meaningfully; as-cast yields 0.
+        assert_eq!(out[0], 0);
+        assert_eq!(out[1], 0);
+        assert_eq!(out[2], 0);
     }
 }

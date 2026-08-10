@@ -745,4 +745,105 @@ mod tests {
         let result = lw.transcribe(&[], None).await;
         assert!(result.is_err());
     }
+
+    fn mock_mimo_response(text: &str) -> String {
+        serde_json::json!({
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": text
+                }
+            }],
+            "language": "zh"
+        })
+        .to_string()
+    }
+
+    #[tokio::test]
+    async fn test_mimo_transcribe_success() {
+        let audio = [0u8; 44];
+        let expected_b64 = base64::engine::general_purpose::STANDARD.encode(audio);
+        let data_uri = format!("data:audio/wav;base64,{}", expected_b64);
+
+        let mut server = mockito::Server::new_async().await;
+        let mock = server
+            .mock("POST", "/v1/chat/completions")
+            .match_header("api-key", "mimo-key")
+            .match_body(mockito::Matcher::PartialJsonString(
+                serde_json::json!({
+                    "model": "mimo-v2.5-asr",
+                    "messages": [{
+                        "role": "user",
+                        "content": [{
+                            "type": "input_audio",
+                            "input_audio": {"data": data_uri}
+                        }]
+                    }],
+                    "asr_options": {"language": "zh"}
+                })
+                .to_string(),
+            ))
+            .with_status(200)
+            .with_body(mock_mimo_response("你好世界"))
+            .create_async()
+            .await;
+
+        let api = MimoAsr::new(
+            "mimo-key".to_string(),
+            server.url(),
+            "zh".to_string(),
+            Duration::from_secs(5),
+        )
+        .unwrap();
+        let result = api.transcribe(&audio).await.unwrap();
+        assert_eq!(result.text, "你好世界");
+        assert_eq!(result.language, "zh");
+        mock.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn test_mimo_transcribe_empty_content_errors() {
+        let mut server = mockito::Server::new_async().await;
+        let _mock = server
+            .mock("POST", "/v1/chat/completions")
+            .with_status(200)
+            .with_body(mock_mimo_response(""))
+            .create_async()
+            .await;
+
+        let api = MimoAsr::new(
+            "mimo-key".to_string(),
+            server.url(),
+            "zh".to_string(),
+            Duration::from_secs(5),
+        )
+        .unwrap();
+        let result = api.transcribe(&[0u8; 44]).await;
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            TranscriberError::ApiError { status: 200, .. }
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_mimo_transcribe_api_error_401() {
+        let mut server = mockito::Server::new_async().await;
+        let _mock = server
+            .mock("POST", "/v1/chat/completions")
+            .with_status(401)
+            .with_body("unauthorized")
+            .create_async()
+            .await;
+
+        let api = MimoAsr::new(
+            "bad-key".to_string(),
+            server.url(),
+            "zh".to_string(),
+            Duration::from_secs(5),
+        )
+        .unwrap();
+        let result = api.transcribe(&[0u8; 44]).await;
+        assert!(result.is_err());
+    }
 }

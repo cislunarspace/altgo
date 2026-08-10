@@ -3,13 +3,16 @@
 //! 这里只放 `#[cfg(test)]` 用的替身结构体 / 实现，避免每个子模块重复
 //! 同一套 fake/mock。
 
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 
 use crate::error::{KeyListenerError, OutputError};
-use crate::key_listener::KeyListener;
+use crate::key_listener::{KeyEvent, KeyListener};
 use crate::output::Output;
 use crate::pipeline_controller::PipelineStatus;
 use crate::recorder::Recorder;
+use crate::transcriber::Transcriber;
 
 use super::sink::{PipelineSink, TranscriptionResult};
 
@@ -17,8 +20,36 @@ use super::sink::{PipelineSink, TranscriptionResult};
 // KeyListener fake
 // ---------------------------------------------------------------------------
 
+/// Handle returned by [`FakeListener::new`] that lets tests inject key events
+/// into the channel created by `start()`.
+pub(super) struct FakeListenerHandle {
+    tx: Arc<Mutex<Option<tokio::sync::mpsc::UnboundedSender<KeyEvent>>>>,
+}
+
+impl FakeListenerHandle {
+    pub(super) fn send(&self, ev: KeyEvent) {
+        if let Some(tx) = self.tx.lock().unwrap().as_ref() {
+            let _ = tx.send(ev);
+        }
+    }
+}
+
 pub(super) struct FakeListener {
     pub(super) backend: &'static str,
+    tx: Arc<Mutex<Option<tokio::sync::mpsc::UnboundedSender<KeyEvent>>>>,
+}
+
+impl FakeListener {
+    pub(super) fn new(backend: &'static str) -> (Self, FakeListenerHandle) {
+        let tx = Arc::new(Mutex::new(None));
+        (
+            Self {
+                backend,
+                tx: Arc::clone(&tx),
+            },
+            FakeListenerHandle { tx },
+        )
+    }
 }
 
 impl KeyListener for FakeListener {
@@ -31,7 +62,8 @@ impl KeyListener for FakeListener {
         ),
         KeyListenerError,
     > {
-        let (_, rx) = tokio::sync::mpsc::unbounded_channel();
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        *self.tx.lock().unwrap() = Some(tx);
         Ok((rx, self.backend))
     }
 }
@@ -43,6 +75,9 @@ impl KeyListener for FakeListener {
 pub(super) struct FakeRecorder {
     pub(super) recording: std::sync::atomic::AtomicBool,
     pub(super) audio: Vec<u8>,
+    pub(super) start_count: std::sync::atomic::AtomicUsize,
+    pub(super) stop_count: std::sync::atomic::AtomicUsize,
+    stop_error: Mutex<Option<crate::error::RecorderError>>,
 }
 
 impl FakeRecorder {
@@ -50,7 +85,28 @@ impl FakeRecorder {
         Self {
             recording: std::sync::atomic::AtomicBool::new(false),
             audio,
+            start_count: std::sync::atomic::AtomicUsize::new(0),
+            stop_count: std::sync::atomic::AtomicUsize::new(0),
+            stop_error: Mutex::new(None),
         }
+    }
+
+    pub(super) fn with_stop_error(error: crate::error::RecorderError, audio: Vec<u8>) -> Self {
+        Self {
+            recording: std::sync::atomic::AtomicBool::new(false),
+            audio,
+            start_count: std::sync::atomic::AtomicUsize::new(0),
+            stop_count: std::sync::atomic::AtomicUsize::new(0),
+            stop_error: Mutex::new(Some(error)),
+        }
+    }
+
+    pub(super) fn start_count(&self) -> usize {
+        self.start_count.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    pub(super) fn stop_count(&self) -> usize {
+        self.stop_count.load(std::sync::atomic::Ordering::SeqCst)
     }
 }
 
@@ -58,15 +114,121 @@ impl Recorder for FakeRecorder {
     fn start_recording(&mut self) -> Result<(), crate::error::RecorderError> {
         self.recording
             .store(true, std::sync::atomic::Ordering::SeqCst);
+        self.start_count
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         Ok(())
     }
     fn stop_recording(&self) -> Result<Vec<u8>, crate::error::RecorderError> {
         self.recording
             .store(false, std::sync::atomic::Ordering::SeqCst);
+        self.stop_count
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        if let Some(err) = self.stop_error.lock().unwrap().take() {
+            return Err(err);
+        }
         Ok(self.audio.clone())
     }
     fn is_recording(&self) -> bool {
         self.recording.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
+impl Recorder for std::sync::Arc<FakeRecorder> {
+    fn start_recording(&mut self) -> Result<(), crate::error::RecorderError> {
+        let ptr: *mut FakeRecorder = Arc::as_ptr(self) as *mut _;
+        unsafe { (*ptr).start_recording() }
+    }
+    fn stop_recording(&self) -> Result<Vec<u8>, crate::error::RecorderError> {
+        (**self).stop_recording()
+    }
+    fn is_recording(&self) -> bool {
+        (**self).is_recording()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Transcriber fake
+// ---------------------------------------------------------------------------
+
+pub(super) struct FakeTranscriber {
+    outcome:
+        Mutex<Option<Result<crate::transcriber::TranscribeResult, crate::error::TranscriberError>>>,
+    pub(super) call_count: std::sync::atomic::AtomicUsize,
+}
+
+impl FakeTranscriber {
+    pub(super) fn new(
+        outcome: Result<crate::transcriber::TranscribeResult, crate::error::TranscriberError>,
+    ) -> Self {
+        Self {
+            outcome: Mutex::new(Some(outcome)),
+            call_count: std::sync::atomic::AtomicUsize::new(0),
+        }
+    }
+
+    pub(super) fn with_success(text: &str, language: &str) -> Self {
+        Self::new(Ok(crate::transcriber::TranscribeResult {
+            text: text.to_string(),
+            language: language.to_string(),
+        }))
+    }
+
+    pub(super) fn call_count(&self) -> usize {
+        self.call_count.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
+impl Transcriber for FakeTranscriber {
+    fn transcribe<'life0, 'life1>(
+        &'life0 self,
+        _audio: &'life1 [u8],
+        _on_progress: Arc<dyn Fn(f32) + Send + Sync>,
+    ) -> Pin<
+        Box<
+            dyn Future<
+                    Output = Result<
+                        crate::transcriber::TranscribeResult,
+                        crate::error::TranscriberError,
+                    >,
+                > + Send
+                + 'life0,
+        >,
+    >
+    where
+        'life1: 'life0,
+    {
+        self.call_count
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let result = self
+            .outcome
+            .lock()
+            .unwrap()
+            .take()
+            .expect("FakeTranscriber::transcribe called more than once");
+        Box::pin(async move { result })
+    }
+}
+
+impl Transcriber for std::sync::Arc<FakeTranscriber> {
+    fn transcribe<'life0, 'life1>(
+        &'life0 self,
+        audio: &'life1 [u8],
+        on_progress: Arc<dyn Fn(f32) + Send + Sync>,
+    ) -> Pin<
+        Box<
+            dyn Future<
+                    Output = Result<
+                        crate::transcriber::TranscribeResult,
+                        crate::error::TranscriberError,
+                    >,
+                > + Send
+                + 'life0,
+        >,
+    >
+    where
+        'life1: 'life0,
+    {
+        std::sync::Arc::as_ref(self).transcribe(audio, on_progress)
     }
 }
 
@@ -92,6 +254,14 @@ impl MockSink {
 
     pub(super) fn status_changes(&self) -> Vec<PipelineStatus> {
         self.status_changes.lock().unwrap().clone()
+    }
+
+    pub(super) fn errors(&self) -> Vec<String> {
+        self.errors.lock().unwrap().clone()
+    }
+
+    pub(super) fn results(&self) -> Vec<TranscriptionResult> {
+        self.results.lock().unwrap().clone()
     }
 }
 

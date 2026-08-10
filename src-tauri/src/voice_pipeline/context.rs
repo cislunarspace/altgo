@@ -121,9 +121,12 @@ impl PipelineContext {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::key_listener::KeyListener;
+    use crate::key_listener::{KeyEvent, KeyListener};
     use crate::polisher::{LLMFormatter, PolishLevel};
     use crate::recorder::PlatformRecorder;
+    use crate::transcriber::Transcriber;
+
+    use super::super::test_doubles::{FakeListener, FakeRecorder, FakeTranscriber, MockSink};
 
     fn test_polisher_config() -> crate::config::PolisherConfig {
         crate::config::PolisherConfig {
@@ -163,11 +166,39 @@ mod tests {
         }
     }
 
+    fn make_test_wav() -> Vec<u8> {
+        let samples: Vec<u8> = (0..1600).flat_map(|_| 0i16.to_le_bytes()).collect();
+        crate::audio::encode_wav(&samples, 16000, 1, 16).unwrap()
+    }
+
+    fn make_test_context(
+        listener: Box<dyn KeyListener>,
+        recorder: Box<dyn Recorder>,
+        transcriber: Box<dyn Transcriber>,
+        polish_level: PolishLevel,
+    ) -> PipelineContext {
+        PipelineContext {
+            recorder,
+            transcriber,
+            formatter: LLMFormatter::new(
+                "test-key".to_string(),
+                "http://127.0.0.1:1".to_string(),
+                "test-model".to_string(),
+                std::time::Duration::from_millis(1),
+            )
+            .unwrap(),
+            polish_level,
+            listener: Mutex::new(Some(listener)),
+            long_press_threshold: std::time::Duration::from_millis(60),
+            double_click_interval: std::time::Duration::from_millis(60),
+            min_press_duration: std::time::Duration::from_millis(10),
+        }
+    }
+
     #[test]
     fn pipeline_context_accepts_boxed_key_listener() {
-        let fake: Box<dyn KeyListener> = Box::new(super::super::test_doubles::FakeListener {
-            backend: "test-fake",
-        });
+        let (fake, _handle) = FakeListener::new("test-fake");
+        let fake: Box<dyn KeyListener> = Box::new(fake);
         let ctx = make_context(Some(fake));
         let mut taken = ctx.listener.lock().unwrap().take().unwrap();
         assert_eq!(taken.start().unwrap().1, "test-fake");
@@ -189,5 +220,173 @@ mod tests {
         let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
         drop(stop_tx);
         rt.block_on(ctx.run(stop_rx, MockSink));
+    }
+
+    #[tokio::test]
+    async fn long_press_records_transcribes_and_reports_result() {
+        let (listener, handle) = FakeListener::new("fake");
+        let recorder = Arc::new(FakeRecorder::new(make_test_wav()));
+        let transcriber = Arc::new(FakeTranscriber::with_success("raw text", "en"));
+        let ctx = make_test_context(
+            Box::new(listener),
+            Box::new(Arc::clone(&recorder)),
+            Box::new(Arc::clone(&transcriber)),
+            PolishLevel::Light,
+        );
+        let sink = MockSink::new();
+        let (stop_tx, stop_rx) = tokio::sync::oneshot::channel();
+
+        let run_handle = tokio::spawn(ctx.run(stop_rx, sink.clone()));
+
+        // Give the event loop time to enter its select!.
+        tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+
+        handle.send(KeyEvent { pressed: true });
+        tokio::time::sleep(std::time::Duration::from_millis(80)).await;
+
+        handle.send(KeyEvent { pressed: false });
+
+        // Wait for transcription + polish retries (each retry backs off).
+        for _ in 0..300 {
+            if !sink.results().is_empty() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+
+        let _ = stop_tx.send(());
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(5), run_handle).await;
+
+        assert_eq!(recorder.start_count(), 1);
+        assert_eq!(recorder.stop_count(), 1);
+        assert_eq!(transcriber.call_count(), 1);
+
+        let results = sink.results();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].raw_text, "raw text");
+        assert_eq!(results[0].text, "raw text");
+        assert!(results[0].polish_failed);
+
+        assert_eq!(
+            sink.status_changes(),
+            vec![
+                PipelineStatus::Idle,
+                PipelineStatus::Recording,
+                PipelineStatus::Processing,
+                PipelineStatus::Stopped,
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn double_click_enters_continuous_recording() {
+        let (listener, handle) = FakeListener::new("fake");
+        let recorder = Arc::new(FakeRecorder::new(make_test_wav()));
+        let transcriber = Arc::new(FakeTranscriber::with_success("continuous raw", "en"));
+        let ctx = make_test_context(
+            Box::new(listener),
+            Box::new(Arc::clone(&recorder)),
+            Box::new(Arc::clone(&transcriber)),
+            PolishLevel::None,
+        );
+        let sink = MockSink::new();
+        let (stop_tx, stop_rx) = tokio::sync::oneshot::channel();
+
+        let run_handle = tokio::spawn(ctx.run(stop_rx, sink.clone()));
+        tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+
+        // First short press.
+        handle.send(KeyEvent { pressed: true });
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        handle.send(KeyEvent { pressed: false });
+
+        // Second press inside the double-click window.
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        handle.send(KeyEvent { pressed: true });
+
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        handle.send(KeyEvent { pressed: false });
+
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        handle.send(KeyEvent { pressed: true });
+
+        for _ in 0..100 {
+            if !sink.results().is_empty() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+
+        let _ = stop_tx.send(());
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(2), run_handle).await;
+
+        assert_eq!(recorder.start_count(), 1);
+        assert_eq!(recorder.stop_count(), 1);
+
+        let results = sink.results();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].raw_text, "continuous raw");
+        assert!(!results[0].polish_failed);
+    }
+
+    #[tokio::test]
+    async fn single_click_shorter_than_min_press_is_ignored() {
+        let (listener, handle) = FakeListener::new("fake");
+        let recorder = Arc::new(FakeRecorder::new(vec![]));
+        let transcriber = Arc::new(FakeTranscriber::with_success("ignored", "en"));
+        let ctx = make_test_context(
+            Box::new(listener),
+            Box::new(Arc::clone(&recorder)),
+            Box::new(Arc::clone(&transcriber)),
+            PolishLevel::None,
+        );
+        let sink = MockSink::new();
+        let (stop_tx, stop_rx) = tokio::sync::oneshot::channel();
+
+        let run_handle = tokio::spawn(ctx.run(stop_rx, sink.clone()));
+        tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+
+        handle.send(KeyEvent { pressed: true });
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        handle.send(KeyEvent { pressed: false });
+
+        // Wait longer than the double-click interval so the state machine settles.
+        tokio::time::sleep(std::time::Duration::from_millis(120)).await;
+
+        let _ = stop_tx.send(());
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(1), run_handle).await;
+
+        assert_eq!(recorder.start_count(), 0);
+        assert_eq!(recorder.stop_count(), 0);
+        assert_eq!(transcriber.call_count(), 0);
+        assert!(sink.results().is_empty());
+        assert_eq!(
+            sink.status_changes(),
+            vec![PipelineStatus::Idle, PipelineStatus::Stopped]
+        );
+    }
+
+    #[tokio::test]
+    async fn stop_signal_terminates_run() {
+        let (listener, _handle) = FakeListener::new("fake");
+        let ctx = make_test_context(
+            Box::new(listener),
+            Box::new(FakeRecorder::new(vec![])),
+            Box::new(FakeTranscriber::with_success("", "en")),
+            PolishLevel::None,
+        );
+        let sink = MockSink::new();
+        let (stop_tx, stop_rx) = tokio::sync::oneshot::channel();
+
+        let run_handle = tokio::spawn(ctx.run(stop_rx, sink.clone()));
+        tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+
+        let _ = stop_tx.send(());
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(1), run_handle).await;
+
+        assert_eq!(
+            sink.status_changes(),
+            vec![PipelineStatus::Idle, PipelineStatus::Stopped]
+        );
     }
 }

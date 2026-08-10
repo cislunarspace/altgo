@@ -212,9 +212,13 @@ pub async fn process_transcription_result(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::polisher::PolishLevel;
+    use crate::audio;
+    use crate::error::{RecorderError, TranscriberError};
+    use crate::history::HistoryStore;
+    use crate::polisher::{LLMFormatter, PolishLevel};
     use crate::transcriber::Transcriber;
     use std::sync::Arc;
+    use std::time::Duration;
 
     fn test_output(raw: &str, polished: &str, polish_failed: bool) -> TranscriptionResult {
         TranscriptionResult {
@@ -350,5 +354,226 @@ mod tests {
             sink_arc,
         )
         .await;
+    }
+
+    // ---------------------------------------------------------------------------
+    // Helpers for the handle_stop_record success/failure path tests.
+    // ---------------------------------------------------------------------------
+
+    fn make_test_wav() -> Vec<u8> {
+        let samples: Vec<i16> = vec![0, 1000, -1000, 32767, -32768];
+        let mut pcm = Vec::new();
+        for s in &samples {
+            pcm.extend_from_slice(&s.to_le_bytes());
+        }
+        audio::encode_wav(&pcm, 16000, 1, 16).unwrap()
+    }
+
+    fn failing_formatter() -> LLMFormatter {
+        // 连接到一个不会响应的地址，让 polish 在超时/重试后失败。
+        LLMFormatter::new(
+            "test-key".to_string(),
+            "http://127.0.0.1:9".to_string(),
+            "test-model".to_string(),
+            Duration::from_millis(10),
+        )
+        .unwrap()
+    }
+
+    // ---------------------------------------------------------------------------
+    // handle_stop_record 成功与失败分支测试
+    // ---------------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn handle_stop_record_success_chain_falls_back_to_raw_on_polish_failure() {
+        let wav = make_test_wav();
+        let mut recorder = super::super::test_doubles::FakeRecorder::new(wav);
+        let transcriber =
+            super::super::test_doubles::FakeTranscriber::with_success("raw text", "zh");
+        let formatter = failing_formatter();
+        let sink = super::super::test_doubles::MockSink::new();
+        let sink_arc: Arc<dyn PipelineSink> = Arc::new(sink.clone());
+
+        recorder.start_recording().unwrap();
+
+        handle_stop_record(
+            &mut recorder,
+            &transcriber,
+            &formatter,
+            PolishLevel::Medium,
+            sink_arc,
+        )
+        .await;
+
+        assert_eq!(recorder.stop_count(), 1);
+        assert_eq!(transcriber.call_count(), 1);
+        assert_eq!(sink.status_changes(), vec![PipelineStatus::Processing]);
+
+        let results = sink.results();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].raw_text, "raw text");
+        assert_eq!(results[0].text, "raw text");
+        assert!(results[0].polish_failed);
+    }
+
+    #[tokio::test]
+    async fn handle_stop_record_transcription_failure_emits_error_and_idle() {
+        let wav = make_test_wav();
+        let mut recorder = super::super::test_doubles::FakeRecorder::new(wav);
+        let transcriber =
+            super::super::test_doubles::FakeTranscriber::new(Err(TranscriberError::ApiError {
+                status: 500,
+                body: "server error".to_string(),
+            }));
+        let formatter = failing_formatter();
+        let sink = super::super::test_doubles::MockSink::new();
+        let sink_arc: Arc<dyn PipelineSink> = Arc::new(sink.clone());
+
+        recorder.start_recording().unwrap();
+
+        handle_stop_record(
+            &mut recorder,
+            &transcriber,
+            &formatter,
+            PolishLevel::Medium,
+            sink_arc,
+        )
+        .await;
+
+        assert_eq!(recorder.stop_count(), 1);
+        assert_eq!(transcriber.call_count(), 1);
+        assert_eq!(
+            sink.status_changes(),
+            vec![PipelineStatus::Processing, PipelineStatus::Idle]
+        );
+        assert!(!sink.errors().is_empty());
+        assert!(sink.errors()[0].contains("transcription"));
+        assert!(sink.results().is_empty());
+    }
+
+    #[tokio::test]
+    async fn handle_stop_record_empty_text_emits_empty_result() {
+        let wav = make_test_wav();
+        let mut recorder = super::super::test_doubles::FakeRecorder::new(wav);
+        let transcriber = super::super::test_doubles::FakeTranscriber::with_success("", "zh");
+        let formatter = failing_formatter();
+        let sink = super::super::test_doubles::MockSink::new();
+        let sink_arc: Arc<dyn PipelineSink> = Arc::new(sink.clone());
+
+        recorder.start_recording().unwrap();
+
+        handle_stop_record(
+            &mut recorder,
+            &transcriber,
+            &formatter,
+            PolishLevel::Medium,
+            sink_arc,
+        )
+        .await;
+
+        assert_eq!(recorder.stop_count(), 1);
+        assert_eq!(transcriber.call_count(), 1);
+        assert_eq!(sink.status_changes(), vec![PipelineStatus::Processing]);
+
+        let results = sink.results();
+        assert_eq!(results.len(), 1);
+        assert!(results[0].text.is_empty());
+        assert!(results[0].raw_text.is_empty());
+        assert!(!results[0].polish_failed);
+    }
+
+    #[tokio::test]
+    async fn handle_stop_record_recorder_failure_returns_idle_without_transcribing() {
+        let wav = make_test_wav();
+        let mut recorder = super::super::test_doubles::FakeRecorder::with_stop_error(
+            RecorderError::StopFailed("device lost".to_string()),
+            wav,
+        );
+        let transcriber =
+            super::super::test_doubles::FakeTranscriber::with_success("raw text", "zh");
+        let formatter = failing_formatter();
+        let sink = super::super::test_doubles::MockSink::new();
+        let sink_arc: Arc<dyn PipelineSink> = Arc::new(sink.clone());
+
+        recorder.start_recording().unwrap();
+
+        handle_stop_record(
+            &mut recorder,
+            &transcriber,
+            &formatter,
+            PolishLevel::Medium,
+            sink_arc,
+        )
+        .await;
+
+        assert_eq!(recorder.stop_count(), 1);
+        assert_eq!(transcriber.call_count(), 0);
+        assert_eq!(
+            sink.status_changes(),
+            vec![PipelineStatus::Processing, PipelineStatus::Idle]
+        );
+        assert!(sink.results().is_empty());
+        assert!(sink.errors().is_empty());
+    }
+
+    // ---------------------------------------------------------------------------
+    // dispatch_history_polish 测试
+    // ---------------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn dispatch_history_polish_success_updates_entry() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let store = HistoryStore::new(temp_dir.path().join("history.json"));
+        let entry = store
+            .append("原始文本".to_string(), "原始文本".to_string())
+            .unwrap();
+
+        // PolishLevel::None 会成功返回原文，适合测编排链路而不过度依赖网络。
+        let formatter = failing_formatter();
+        let result =
+            dispatch_history_polish(&store, &entry.id, &formatter, PolishLevel::None).await;
+
+        assert!(result.is_ok());
+        let updated = result.unwrap();
+        assert_eq!(updated.raw_text, "原始文本");
+        assert_eq!(updated.text, "原始文本");
+
+        let fetched = store.get(&entry.id).unwrap().unwrap();
+        assert_eq!(fetched.text, "原始文本");
+        assert_eq!(fetched.raw_text, "原始文本");
+    }
+
+    #[tokio::test]
+    async fn dispatch_history_polish_missing_entry_returns_error() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let store = HistoryStore::new(temp_dir.path().join("history.json"));
+        let formatter = failing_formatter();
+
+        let result =
+            dispatch_history_polish(&store, "missing-id", &formatter, PolishLevel::None).await;
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not found"));
+    }
+
+    #[tokio::test]
+    async fn dispatch_history_polish_failure_returns_error() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let store = HistoryStore::new(temp_dir.path().join("history.json"));
+        let entry = store
+            .append("原始文本".to_string(), "原始文本".to_string())
+            .unwrap();
+
+        // 使用需要实际调用 API 的级别，让 polish 在连接失败后返回 Err。
+        let formatter = failing_formatter();
+        let result =
+            dispatch_history_polish(&store, &entry.id, &formatter, PolishLevel::Medium).await;
+
+        assert!(result.is_err());
+        assert!(!result.unwrap_err().is_empty());
+
+        // 失败时不应写入历史。
+        let fetched = store.get(&entry.id).unwrap().unwrap();
+        assert_eq!(fetched.text, "原始文本");
     }
 }

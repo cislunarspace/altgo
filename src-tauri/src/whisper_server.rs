@@ -197,15 +197,15 @@ impl ResidentWhisper {
             return Err("whisper-server not started".to_string());
         }
         self.ready
-            .get_or_init(|| async { self.probe_ready().await })
+            .get_or_init(|| async { self.probe_ready(READY_TIMEOUT).await })
             .await
             .clone()
     }
 
     /// 轮询 `GET /health` 直到 200 或超时。
-    async fn probe_ready(&self) -> Result<(), String> {
+    async fn probe_ready(&self, timeout: Duration) -> Result<(), String> {
         let url = format!("{}/health", self.base_url);
-        let deadline = Instant::now() + READY_TIMEOUT;
+        let deadline = Instant::now() + timeout;
         loop {
             match self
                 .client
@@ -220,7 +220,7 @@ impl ResidentWhisper {
             if Instant::now() >= deadline {
                 return Err(format!(
                     "whisper-server readiness timed out after {:?}",
-                    READY_TIMEOUT
+                    timeout
                 ));
             }
             tokio::time::sleep(READY_POLL_INTERVAL).await;
@@ -432,6 +432,11 @@ impl ResidentWhisper {
     fn for_test(base_url: String) -> Self {
         let ready = OnceCell::new();
         let _ = ready.set(Ok(()));
+        Self::for_test_with_ready(base_url, ready)
+    }
+
+    /// 测试构造器：跳过真实 spawn，可自定义 ready cell（用于 probe_ready 测试）。
+    fn for_test_with_ready(base_url: String, ready: OnceCell<Result<(), String>>) -> Self {
         Self {
             proc: Arc::new(ServerProc {
                 child: Mutex::new(None),
@@ -536,5 +541,59 @@ mod tests {
         let result = rw.transcribe(&[0u8; 44], None).await;
         // 回退路径会因 cli/model 缺失而失败，但不应 panic。
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_transcribe_falls_back_when_server_runtime_fails() {
+        let mut server = mockito::Server::new_async().await;
+        let _health_mock = server
+            .mock("GET", "/health")
+            .with_status(200)
+            .create_async()
+            .await;
+        let _inference_mock = server
+            .mock("POST", "/inference")
+            .with_status(500)
+            .with_body("server runtime error")
+            .create_async()
+            .await;
+
+        // spawned=true, ready 预设 Ok，模拟运行期崩溃：/inference 失败触发回退。
+        let rw = ResidentWhisper::for_test(server.url());
+        // fallback LocalWhisper 使用空 whisper_path，会触发回退失败。
+        let result = rw.transcribe(&[0u8; 44], None).await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_probe_ready_success() {
+        let mut server = mockito::Server::new_async().await;
+        let mock = server
+            .mock("GET", "/health")
+            .with_status(200)
+            .create_async()
+            .await;
+
+        let rw = ResidentWhisper::for_test_with_ready(server.url(), OnceCell::new());
+        let result = rw.probe_ready(Duration::from_secs(1)).await;
+        assert!(result.is_ok());
+        mock.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn test_probe_ready_times_out() {
+        let mut server = mockito::Server::new_async().await;
+        let mock = server
+            .mock("GET", "/health")
+            .with_status(500)
+            .expect_at_least(1)
+            .create_async()
+            .await;
+
+        let rw = ResidentWhisper::for_test_with_ready(server.url(), OnceCell::new());
+        let result = rw.probe_ready(Duration::from_millis(100)).await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("timed out"));
+        mock.assert_async().await;
     }
 }
