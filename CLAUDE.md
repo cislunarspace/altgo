@@ -21,7 +21,7 @@
 
 ## 项目概览
 
-**altgo** 是用 Rust 编写的桌面语音转文字工具，支持 **Linux**（Ubuntu 20.04+）和 **Windows**（通过 GitHub Releases 提供 MSI）。按住右 Alt 键录音，松开后使用 **本地 whisper.cpp** 进行转写，可选择通过任意 **兼容 OpenAI 的 LLM** API 进行润色，然后将结果写入系统剪贴板，并在悬浮浮窗中显示（如果剪贴板工具失败，则使用浮窗副本作为回退）。成功的转写结果（原始文本 + 显示文本）以纯文本历史记录的形式持久化保存在本地 JSON 文件（`~/.config/altgo/history.json`）中；音频不会被保存。代码中可能仍包含可选的 HTTP Whisper API 路径，以供高级用途。
+**altgo** 是用 Rust 编写的桌面语音转文字工具，支持 **Linux**（Ubuntu 20.04+）和 **Windows**（通过 GitHub Releases 提供 MSI）。按住右 Alt 键录音，松开后使用 **本地 whisper.cpp** 进行转写，也可选择 **OpenAI 兼容的 API**（`engine = "api"`）或 **小米 MiMo 云 API**（`engine = "mimo"`）。随后可选通过 **OpenAI 兼容或 Anthropic Messages 协议**的 LLM 进行润色。结果写入系统剪贴板，并在悬浮浮窗中显示。成功的转写结果（原始文本 + 显示文本）以纯文本历史记录的形式持久化保存在本地 JSON 文件（`~/.config/altgo/history.json`）中；音频不会被保存。
 
 ## 构建与测试命令
 
@@ -74,28 +74,28 @@ Key Listener → State Machine → Recorder → Transcriber → Polisher → Out
 
 ### 模块（位于 `src-tauri/src/`）
 
-- **`lib.rs`** —— Tauri 应用入口：`run()` 运行循环、`AppState`（`config_path`、**`history_path`**、pipeline 句柄与状态），以及 `spawn_pipeline_thread`（在独立 OS 线程的 tokio 运行时上拉起 `voice_pipeline::run`）。
-- **`cmd.rs`** —— 通过 IPC 暴露给前端的 Tauri 命令：配置（`get_config`、`save_config`、`capture_activation_key`）、pipeline（`start_pipeline`、`stop_pipeline`、`get_status`）、浮窗（`copy_text`、`hide_overlay`）、模型（`list_models`、`download_model`、`delete_model`、`resolve_model`）、**历史记录**（`list_history`、`delete_history_entries`、`clear_history`、`polish_history_entry`）。语音流水线（`run_pipeline`）在 `raw_text` 非空时追加一行，写入成功后发出 `history-updated` 事件，并优先在润色后文本经 trim 后非空时展示润色文本。
+- **`lib.rs`** —— Tauri 应用入口：`run()` 装配 managed state（`ConfigStore`、`HistoryStore`、`PipelineController`、`Arc<dyn Output>`），`spawn_pipeline_thread` 在独立 OS 线程的 tokio 运行时上拉起 `voice_pipeline::run`（从 managed state 取 Output 与 HistoryStore，构造 `TranscriptionDispatcherImpl` 和 `TauriPipelineSink`）。
+- **`cmd.rs`** —— 通过 IPC 暴露给前端的 Tauri 命令，共 16 个：配置（`get_config`、`save_config`、`capture_activation_key`）、pipeline（`start_pipeline`、`stop_pipeline`、`get_status`）、浮窗（`copy_text`、`hide_overlay`）、模型（`list_models`、`download_model`、`delete_model`、`resolve_model`）、历史记录（`list_history`、`delete_history_entries`、`clear_history`、`polish_history_entry`）。历史追加由 `tauri_sink.rs` 经 `TranscriptionDispatch` 驱动，写入成功后发出 `history-updated` 事件，并优先在润色后文本经 trim 后非空时展示润色文本。
 - **`history.rs`** —— `HistoryStore`：对 `history.json` 的追加/列出/删除/清空/更新/计数（camelCase JSON，文件 I/O 使用 `Mutex`）。`HistoryStore` 是唯一对外接口，调用方不直接接触文件路径或内部辅助函数。不保存音频。
 - **`config.rs`** —— 使用 `serde(default)` 加载每个字段的 TOML 配置；`ConfigPatch` 补丁逻辑与字段定义共处一处。API 密钥可通过环境变量覆盖（例如 `ALTGO_POLISHER_API_KEY`；若使用 API 引擎，则转写器密钥同样可覆盖）。
-- **`config_store.rs`** —— `Config` 的持久化封装；所有变更经 `apply_patch` 原子校验并写盘。
+- **`config_store.rs`** —— `Config` 的持久化封装；所有变更经 `apply_patch` 校验并写盘。校验失败时内存已部分应用、不落盘（非原子回滚）。
 - **`state_machine.rs`** —— 5 状态枚举（`Idle`、`PotentialPress`、`Recording`、`WaitSecondClick`、`ContinuousRecording`）。长按录音，双击进入连续模式。提供同步接口（`process`、`poll_timeout`、`next_deadline`），由 `voice_pipeline` 的 `tokio::select!` 主循环驱动。
 - **`audio.rs`** —— 线程安全的 PCM 缓冲区（`Mutex<Vec<u8>>`），WAV 编码/解码（44 字节头 + PCM）。
 - **`error.rs`** —— 类型化错误枚举（`PipelineError`、`OutputError`、`KeyListenerError`、`ModelError`、`ConfigError`、`HistoryError`），区分致命（停管道）与可恢复（降级）。
-- **`transcriber.rs`** —— 转写后端 trait 与实现：`WhisperApi`（HTTP multipart 上传至兼容 OpenAI 的端点）、`LocalWhisper`（一次性 `whisper-cli` 子进程）。本地默认走常驻后端（见 `whisper_server.rs`）。
+- **`transcriber.rs`** —— 转写后端 trait 与实现：`WhisperApi`（OpenAI 兼容 HTTP）、`MimoAsr`（小米 MiMo 云 API）、`LocalWhisper`（一次性 `whisper-cli` 子进程）。引擎由配置 `engine` 选择（`local`/`api`/`mimo`），本地默认走常驻后端（见 `whisper_server.rs`）。
 - **`whisper_server.rs`** —— 常驻 whisper-server 管理（`ResidentWhisper`）：管道启动时拉起一次，模型常驻内存，逐句走本地 HTTP；二进制缺失、端口冲突、就绪超时或运行期崩溃均自动回退到一次性 `LocalWhisper`。
 - **`polisher.rs`** —— 使用 LLM 对文本进行 4 档润色（`none`/`light`/`medium`/`heavy`），支持 OpenAI 兼容聊天 API 与 Anthropic Messages API 两种协议。指数退避重试（3 次）。`polisher/protocol.rs` 定义 API 协议类型（`ApiProtocol`）。
-- **`prompt_store.rs`** —— 润色 prompt 模板管理：从 `resources/prompts/` 组合 `base.txt` + 各档后缀，文件变动时热重载（去抖 500ms）。
-- **`voice_pipeline/`** —— 核心处理流水线（录音→转写→润色）的单一深模块。`sink.rs` 定义 `PipelineSink` 接缝（状态变更、错误、结果、进度、按键后端通知）与 `TranscriptionResult` / `DispatchOutcome`；`dispatcher.rs` 是 sink 注入的业务 seam（剪贴板写入 + 历史追加，归到 `TranscriptionDispatch` trait），生产实现 `TranscriptionDispatcherImpl` 转调 `process_transcription_result`；`handlers.rs` 留有 `dispatch_history_polish` 编排 `store.get + formatter.polish + store.polish_entry`。
-- **`pipeline_controller.rs`** —— 流水线生命周期与状态跟踪（`PipelineStatus`：Idle/Recording/Processing 等），对应 `start`/`stop`/`get_status`。
+- **`prompt_store.rs`** —— 润色 prompt 模板管理：从 `resources/prompts/` 组合 `base.txt` + 各档后缀，启动时加载一次，改文件需重启应用生效。
+- **`voice_pipeline/`** —— 核心处理流水线（录音→转写→润色）的单一深模块。`sink.rs` 定义 `PipelineSink` 接缝（状态变更、错误、结果、进度、按键后端通知）与 `TranscriptionResult` / `DispatchOutcome`；`dispatcher.rs` 是 sink 注入的业务 seam（剪贴板写入 + 历史追加，归到 `TranscriptionDispatch` trait），生产实现 `TranscriptionDispatcherImpl` 转调 `process_transcription_result`；`handlers.rs` 留有 `dispatch_history_polish` 编排 `store.get + formatter.polish + store.polish_entry`。`context.rs` 主循环是 `tokio::select!` 三分支（按键、状态机超时、停止信号），转写与润色在循环内串行完成（单次转写互斥）。
+- **`pipeline_controller.rs`** —— 流水线生命周期与状态跟踪（`PipelineStatus`：Idle/Recording/Processing/Done/Stopped 五态），对应 `start`/`stop`/`get_status`。
 - **`tauri_sink.rs`** —— `PipelineSink` 的 Tauri 适配器：把管道事件转成前端事件，并把悬浮窗操作委托给 `OverlayManager`。剪贴板/历史业务由 `TranscriptionDispatch` trait 注入（构造时一次性决定），本模块不再持有 `Output` 或 `HistoryStore`。
-- **`model.rs`** —— whisper.cpp GGML 模型管理（下载、切换、存储在 `~/.config/altgo/models/`）。
+- **`model.rs`** —— whisper.cpp GGML 模型管理（下载、切换；存储在 `dirs::config_dir()/altgo/models/`，Linux 为 `~/.config/altgo/models/`，Windows 为 `%APPDATA%/altgo/models/`）。
 - **`tray.rs`** —— 系统托盘配置（显示窗口、退出菜单）。
-- **`resource.rs`** —— 资源文件管理。
-- **`key_capture/`** —— 设置中的一次性激活键捕获（Linux evdev；Windows WH_KEYBOARD_LL）。`mod.rs` 包含共享类型与 Linux 实现，`windows.rs` 为 Windows 实现。
+- **`resource.rs`** —— 资源路径与线程数工具：`bundled_bin`（捆绑二进制查找，顺序为配置路径 → 捆绑 → PATH）、`effective_threads`、`expand_tilde`。
+- **`key_capture/`** —— 设置中的一次性激活键捕获。无 trait 抽象，`capture_activation_key_blocking` 是按平台 cfg 分派的自由函数（Linux evdev；Windows WH_KEYBOARD_LL）。`mod.rs` 包含共享类型与 Linux 实现，`windows.rs` 为 Windows 实现。
 - **`key_listener/`** —— 按键检测（Linux：`xinput test-xi2` / Windows：通过 `SetWindowsHookExW` 在独立消息泵线程上挂接 `WH_KEYBOARD_LL`）。
 - **`recorder/`** —— 音频捕获（Linux：`parecord` PulseAudio / Windows：`cpal` WASAPI；输出 16kHz 单声道 WAV；如果设备采样率不同，则通过 rubato 重采样）。
-- **`output/`** —— 剪贴板 + 通知（Linux：`xclip`/`xsel`/`wl-copy` + `notify-send` / Windows：`arboard` 剪贴板 + 空操作通知；Windows 由浮窗负责显示）。
+- **`output/`** —— 剪贴板写入（Linux：`xclip`/`xsel`/`wl-copy`；Windows：`arboard`）。结果展示统一由浮窗负责，Linux 与 Windows 均无系统通知。
 - **悬浮窗（`overlay/`）** —— 状态意图与窗口操作分离：`overlay/seam.rs` 定义 `OverlayWindow` seam，`overlay/manager.rs` 按状态意图算尺寸/位置，`overlay/tauri.rs` 是 Tauri 适配器（用 `GetMonitorInfoW` 取显示器几何）。
 
 ### 前端结构（`frontend/src/`）
@@ -151,7 +151,7 @@ Key Listener → State Machine → Recorder → Transcriber → Polisher → Out
 
 ### 系统要求
 
-**Linux**：`xinput`、`xmodmap`、`parecord`、`xclip`/`xsel`/`wl-copy`、`notify-send`
+**Linux**：`xinput`、`xmodmap`、`parecord`、`xclip`/`xsel`/`wl-copy`
 
 **Windows**：WebView2 Runtime（若缺失，MSI 会自动安装）、麦克风（WASAPI 默认设备）。不依赖 CLI 工具 —— 所有平台集成均使用 Win32 API 或内置 crate。
 

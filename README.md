@@ -1,231 +1,133 @@
 # altgo
 
-**无需打字，言出法随** — 语音转文字桌面工具（Linux + Windows）
+语音转文字桌面工具。按住右 Alt 键说话，松开即转写，结果写入剪贴板，并显示在悬浮窗中。
 
-按住右 Alt 键说话，松开后在本地用 **whisper.cpp** 转写，可选通过 **OpenAI 兼容 API 或 Anthropic Messages API** 调用 LLM 润色。结果写入系统剪贴板，同时在**悬浮窗**中展示便于核对；若剪贴板写入失败或想再次确认，可在悬浮窗内点按复制。所有转写文本（原始 + 润色后）自动保存到本地**历史记录**，随时可查、可复制、可再次润色。
+支持 **Linux**（Ubuntu 20.04+）和 **Windows**（MSI 安装包）。不支持 macOS。
 
-**在线文档**：[cislunarspace.github.io/altgo](https://cislunarspace.github.io/altgo/)（源码在 [`docs-site/`](docs-site/)，由 GitHub Pages 部署）。
-
-支持 **Linux**（Ubuntu 20.04+）和 **Windows**（MSI 安装包，GitHub Releases 提供）。不支持 macOS。
-
-![APP首页](figures/app-front.png)
+**在线文档**：https://cislunarspace.github.io/altgo/（源码在 `docs-site/`）
 
 ## 功能
 
-- **长按触发**：长按右 Alt 键进入录音模式，松开自动停止并处理
-- **双击切换**：双击右 Alt 键进入连续录音模式，再次单击停止
-- **本地 ASR**：以 **whisper.cpp** 为主；模型可在**设置**里下载并选用，`whisper-cli` 随**官方预编译包**一并提供，一般无需自行安装。有 NVIDIA 显卡的用户安装 CUDA runtime（`libcublas` / `libcublasLt` / `libcudart`）后自动启用 GPU 加速，未安装则回退 CPU
-- **常驻转写提速**：本地模式下自动拉起常驻 **whisper-server**，模型只载入内存一次，之后每句话走本地 HTTP 转写，省去逐句重载模型的冷启动开销；若 whisper-server 不可用，自动回退到一次性 `whisper-cli`
-- **LLM 润色（可选）**：通过 **OpenAI 兼容 API** 或 **Anthropic Messages API** 调用任意厂商或本地部署的 LLM（如云端 API、Ollama、vLLM 等），对转写文本做 light / medium / heavy 等档位润色
-- **悬浮窗与剪贴板**：处理完成后写入剪贴板并弹出悬浮窗；可在悬浮窗内再次复制
-- **系统托盘**：常驻托盘图标，左键显示/隐藏主窗口，右键菜单提供退出选项
-- **转写历史**：所有成功转写自动保存到本地 `history.json`；支持查看列表、复制、删除单条、清空全部，以及对任意记录**再次润色**
+- 长按右 Alt 键录音，松开自动转写
+- 双击右 Alt 键进入连续录音模式，再次单击停止
+- 本地 whisper.cpp 转写，模型可在设置里下载。有 NVIDIA 显卡并安装 CUDA runtime 时自动启用 GPU 加速，否则回退 CPU。本地自动拉起常驻 whisper-server 提速，不可用时回退一次性 whisper-cli
+- 可选 LLM 润色，支持 OpenAI 兼容与 Anthropic Messages 两种协议
+- 结果写入剪贴板，并在悬浮窗展示，可再次复制
+- 托盘常驻，可隐藏窗口或退出
+- 转写历史保存在本地 history.json，可查看、复制、删除、清空、再次润色。历史只保存文本，不保存音频
 
 ## 系统要求
 
 ### Linux
 
-- **测试与部署环境**：目前仅在 **Ubuntu 20.04** 上做过安装与运行验证；其他发行版可能可用，但未保证。
-- **读取键盘设备（必做）**：在常见安装方式下，必须将当前用户加入 **`input` 组**，否则无法稳定访问 `/dev/input/event*`，按键监听会失败。执行后**须重新登录**会话方可生效：
+- 需将当前用户加入 `input` 组，否则无法读取键盘设备。加入后须重新登录
 
   ```bash
   sudo usermod -aG input "$USER"
-  # 注销并重新登录，或重启后再试
   ```
 
-- **其余系统组件**（桌面、音频相关库）由 **`.deb` 依赖**自动处理，缺什么按安装器提示补装即可。
+- 其余依赖由安装包自动处理
 
 ### Windows
 
-- **运行时**：需要 **WebView2 运行时**（MSI 安装包已内嵌引导，会自动安装；Windows 10 1803+ 和 Windows 11 通常已预装）。
-- **音频**：使用系统默认麦克风，无需额外配置。若应用无法识别录音设备，检查系统声音设置中是否有可用输入设备。
-- **无额外依赖**：`whisper-cli` 等已随 MSI 一并打包，无需单独安装。
+- 需要 WebView2 Runtime（MSI 会自动安装），使用系统默认麦克风
+- 无需额外依赖
 
 ## 安装
 
-### 给最终用户（推荐）
+### Linux
 
-#### Linux
+1. 到 [Releases](https://github.com/cislunarspace/altgo/releases) 下载安装包
+2. 按格式安装：
 
-1. 前往 [Releases](https://github.com/cislunarspace/altgo/releases) 下载对应发行版的安装包：
-   - **`.deb`**（Ubuntu / Debian 系）
-   - **`.rpm`**（Fedora / RHEL 系）
-   - **`.flatpak`**（任意发行版，需已安装 Flatpak）
-2. 安装（按下载的格式选其一）：
-   - **`.deb`**：推荐用 `apt` 从本地文件安装，会自动处理依赖（GTK / WebKit、系统托盘、剪贴板工具等）：
+   ```bash
+   sudo apt install ./altgo_*_amd64.deb     # deb
+   sudo dnf install ./altgo-*.rpm           # rpm
+   flatpak install --user ./altgo-*.flatpak # flatpak
+   ```
 
-     ```bash
-     sudo apt install /path/to/altgo_*_amd64.deb
-     ```
+3. 加入 `input` 组并重新登录（见系统要求）
+4. 启动应用，在设置里完成转写模型与润色
 
-     将路径换成你保存 deb 的实际位置；在 deb 所在目录时也可写 `sudo apt install ./altgo_*.deb`。
-     不建议只用 `sudo dpkg -i …`：dpkg 不拉依赖，容易缺包；若已装到一半失败，用 `sudo apt install -f` 补全。
-   - **`.rpm`**：`sudo dnf install /path/to/altgo-*.rpm`（自动拉依赖）；无 dnf 时用 `sudo rpm -i …`，需自行保证依赖。
-   - **`.flatpak`**：`flatpak install --user /path/to/altgo-x86_64.flatpak`，首次安装会自动拉取 Flatpak 运行时；之后从应用菜单启动，或 `flatpak run com.github.altgo`。
+### Windows
 
-3. **务必**完成 [系统要求](#linux) 中的 **`input` 组** 步骤（与按键监听相关，安装包无法代劳）。
-4. 启动应用，在 **[设置](#首次使用应用内设置)** 里完成转写模型与可选润色等；**不要**一上来编辑配置文件。
+1. 到 [Releases](https://github.com/cislunarspace/altgo/releases) 下载 MSI
+2. 双击运行，按向导完成安装
+3. 启动应用，在设置里完成转写模型与润色
 
-#### Windows
+## 使用
 
-1. 前往 [Releases](https://github.com/cislunarspace/altgo/releases) 下载 **`.msi`** 安装包。
-2. 双击运行 MSI，按向导完成安装。首次安装时若系统缺少 **WebView2 运行时**，安装程序会自动下载并安装（需联网）。
-3. 启动应用，在 **[设置](#首次使用应用内设置)** 里完成转写模型与可选润色等。
+启动后先在设置页完成转写模型、润色与触发键，然后：
 
-### 给开发者（从本仓库构建）
+1. 长按右 Alt 录音，松开后转写（可选润色），结果进剪贴板和悬浮窗
+2. 双击右 Alt 进入连续录音，再次单击停止
+3. 在历史记录页可浏览、复制、删除、清空、再次润色
 
-克隆仓库后，在 **Linux** 上使用 **`make build`** 可一次性拉取 **whisper-cli** 等到 `target/deps/bin/`，执行 `cargo tauri build`，并把依赖二进制拷贝到 `src-tauri/target/release/bin/`，与 CI/打包流程一致。**日常联调与验证同样建议以 `make build`（或下表 Windows 等价命令）为主**，确保与发布产物行为一致。
+默认触发键是右 Alt。按它没反应时，Linux 检查是否已加入 `input` 组并重新登录，Windows 确认 altgo 窗口在前台。可用 `RUST_LOG=altgo=debug altgo` 查看日志。
 
-在 **Windows** 上无需安装 `make`：使用仓库里的 **`build.ps1` / `build.cmd`**（与 `make build` 同款流程）。需已安装 **Rust（cargo）**、**Node.js（npm）** 与 **PowerShell 7+（`pwsh`，推荐；否则 `build.cmd` 会回退到 Windows PowerShell 5.1）**。
+## 配置
 
-```bash
-git clone <本仓库 URL>
-cd altgo
-cd frontend && npm install && cd ..
-# Linux：先安装 Tauri 所需的 GTK/WebKit 等开发包，见下文「开发环境」
-make deps-linux
-make build
-# 可选：sudo make install
-```
-
-```powershell
-# Windows（与上列 make build 等价）
-cd frontend; npm install; cd ..
-.\build.ps1
-# 或: pwsh packaging/scripts/build.ps1
-# 或: build.cmd
-```
-
-若需快速改前端界面，可临时使用 `cargo tauri dev` 获得热重载；**完整链路（含捆绑二进制、与发布一致）仍以 `make build` / `.\build.ps1` 为准。**
-
-从源码自行构建且**未**走 `make deps-linux` 时，才需要自行保证 **whisper-cli** 可被程序找到（例如加入 `PATH`）。
-
-## 首次使用：应用内设置
-
-安装并启动后，**面向用户的选项都应在图形界面里完成**，无需先理解配置文件：
-
-- **顶部状态**：会提示本地转写是否就绪（例如是否已选用可用模型）；按提示操作即可。
-- **转写**：选择 **本地 whisper.cpp** 或 **云端 API**（若使用）；设置识别语言；在 **模型管理** 中 **下载 / 选用** 模型，或使用「高级」填写本机 `.bin` 路径或模型名。
-- **润色**：选择是否启用以及轻/中/重度；选择 API 协议（OpenAI 兼容 或 Anthropic）；填写地址、模型名与密钥（适用于云端或本地网关如 Ollama 等）。
-- **外观**：浅色 / 深色 / 跟随系统；**界面语言**。
-- **录音 / 触发键**：预设左右 Alt 或 **「按下以设置」** 捕获快捷键。
-- 点击 **保存**；多数情况下管道会自动重载，无需重启应用。
-
-跟着界面走即可完成日常使用。
-
-![设置](figures/settings.png)
-
-## 高级：直接编辑配置文件（可选）
-
-仅在需要 **脚本化、批量部署、或与 GUI 未暴露的字段打交道** 时使用：
-
-- **配置路径**：`~/.config/altgo/altgo.toml`
-
-仓库内 [`configs/altgo.toml`](configs/altgo.toml) 列出全部字段及注释；与界面保存的是同一套配置。
-
-### 环境变量（高级 / 部署）
+配置文件位于 `~/.config/altgo/altgo.toml`，模板见 [`configs/altgo.toml`](configs/altgo.toml)。
 
 | 变量 | 说明 |
 | ---- | ---- |
 | `ALTGO_POLISHER_API_KEY` | 覆盖润色 API 密钥 |
-| `ALTGO_TRANSCRIBER_API_KEY` | 若使用云端转写 API，可覆盖其密钥 |
+| `ALTGO_TRANSCRIBER_API_KEY` | 覆盖云端转写 API 密钥 |
 | `RUST_LOG` | 日志级别，如 `altgo=debug` |
-
-## 使用
-
-1. 启动 altgo。
-2. **长按右 Alt** → 录音 → 松开 → 本地转写（及可选润色）→ **悬浮窗**展示结果，并自动写入剪贴板。
-3. **双击右 Alt** → 连续录音 → 再次单击停止 → 同上。
-4. 点击主窗口的**历史记录**标签，可浏览过往转写、复制内容或对单条记录再次润色。
-
-![首页转写中](figures/home-transcribing.png)
-
-![悬浮窗转写中](figures/overlay-transcribing.png)
-
-### 按 Alt 没有反应？
-
-1. **默认触发键是右侧 Alt**。优先在 **设置 → 录音 / 触发键** 里用「按下以设置」或预设；一般不必改配置文件。
-2. **Linux：是否已加入 `input` 组并重新登录？** 未满足则 Wayland/X11 下按键设备常无法读取。
-3. **Windows：确认 altgo 窗口在前台或未被最小化**。`WH_KEYBOARD_LL` 钩子依赖消息循环；某些安全软件可能拦截全局钩子。
-4. 查看主窗口是否报错：模型缺失、`xinput`/`evtest` 不可用等会导致管道无法就绪。
-5. 调试：`RUST_LOG=altgo=debug altgo`（Linux）或在 PowerShell 中 `$env:RUST_LOG="altgo=debug"; altgo`（Windows）。
-
-### 历史记录
-
-所有成功转写结果都会自动保存到本地历史。在历史页面你可以：
-- 浏览全部转写记录（显示原始文本与润色后文本）
-- 复制单条记录的原始或润色文本
-- 对任意历史记录**再次润色**
-- 删除单条或清空全部历史
-
-> **隐私说明**：历史记录仅保存**文本**，不会存储任何音频文件。
-
-![转录历史](figures/history.png)
 
 ## 架构
 
 ```text
-按键事件 → 状态机 → 录音 → whisper.cpp 转写 → 可选 LLM 润色 → 悬浮窗展示 + 剪贴板 + 历史记录持久化
+按键事件 → 状态机 → 录音 → whisper.cpp 转写 → 可选润色 → 剪贴板 + 悬浮窗 + 历史
 ```
 
-altgo 基于 **Tauri**，前端 **React**，核心逻辑 **Rust**。关键模块包括：
+基于 Tauri，前端 React，核心逻辑 Rust。关键模块：
 
 | 模块 | 职责 |
 |------|------|
-| `state_machine` | 按键状态管理（单击 / 长按 / 双击 / 连续录音） |
-| `key_listener` | 按键监听（Linux: XInput2 / Windows: WH_KEYBOARD_LL） |
-| `recorder` | 音频采集（Linux: parecord / Windows: cpal-WASAPI） |
-| `transcriber` | 本地常驻 whisper-server（回退 `whisper-cli`）或 OpenAI 兼容 API 转写 |
-| `polisher` | OpenAI 兼容 API 或 Anthropic Messages API 润色 |
-| `output` | 剪贴板写入（Linux: xclip/xsel/wl-copy / Windows: arboard） |
-| `history` | 本地 `history.json` 的追加 / 列表 / 删除 / 更新 |
+| `state_machine` | 按键状态管理（长按 / 双击 / 连续录音） |
+| `key_listener` | 按键监听（Linux xinput / Windows WH_KEYBOARD_LL） |
+| `recorder` | 音频采集（Linux parecord / Windows cpal） |
+| `transcriber` | 转写后端：本地 whisper-server（回退 whisper-cli）、OpenAI 兼容 API、小米 MiMo 云 API |
+| `whisper_server` | 常驻 whisper-server 管理，模型常驻内存 |
+| `polisher` | OpenAI 兼容或 Anthropic 协议润色 |
+| `output` | 剪贴板写入（Linux xclip / xsel / wl-copy，Windows arboard） |
+| `history` | 本地 history.json 读写 |
 | `model` | GGML 模型下载与管理 |
+| `overlay` | 悬浮窗（状态意图与窗口操作分离） |
+| `tauri_sink` | 管道事件转 Tauri 事件与悬浮窗状态 |
+| `pipeline_controller` | 管道生命周期与状态跟踪 |
 
 ## 开发环境
 
-### 前置依赖
+前置依赖：Rust stable、Node.js 18+、Tauri CLI（`cargo install tauri-cli`）。
 
-- Rust stable（建议 **1.80+**，见 [Tauri 2 前置条件](https://tauri.app/start/prerequisites/)）
-- **Node.js 18+**（建议 20+）
-- Tauri CLI：`cargo install tauri-cli --version "^2"`
-- **Windows 额外**：MSVC 工具链（通过 `rustup` 安装 `x86_64-pc-windows-msvc`）、PowerShell 7+（`pwsh`）
-
-### Ubuntu 20.04 上打包依赖示例
+从源码构建：
 
 ```bash
-sudo apt update
-sudo apt install build-essential curl wget file \
-  libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev
+cd frontend && npm install && cd ..
+make deps-linux
+make build
 ```
 
-仅需可执行文件、不生成 deb 时：`cargo tauri build --no-bundle`。
+Windows 用 `.\build.ps1` 或 `build.cmd`。系统依赖（GTK/WebKit 等）见 [CLAUDE.md](CLAUDE.md)。
 
-### 常用命令
+常用命令：
 
-| 目标 | 说明 |
+| 命令 | 说明 |
 | ---- | ---- |
-| `make deps-linux` | 下载 whisper-cli 等至 `target/deps/bin/` |
-| `make build` | 依赖上述二进制后 `cargo tauri build`，并拷贝到 `src-tauri/target/release/bin/` |
-| `make install` | 安装可执行文件与 `/etc/altgo` 配置（通常需 `sudo`） |
-| `make run` | 构建后直接运行 |
+| `make deps-linux` | 下载 whisper 依赖到 target/deps/bin |
+| `make build` | 构建并拷贝依赖二进制到发布目录 |
+| `make install` | 安装到系统（/usr/local/bin 等） |
 | `make test` / `make fmt` / `make lint` | 测试、格式化、Clippy 检查 |
-
-不使用 Makefile 时，也可直接运行：
-
-```bash
-cargo fmt --manifest-path=src-tauri/Cargo.toml -- --check
-cargo clippy --manifest-path=src-tauri/Cargo.toml -- -D warnings
-cargo test --manifest-path=src-tauri/Cargo.toml
-```
-
-**Windows**：用 `.\build.ps1` 或 `build.cmd` 替代 `make build`（下载依赖 + `cargo tauri build --bundles msi`）。
+| `cargo tauri dev` | 开发模式热重载 |
 
 ## 相关文档
 
-- **用户向站点**：[cislunarspace.github.io/altgo](https://cislunarspace.github.io/altgo/) · 源码 [`docs-site/`](docs-site/)
-- [CONTRIBUTING.md](CONTRIBUTING.md)（含 **CI / Release / GitHub Pages** 维护说明）
-- [CLAUDE.md](CLAUDE.md)（面向 AI/贡献者的架构速览）
-- [docs/](docs/)（维护者用的设计与计划归档，见 [`docs/README.md`](docs/README.md)）
+- 在线文档：https://cislunarspace.github.io/altgo/
+- [CONTRIBUTING.md](CONTRIBUTING.md)（CI / Release / GitHub Pages 维护）
+- [CLAUDE.md](CLAUDE.md)（面向 AI 与贡献者的架构速览）
+- [docs/](docs/)（设计与计划归档）
 
 ## 许可证
 
