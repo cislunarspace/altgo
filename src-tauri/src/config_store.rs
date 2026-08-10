@@ -38,12 +38,20 @@ impl ConfigStore {
     }
 
     /// Apply a partial update, validate, persist to disk, and return the new config.
+    ///
+    /// If validation fails, the in-memory config is rolled back to its pre-patch state
+    /// before returning the error, keeping memory and disk consistent.
     pub async fn apply_patch(&self, patch: ConfigPatch) -> Result<Config, String> {
         let mut cfg = self.config.lock().await;
+        let original = cfg.clone();
 
         patch.apply_to_config(&mut cfg);
 
-        cfg.validate().map_err(|e| e.to_string())?;
+        if let Err(e) = cfg.validate() {
+            *cfg = original;
+            return Err(e.to_string());
+        }
+
         cfg.save(&self.config_path)
             .map_err(|e| format!("save failed: {}", e))?;
 
@@ -113,6 +121,59 @@ mod tests {
         let result = store.apply_patch(patch).await;
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("api_key"));
+    }
+
+    #[tokio::test]
+    async fn apply_patch_invalid_config_rolls_back_memory() {
+        let (store, _dir) = temp_store();
+        // Set up a valid config with polishing enabled.
+        let patch: ConfigPatch = serde_json::from_str(
+            r#"{"engine":"local","polishLevel":"light","polishApiKey":"polish-key"}"#,
+        )
+        .unwrap();
+        store.apply_patch(patch).await.unwrap();
+        let original = store.snapshot().await;
+        assert_eq!(original.transcriber.engine, "local");
+        assert_eq!(original.polisher.level, "light");
+        assert_eq!(original.polisher.api_key, "polish-key");
+
+        // Now apply an invalid patch that would partially mutate config.
+        let invalid_patch: ConfigPatch =
+            serde_json::from_str(r#"{"engine":"api","polishLevel":"medium","polishApiKey":""}"#)
+                .unwrap();
+        let result = store.apply_patch(invalid_patch).await;
+        assert!(result.is_err());
+
+        // Memory must be rolled back to the pre-patch state.
+        let after = store.snapshot().await;
+        assert_eq!(after.transcriber.engine, "local");
+        assert_eq!(after.polisher.level, "light");
+        assert_eq!(after.polisher.api_key, "polish-key");
+    }
+
+    #[tokio::test]
+    async fn apply_patch_rollback_then_valid_patch_still_works() {
+        let (store, _dir) = temp_store();
+        let patch: ConfigPatch = serde_json::from_str(
+            r#"{"engine":"local","polishLevel":"light","polishApiKey":"polish-key"}"#,
+        )
+        .unwrap();
+        store.apply_patch(patch).await.unwrap();
+
+        let invalid_patch: ConfigPatch =
+            serde_json::from_str(r#"{"engine":"api","polishLevel":"medium","polishApiKey":""}"#)
+                .unwrap();
+        assert!(store.apply_patch(invalid_patch).await.is_err());
+
+        let valid_patch: ConfigPatch =
+            serde_json::from_str(r#"{"engine":"mimo","apiKey":"mimo-key"}"#).unwrap();
+        let result = store.apply_patch(valid_patch).await.unwrap();
+        assert_eq!(result.transcriber.engine, "mimo");
+        assert_eq!(result.transcriber.api_key, "mimo-key");
+
+        let snapshot = store.snapshot().await;
+        assert_eq!(snapshot.transcriber.engine, "mimo");
+        assert_eq!(snapshot.transcriber.api_key, "mimo-key");
     }
 
     #[tokio::test]
