@@ -78,7 +78,7 @@ lib.rs
         +-- sink
 
   +-- pipeline_controller  (生命周期 + PipelineStatus)
-  +-- tauri_sink           (持有 AppHandle)
+  +-- tauri_sink           (经 PipelineEventEmitter 发射事件)
   +-- cmd.rs               (IPC 命令)
 ```
 
@@ -86,7 +86,7 @@ lib.rs
 
 1. **唯一一个环**：`polisher` ↔ `prompt_store`，但二者同处一个 crate 内，可接受。
 2. `voice_pipeline::context.rs` 依赖 `pipeline_controller::PipelineStatus`（UI 状态枚举从底层向上泄漏了一点）。
-3. `tauri_sink.rs` 直接攥着 `tauri::AppHandle`（issue #104 要修的已知问题）。
+3. `tauri_sink.rs` 通过 `PipelineEventEmitter` seam 发射事件，仅生产实现 `TauriEventEmitter` 持有 `AppHandle`（issue #104 已修）。
 
 ## 三、核心流水线
 
@@ -215,16 +215,13 @@ trait 边界一律返回自定义 thiserror 枚举：`RecorderError` / `OutputEr
 
 ### 结构性
 
-- `tauri_sink` 直接持有 `AppHandle`（`tauri_sink.rs:36`；#104）。
-- `config_store::apply_patch` 不是原子更新：校验失败时内存已部分应用、不落盘。
-- `key_capture` 无 trait，平台实现直接暴露自由函数，测试隔离性稍弱。
+- `voice_pipeline::context.rs` 依赖 `pipeline_controller::PipelineStatus`，UI 状态枚举从底层向上泄漏了一点。
 
 ### 文档漂移 / 死代码
 
 - `notify-send` 从未实现，结果展示统一走 Tauri overlay。
 - `prompt_store` 没有热重载，改文件需重启。
 - `get_status` / `stop_pipeline` 疑为死代码。
-- `testing.md` 列出的测试缺口：模型下载、MimoAsr、Anthropic 协议、`whisper_server` 崩溃回退、`cmd.rs` 零测试、`handle_stop_record` 成功链路、`PipelineContext` 端到端。
 
 ### 架构资产
 
