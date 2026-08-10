@@ -198,6 +198,17 @@ Issue 位于 GitHub Issues（`cislunarspace/altgo`）。使用 `gh` CLI。参见
 
 单上下文布局（仓库根目录的 `CONTEXT.md` + `docs/adr/`）。参见 `docs/agents/domain.md`。
 
+### Loop Engineering
+
+本仓库配有 Loop 三件套：`/loop-go <任务>` 循环运行 builder 与 checker，直到全部检查通过。定义见 `.claude/agents/builder.md`、`.claude/agents/checker.md`、`.claude/commands/loop-go.md`。三件套为项目级副本，覆盖用户级同名 agent（仅本仓库生效）。
+
+#### Loop 停止规则
+
+- 最多 5 轮。每轮开始时公开声明 "Cycle N/5"。
+- 同一失败连续出现两次 → 停止循环，向用户报告。
+- 修复导致之前通过的检查失败 → 停止循环（拆东墙补西墙）。
+- 达到轮次上限仍未全部通过 → 停止，报告当前状态。
+
 ## 编码准则
 
 LLM 写代码时会犯一些可以预见的错误，同样几个，一遍又一遍。以下是规则，需要严格遵守。
