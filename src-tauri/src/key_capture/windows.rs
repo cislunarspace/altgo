@@ -28,9 +28,10 @@ use windows::Win32::UI::WindowsAndMessaging::{
     WM_QUIT, WM_SYSKEYDOWN,
 };
 
-use super::CaptureActivationResponse;
+use super::{CaptureActivationResponse, KeyCapture};
 
 const HOOK_START_TIMEOUT: Duration = Duration::from_secs(2);
+const CAPTURE_TIMEOUT: Duration = Duration::from_secs(12);
 
 struct CaptureState {
     tx: SyncSender<i32>,
@@ -39,6 +40,28 @@ struct CaptureState {
 }
 
 static CAPTURE_STATE: Mutex<Option<Arc<CaptureState>>> = Mutex::new(None);
+
+/// Windows 平台激活键捕获器。
+pub struct WindowsKeyCapture;
+
+impl WindowsKeyCapture {
+    /// 创建新的捕获器。
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Default for WindowsKeyCapture {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl KeyCapture for WindowsKeyCapture {
+    fn capture(&mut self) -> Result<CaptureActivationResponse, String> {
+        capture_activation_key_blocking(CAPTURE_TIMEOUT)
+    }
+}
 
 /// 把常见虚拟键码映射成可读名字。已知键返回 `Some("Right Alt")` 形式；未知返回 `None`。
 ///

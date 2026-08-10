@@ -10,6 +10,7 @@ use crate::{
     config_store::ConfigStore,
     history,
     history::HistoryStore,
+    key_capture::KeyCapture,
     output,
     overlay::manager::{OverlayManager, OverlayState},
     overlay::tauri::TauriOverlayWindow,
@@ -17,18 +18,23 @@ use crate::{
     polisher, voice_pipeline,
 };
 
-async fn restart_pipeline(
-    app: AppHandle,
-    controller: &PipelineController,
+/// 重启语音流水线的核心编排：
+/// 取出配置快照并校验 → 停止旧流水线 → 用 `spawn` 启动新流水线。
+///
+/// `spawn` 由调用方注入，使本函数不依赖 `AppHandle`，从而可在测试中
+/// 用 fake `PipelineHandle` 验证编排，而无需构造 Tauri app。
+async fn restart_pipeline<S>(
     config_store: &ConfigStore,
-) -> Result<(), String> {
+    controller: &PipelineController,
+    spawn: S,
+) -> Result<(), String>
+where
+    S: FnOnce(Arc<crate::config::Config>) -> crate::PipelineHandle,
+{
     let cfg = Arc::new(config_store.snapshot().await);
     cfg.validate().map_err(|e| e.to_string())?;
-    let status_arc = controller.status_arc();
     controller.stop().await;
-    controller
-        .start_with(|| crate::spawn_pipeline_thread(&app, cfg, status_arc))
-        .await
+    controller.start_with(|| spawn(cfg)).await
 }
 
 #[derive(Serialize)]
@@ -48,10 +54,8 @@ pub struct ConfigResponse {
     pub has_polisher_api_key: bool,
 }
 
-#[tauri::command]
-pub async fn get_config(config_store: State<'_, ConfigStore>) -> Result<ConfigResponse, String> {
-    let cfg = config_store.snapshot().await;
-    Ok(ConfigResponse {
+fn build_config_response(cfg: &crate::config::Config) -> ConfigResponse {
+    ConfigResponse {
         key_name: cfg.key_listener.key_name.clone(),
         linux_evdev_code: cfg.key_listener.linux_evdev_code,
         language: cfg.transcriber.language.clone(),
@@ -64,7 +68,13 @@ pub async fn get_config(config_store: State<'_, ConfigStore>) -> Result<ConfigRe
         gui_language: cfg.gui.language.clone(),
         has_transcriber_api_key: !cfg.transcriber.api_key.trim().is_empty(),
         has_polisher_api_key: !cfg.polisher.api_key.trim().is_empty(),
-    })
+    }
+}
+
+#[tauri::command]
+pub async fn get_config(config_store: State<'_, ConfigStore>) -> Result<ConfigResponse, String> {
+    let cfg = config_store.snapshot().await;
+    Ok(build_config_response(&cfg))
 }
 
 #[tauri::command]
@@ -74,8 +84,12 @@ pub async fn save_config(
     controller: State<'_, PipelineController>,
     patch: ConfigPatch,
 ) -> Result<(), String> {
-    config_store.apply_patch(patch).await?;
-    restart_pipeline(app, &controller, &config_store).await
+    let cfg = Arc::new(config_store.apply_patch(patch).await?);
+    let status_arc = controller.status_arc();
+    restart_pipeline(&config_store, &controller, move |_cfg| {
+        crate::spawn_pipeline_thread(&app, cfg, status_arc)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -85,7 +99,9 @@ pub async fn capture_activation_key(
     controller.stop().await;
     tokio::time::sleep(std::time::Duration::from_millis(400)).await;
 
-    match tokio::task::spawn_blocking(crate::key_capture::capture_activation_key_blocking).await {
+    match tokio::task::spawn_blocking(|| crate::key_capture::PlatformKeyCapture::new().capture())
+        .await
+    {
         Ok(Ok(r)) => Ok(r),
         Ok(Err(e)) => Err(e),
         Err(e) => Err(e.to_string()),
@@ -118,16 +134,20 @@ pub async fn get_status(
     Ok(controller.current_status())
 }
 
+async fn copy_text_core(output: Arc<dyn output::Output>, text: String) -> Result<(), String> {
+    let out = output.clone_box();
+    tokio::task::spawn_blocking(move || out.write_clipboard(&text))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 pub async fn copy_text(
     output_state: State<'_, Arc<dyn output::Output>>,
     text: String,
 ) -> Result<(), String> {
-    let out = output_state.inner().clone_box();
-    tokio::task::spawn_blocking(move || out.write_clipboard(&text))
-        .await
-        .map_err(|e| e.to_string())?
-        .map_err(|e| e.to_string())
+    copy_text_core(output_state.inner().clone(), text).await
 }
 
 #[tauri::command]
@@ -141,15 +161,25 @@ pub async fn list_models() -> Result<Vec<crate::model::ModelEntry>, String> {
     Ok(crate::model::list_all_with_status())
 }
 
-#[tauri::command]
-pub async fn download_model(app: tauri::AppHandle, name: String) -> Result<(), String> {
-    crate::model::validate_name(&name).map_err(|e| e.to_string())?;
+pub(crate) type EventEmitter = Arc<dyn Fn(&str, serde_json::Value) + Send + Sync>;
 
-    if let Some(info) = crate::model::models_info()
-        .iter()
-        .find(|m| m.name == name.as_str())
-    {
-        let _ = app.emit(
+/// 模型下载的核心逻辑，可注入 `emit` 与 `download` 以便测试。
+///
+/// 真实路径中 `download` 传 `crate::model::download_with_progress`；
+/// 测试中可替换为 fake downloader，仅验证事件序列。
+pub(crate) async fn download_model_with_emitter<D, F>(
+    name: &str,
+    emit: EventEmitter,
+    download: D,
+) -> Result<(), String>
+where
+    D: FnOnce(String, Box<dyn FnMut(u64, u64) + Send>) -> F,
+    F: std::future::Future<Output = Result<std::path::PathBuf, crate::error::ModelError>> + Send,
+{
+    crate::model::validate_name(name).map_err(|e| e.to_string())?;
+
+    if let Some(info) = crate::model::models_info().iter().find(|m| m.name == name) {
+        emit(
             "model-download-progress",
             serde_json::json!({
                 "name": name,
@@ -159,47 +189,61 @@ pub async fn download_model(app: tauri::AppHandle, name: String) -> Result<(), S
         );
     }
 
+    let name_for_callback = name.to_string();
+    let emit_for_progress = Arc::clone(&emit);
+    let result = download(
+        name.to_string(),
+        Box::new(move |downloaded, total| {
+            emit_for_progress(
+                "model-download-progress",
+                serde_json::json!({
+                    "name": name_for_callback,
+                    "downloaded": downloaded,
+                    "total": total,
+                }),
+            );
+        }),
+    )
+    .await;
+
+    match result {
+        Ok(path) => {
+            emit(
+                "model-download-finished",
+                serde_json::json!({
+                    "name": name,
+                    "success": true,
+                    "path": path.to_string_lossy(),
+                }),
+            );
+        }
+        Err(e) => {
+            emit(
+                "model-download-finished",
+                serde_json::json!({
+                    "name": name,
+                    "success": false,
+                    "error": e.to_string(),
+                }),
+            );
+        }
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn download_model(app: AppHandle, name: String) -> Result<(), String> {
     let app_task = app.clone();
     let name_task = name.clone();
     tauri::async_runtime::spawn(async move {
-        let result = crate::model::download_with_progress(&name_task, {
-            let app = app_task.clone();
-            let name_clone = name_task.clone();
-            move |downloaded, total| {
-                let _ = app.emit(
-                    "model-download-progress",
-                    serde_json::json!({
-                        "name": name_clone,
-                        "downloaded": downloaded,
-                        "total": total,
-                    }),
-                );
-            }
+        let emit: EventEmitter = Arc::new(move |event: &str, payload: serde_json::Value| {
+            let _ = app_task.emit(event, payload);
+        });
+        let _ = download_model_with_emitter(&name_task, emit, |name, on_progress| async move {
+            crate::model::download_with_progress(&name, on_progress).await
         })
         .await;
-
-        match result {
-            Ok(path) => {
-                let _ = app_task.emit(
-                    "model-download-finished",
-                    serde_json::json!({
-                        "name": name_task,
-                        "success": true,
-                        "path": path.to_string_lossy(),
-                    }),
-                );
-            }
-            Err(e) => {
-                let _ = app_task.emit(
-                    "model-download-finished",
-                    serde_json::json!({
-                        "name": name_task,
-                        "success": false,
-                        "error": e.to_string(),
-                    }),
-                );
-            }
-        }
     });
 
     Ok(())
@@ -247,6 +291,28 @@ pub async fn clear_history(history_store: State<'_, HistoryStore>) -> Result<(),
         .map_err(|e| e.to_string())
 }
 
+/// 对历史条目重新润色的可测试核心。
+///
+/// 把 `AppHandle.emit` 抽象为 `emit` 回调，避免测试中构造 Tauri app。
+pub(crate) async fn polish_history_entry_core(
+    config_store: &ConfigStore,
+    history_store: &HistoryStore,
+    id: &str,
+    emit: impl Fn(&str),
+) -> Result<history::HistoryEntry, String> {
+    let cfg = config_store.snapshot().await;
+    let formatter =
+        polisher::LLMFormatter::from_config_with_sources(&cfg).map_err(|e| e.to_string())?;
+    let polish_level = polisher::PolishLevel::effective(&cfg.polisher.level);
+
+    let updated =
+        voice_pipeline::dispatch_history_polish(history_store, id, &formatter, polish_level)
+            .await?;
+
+    emit("history-updated");
+    Ok(updated)
+}
+
 #[tauri::command]
 pub async fn polish_history_entry(
     app: AppHandle,
@@ -254,19 +320,292 @@ pub async fn polish_history_entry(
     history_store: State<'_, HistoryStore>,
     id: String,
 ) -> Result<history::HistoryEntry, String> {
-    let cfg = config_store.snapshot().await;
-    let formatter =
-        polisher::LLMFormatter::from_config_with_sources(&cfg).map_err(|e| e.to_string())?;
-    let polish_level = polisher::PolishLevel::effective(&cfg.polisher.level);
+    polish_history_entry_core(&config_store, &history_store, &id, |event| {
+        let _ = app.emit(event, ());
+    })
+    .await
+}
 
-    let updated = voice_pipeline::dispatch_history_polish(
-        history_store.inner(),
-        &id,
-        &formatter,
-        polish_level,
-    )
-    .await?;
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::{Arc, Mutex};
 
-    let _ = app.emit("history-updated", ());
-    Ok(updated)
+    use crate::config::Config;
+    use crate::config_store::ConfigStore;
+    use crate::error::{ModelError, OutputError};
+    use crate::history::HistoryStore;
+    use crate::output::Output;
+    use crate::pipeline_controller::{PipelineController, PipelineStatus};
+
+    use super::*;
+
+    /// 构造一个等待 stop 信号后才退出的 fake pipeline handle，
+    /// 用于验证 `restart_pipeline` 的停止/启动编排。
+    fn fake_spawn() -> (crate::PipelineHandle, Arc<AtomicBool>) {
+        let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
+        let stopped = Arc::new(AtomicBool::new(false));
+        let stopped_clone = Arc::clone(&stopped);
+        let thread_handle = std::thread::spawn(move || {
+            let _ = stop_rx.blocking_recv();
+            stopped_clone.store(true, Ordering::SeqCst);
+        });
+        (
+            crate::PipelineHandle {
+                stop_tx,
+                thread_handle,
+            },
+            stopped,
+        )
+    }
+
+    #[tokio::test]
+    async fn restart_pipeline_stops_old_and_starts_new() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let store = ConfigStore::load(temp_dir.path().join("altgo.toml"));
+        let controller = PipelineController::new();
+
+        // 先启动一个旧流水线。
+        let (old_handle, old_stopped) = fake_spawn();
+        controller.start_with(move || old_handle).await.unwrap();
+
+        // restart_pipeline 应停止旧流水线并启动新流水线。
+        let (new_handle, _new_stopped) = fake_spawn();
+        let result = restart_pipeline(&store, &controller, move |_cfg| new_handle).await;
+
+        assert!(result.is_ok());
+        assert!(
+            old_stopped.load(Ordering::SeqCst),
+            "old pipeline should be stopped"
+        );
+        assert_eq!(controller.current_status(), PipelineStatus::Idle);
+    }
+
+    #[tokio::test]
+    async fn restart_pipeline_fails_when_config_invalid() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let path = temp_dir.path().join("altgo.toml");
+        let mut cfg = Config::default();
+        cfg.transcriber.engine = "api".to_string();
+        cfg.transcriber.api_key = String::new();
+        cfg.save(&path).unwrap();
+
+        let store = ConfigStore::load(path);
+        let controller = PipelineController::new();
+
+        let result = restart_pipeline(&store, &controller, |_cfg| unreachable!()).await;
+
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("api_key") || err.contains("API"),
+            "expected API key validation error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn build_config_response_maps_fields() {
+        let mut cfg = Config::default();
+        cfg.key_listener.key_name = "space".to_string();
+        cfg.key_listener.linux_evdev_code = Some(56);
+        cfg.transcriber.language = "en".to_string();
+        cfg.transcriber.engine = "api".to_string();
+        cfg.transcriber.api_key = "trans-key".to_string();
+        cfg.polisher.level = "light".to_string();
+        cfg.polisher.api_key = "polish-key".to_string();
+
+        let resp = build_config_response(&cfg);
+        assert_eq!(resp.key_name, "space");
+        assert_eq!(resp.linux_evdev_code, Some(56));
+        assert_eq!(resp.language, "en");
+        assert_eq!(resp.engine, "api");
+        assert!(resp.has_transcriber_api_key);
+        assert!(resp.has_polisher_api_key);
+        assert_eq!(resp.polish_level, "light");
+    }
+
+    struct FakeOutput {
+        writes: Arc<Mutex<Vec<String>>>,
+    }
+
+    impl Output for FakeOutput {
+        fn write_clipboard(&self, text: &str) -> Result<(), OutputError> {
+            self.writes.lock().unwrap().push(text.to_string());
+            Ok(())
+        }
+
+        fn clone_box(&self) -> Arc<dyn Output> {
+            Arc::new(FakeOutput {
+                writes: Arc::clone(&self.writes),
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn copy_text_core_writes_to_clipboard() {
+        let writes = Arc::new(Mutex::new(Vec::new()));
+        let output = Arc::new(FakeOutput {
+            writes: Arc::clone(&writes),
+        });
+
+        copy_text_core(output, "hello".to_string()).await.unwrap();
+
+        assert_eq!(writes.lock().unwrap().as_slice(), &["hello".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn download_model_with_emitter_success_emits_event_sequence() {
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let events2 = Arc::clone(&events);
+
+        let emit: EventEmitter = Arc::new(move |event, payload| {
+            events2.lock().unwrap().push((event.to_string(), payload))
+        });
+
+        download_model_with_emitter("tiny", emit, |_name, mut on_progress| async move {
+            on_progress(0, 100);
+            on_progress(50, 100);
+            on_progress(100, 100);
+            Ok(PathBuf::from("/models/ggml-tiny.bin"))
+        })
+        .await
+        .unwrap();
+
+        let events = events.lock().unwrap();
+        assert_eq!(events.len(), 5);
+
+        assert_eq!(events[0].0, "model-download-progress");
+        assert_eq!(events[0].1["name"], "tiny");
+        assert_eq!(events[0].1["downloaded"], 0);
+        let tiny_size = crate::model::models_info()
+            .iter()
+            .find(|m| m.name == "tiny")
+            .unwrap()
+            .size_bytes;
+        assert_eq!(events[0].1["total"], tiny_size);
+
+        assert_eq!(events[1].0, "model-download-progress");
+        assert_eq!(events[1].1["downloaded"], 0);
+        assert_eq!(events[2].1["downloaded"], 50);
+        assert_eq!(events[3].1["downloaded"], 100);
+
+        assert_eq!(events[4].0, "model-download-finished");
+        assert_eq!(events[4].1["success"], true);
+        assert_eq!(events[4].1["path"], "/models/ggml-tiny.bin");
+    }
+
+    #[tokio::test]
+    async fn download_model_with_emitter_failure_emits_finished_with_error() {
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let events2 = Arc::clone(&events);
+
+        let emit: EventEmitter = Arc::new(move |event, payload| {
+            events2.lock().unwrap().push((event.to_string(), payload))
+        });
+
+        download_model_with_emitter("tiny", emit, |_name, _on_progress| async move {
+            Err(ModelError::DownloadFailed("network down".to_string()))
+        })
+        .await
+        .unwrap();
+
+        let events = events.lock().unwrap();
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].0, "model-download-progress");
+        assert_eq!(events[1].0, "model-download-finished");
+        assert_eq!(events[1].1["success"], false);
+        assert!(events[1].1["error"]
+            .as_str()
+            .unwrap()
+            .contains("network down"));
+    }
+
+    #[tokio::test]
+    async fn download_model_with_emitter_unknown_model_returns_error_without_events() {
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let events2 = Arc::clone(&events);
+
+        let emit: EventEmitter = Arc::new(move |event, payload| {
+            events2.lock().unwrap().push((event.to_string(), payload))
+        });
+
+        let result =
+            download_model_with_emitter("unknown-model", emit, |_name, _on_progress| async move {
+                Ok(PathBuf::from("/tmp/x.bin"))
+            })
+            .await;
+
+        assert!(result.is_err());
+        assert!(events.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn polish_history_entry_core_success_updates_history_and_emits() {
+        let mut server = mockito::Server::new_async().await;
+        let mock = server
+            .mock("POST", "/v1/chat/completions")
+            .match_header("Authorization", "Bearer polish-key")
+            .with_status(200)
+            .with_body(r#"{"choices":[{"message":{"role":"assistant","content":"润色后的文本"}}]}"#)
+            .create_async()
+            .await;
+
+        let history_dir = tempfile::tempdir().unwrap();
+        let store = HistoryStore::new(history_dir.path().join("history.json"));
+        let entry = store
+            .append("原始文本".to_string(), "原始文本".to_string())
+            .unwrap();
+
+        let cfg_dir = tempfile::tempdir().unwrap();
+        let cfg_path = cfg_dir.path().join("altgo.toml");
+        let mut cfg = Config::default();
+        cfg.transcriber.language = "zh".to_string();
+        cfg.polisher.level = "light".to_string();
+        cfg.polisher.api_key = "polish-key".to_string();
+        cfg.polisher.api_base_url = server.url();
+        cfg.polisher.model = "model".to_string();
+        cfg.save(&cfg_path).unwrap();
+        let config_store = ConfigStore::load(cfg_path);
+
+        let emitted = Arc::new(Mutex::new(Vec::new()));
+        let emitted2 = Arc::clone(&emitted);
+        let updated = polish_history_entry_core(&config_store, &store, &entry.id, |event| {
+            emitted2.lock().unwrap().push(event.to_string())
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(updated.raw_text, "原始文本");
+        assert_eq!(updated.text, "润色后的文本");
+        let fetched = store.get(&entry.id).unwrap().unwrap();
+        assert_eq!(fetched.text, "润色后的文本");
+        assert_eq!(
+            emitted.lock().unwrap().as_slice(),
+            &["history-updated".to_string()]
+        );
+
+        mock.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn polish_history_entry_core_missing_entry_returns_error() {
+        let history_dir = tempfile::tempdir().unwrap();
+        let store = HistoryStore::new(history_dir.path().join("history.json"));
+
+        let cfg_dir = tempfile::tempdir().unwrap();
+        let cfg_path = cfg_dir.path().join("altgo.toml");
+        Config::default().save(&cfg_path).unwrap();
+        let config_store = ConfigStore::load(cfg_path);
+
+        let emitted = Arc::new(Mutex::new(Vec::new()));
+        let result = polish_history_entry_core(&config_store, &store, "missing-id", |event| {
+            emitted.lock().unwrap().push(event.to_string())
+        })
+        .await;
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("not found"));
+        assert!(emitted.lock().unwrap().is_empty());
+    }
 }
