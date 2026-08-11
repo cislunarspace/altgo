@@ -3,7 +3,7 @@
 //! Thin persistence wrapper around `Config`. Patch logic lives in `config.rs`
 //! (`ConfigPatch::apply_to_config`), keeping config definition and mutation co-located.
 
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, MutexGuard};
 
 use crate::config::{Config, ConfigPatch};
 
@@ -12,6 +12,20 @@ use crate::config::{Config, ConfigPatch};
 pub struct ConfigStore {
     pub(crate) config: Mutex<Config>,
     config_path: std::path::PathBuf,
+}
+
+/// 已校验且已持久化的配置更新。
+///
+/// 持有锁直到调用方完成依赖本次更新的后续操作，防止其他配置更新插入。
+pub struct ConfigUpdate<'a> {
+    config: Config,
+    _guard: MutexGuard<'a, Config>,
+}
+
+impl ConfigUpdate<'_> {
+    pub fn config(&self) -> &Config {
+        &self.config
+    }
 }
 
 impl ConfigStore {
@@ -37,11 +51,16 @@ impl ConfigStore {
         self.config.blocking_lock().clone()
     }
 
-    /// Apply a partial update, validate, persist to disk, and return the new config.
+    /// Apply a partial update, validate, persist, and keep the config lock held.
     ///
-    /// If validation fails, the in-memory config is rolled back to its pre-patch state
-    /// before returning the error, keeping memory and disk consistent.
-    pub async fn apply_patch(&self, patch: ConfigPatch) -> Result<Config, String> {
+    /// The returned update lets a caller finish a dependent operation, such as restarting
+    /// the voice pipeline, before another patch can replace the active configuration.
+    /// If validation or persistence fails, the in-memory config is rolled back before
+    /// returning the error, keeping memory and disk consistent.
+    pub async fn apply_patch_for_update(
+        &self,
+        patch: ConfigPatch,
+    ) -> Result<ConfigUpdate<'_>, String> {
         let mut cfg = self.config.lock().await;
         let original = cfg.clone();
 
@@ -52,10 +71,24 @@ impl ConfigStore {
             return Err(e.to_string());
         }
 
-        cfg.save(&self.config_path)
-            .map_err(|e| format!("save failed: {}", e))?;
+        if let Err(e) = cfg.save(&self.config_path) {
+            *cfg = original;
+            return Err(format!("save failed: {}", e));
+        }
+        let updated = cfg.clone();
 
-        Ok(cfg.clone())
+        Ok(ConfigUpdate {
+            config: updated,
+            _guard: cfg,
+        })
+    }
+
+    /// Apply a partial update, validate, persist to disk, and return the new config.
+    ///
+    /// If validation fails, the in-memory config is rolled back to its pre-patch state
+    /// before returning the error, keeping memory and disk consistent.
+    pub async fn apply_patch(&self, patch: ConfigPatch) -> Result<Config, String> {
+        Ok(self.apply_patch_for_update(patch).await?.config)
     }
 }
 
@@ -100,6 +133,18 @@ mod tests {
         let reloaded = Config::load(&path).unwrap();
         assert_eq!(reloaded.key_listener.key_name, "space");
         assert_eq!(reloaded.transcriber.language, "en");
+    }
+
+    #[tokio::test]
+    async fn apply_patch_save_failure_rolls_back_memory() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = ConfigStore::load(dir.path().to_path_buf());
+        let patch: ConfigPatch = serde_json::from_str(r#"{"language":"en"}"#).unwrap();
+
+        let result = store.apply_patch(patch).await;
+
+        assert!(result.is_err());
+        assert_eq!(store.snapshot().await.transcriber.language, "zh");
     }
 
     #[tokio::test]

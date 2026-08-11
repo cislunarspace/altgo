@@ -19,19 +19,18 @@ use crate::{
 };
 
 /// 重启语音流水线的核心编排：
-/// 取出配置快照并校验 → 停止旧流水线 → 用 `spawn` 启动新流水线。
+/// 校验配置快照 → 停止旧流水线 → 用 `spawn` 启动新流水线。
 ///
 /// `spawn` 由调用方注入，使本函数不依赖 `AppHandle`，从而可在测试中
 /// 用 fake `PipelineHandle` 验证编排，而无需构造 Tauri app。
 async fn restart_pipeline<S>(
-    config_store: &ConfigStore,
     controller: &PipelineController,
+    cfg: Arc<crate::config::Config>,
     spawn: S,
 ) -> Result<(), String>
 where
     S: FnOnce(Arc<crate::config::Config>) -> crate::PipelineHandle,
 {
-    let cfg = Arc::new(config_store.snapshot().await);
     cfg.validate().map_err(|e| e.to_string())?;
     controller.stop().await;
     controller.start_with(|| spawn(cfg)).await
@@ -84,12 +83,15 @@ pub async fn save_config(
     controller: State<'_, PipelineController>,
     patch: ConfigPatch,
 ) -> Result<(), String> {
-    let cfg = Arc::new(config_store.apply_patch(patch).await?);
+    let update = config_store.apply_patch_for_update(patch).await?;
+    let cfg = Arc::new(update.config().clone());
     let status_arc = controller.status_arc();
-    restart_pipeline(&config_store, &controller, move |_cfg| {
+    let result = restart_pipeline(&controller, cfg, move |cfg| {
         crate::spawn_pipeline_thread(&app, cfg, status_arc)
     })
-    .await
+    .await;
+    drop(update);
+    result
 }
 
 #[tauri::command]
@@ -360,6 +362,22 @@ mod tests {
         )
     }
 
+    fn gated_stop_spawn(
+        stopping: tokio::sync::oneshot::Sender<()>,
+        release: tokio::sync::oneshot::Receiver<()>,
+    ) -> crate::PipelineHandle {
+        let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
+        let thread_handle = std::thread::spawn(move || {
+            let _ = stop_rx.blocking_recv();
+            let _ = stopping.send(());
+            let _ = release.blocking_recv();
+        });
+        crate::PipelineHandle {
+            stop_tx,
+            thread_handle,
+        }
+    }
+
     #[tokio::test]
     async fn restart_pipeline_stops_old_and_starts_new() {
         let temp_dir = tempfile::tempdir().unwrap();
@@ -372,7 +390,10 @@ mod tests {
 
         // restart_pipeline 应停止旧流水线并启动新流水线。
         let (new_handle, _new_stopped) = fake_spawn();
-        let result = restart_pipeline(&store, &controller, move |_cfg| new_handle).await;
+        let result = restart_pipeline(&controller, Arc::new(store.snapshot().await), move |_cfg| {
+            new_handle
+        })
+        .await;
 
         assert!(result.is_ok());
         assert!(
@@ -380,6 +401,79 @@ mod tests {
             "old pipeline should be stopped"
         );
         assert_eq!(controller.current_status(), PipelineStatus::Idle);
+    }
+
+    #[tokio::test]
+    async fn restart_pipeline_passes_supplied_config_to_spawn() {
+        let controller = PipelineController::new();
+        let mut config = Config::default();
+        config.transcriber.language = "en".to_string();
+        let (handle, _stopped) = fake_spawn();
+        let received_language = Arc::new(Mutex::new(None));
+        let received_language_clone = Arc::clone(&received_language);
+
+        restart_pipeline(&controller, Arc::new(config), move |cfg| {
+            *received_language_clone.lock().unwrap() = Some(cfg.transcriber.language.clone());
+            handle
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(
+            received_language.lock().unwrap().as_deref(),
+            Some("en"),
+            "spawn should receive the validated configuration snapshot"
+        );
+    }
+
+    #[tokio::test]
+    async fn restart_pipeline_keeps_its_save_config_current() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let store = Arc::new(ConfigStore::load(temp_dir.path().join("altgo.toml")));
+        let controller = PipelineController::new();
+        let (stopping_tx, mut stopping_rx) = tokio::sync::oneshot::channel();
+        let (release_tx, release_rx) = tokio::sync::oneshot::channel();
+        controller
+            .start_with(move || gated_stop_spawn(stopping_tx, release_rx))
+            .await
+            .unwrap();
+
+        let update = store
+            .apply_patch_for_update(serde_json::from_str(r#"{"language":"en"}"#).unwrap())
+            .await
+            .unwrap();
+        let cfg = Arc::new(update.config().clone());
+        let (spawned_tx, spawned_rx) = tokio::sync::oneshot::channel();
+        let restart = restart_pipeline(&controller, cfg, move |cfg| {
+            let _ = spawned_tx.send(cfg.transcriber.language.clone());
+            fake_spawn().0
+        });
+        tokio::pin!(restart);
+
+        tokio::select! {
+            result = &mut restart => panic!("restart completed before old pipeline stopped: {result:?}"),
+            _ = &mut stopping_rx => {}
+        }
+
+        let second_store = Arc::clone(&store);
+        let second_save = tokio::spawn(async move {
+            second_store
+                .apply_patch(serde_json::from_str(r#"{"language":"ja"}"#).unwrap())
+                .await
+        });
+
+        assert!(
+            !second_save.is_finished(),
+            "another save must wait until the current pipeline restart completes"
+        );
+        release_tx.send(()).unwrap();
+
+        restart.await.unwrap();
+        drop(update);
+
+        assert_eq!(spawned_rx.await.unwrap(), "en");
+        second_save.await.unwrap().unwrap();
+        assert_eq!(store.snapshot().await.transcriber.language, "ja");
     }
 
     #[tokio::test]
@@ -394,7 +488,12 @@ mod tests {
         let store = ConfigStore::load(path);
         let controller = PipelineController::new();
 
-        let result = restart_pipeline(&store, &controller, |_cfg| unreachable!()).await;
+        let result = restart_pipeline(
+            &controller,
+            Arc::new(store.snapshot().await),
+            |_cfg| unreachable!(),
+        )
+        .await;
 
         assert!(result.is_err());
         let err = result.unwrap_err();
