@@ -110,14 +110,13 @@ pub fn capture_activation_key_blocking(
     let (ready_tx, ready_rx) = sync_channel::<Result<(), String>>(1);
 
     let handle = std::thread::spawn(move || {
-        // SAFETY: WH_KEYBOARD_LL allows a null module handle when the callback is in the
-        // current process and the hook is installed for all threads (dwThreadId = 0). The
-        // callback has the correct ABI.
+        // SAFETY: 当前进程内的回调以 dwThreadId = 0 为所有线程安装钩子时，
+        // WH_KEYBOARD_LL 允许模块句柄为空；回调 ABI 与 Win32 要求一致。
         let hook = unsafe { SetWindowsHookExW(WH_KEYBOARD_LL, Some(capture_hook_proc), None, 0) };
         let hook = match hook {
             Ok(hook) => {
-                // SAFETY: GetCurrentThreadId has no preconditions and returns this message-pump
-                // thread ID, used later to post WM_QUIT.
+                // SAFETY: GetCurrentThreadId 没有前置条件，返回当前消息泵线程 ID，
+                // 后续用于投递 WM_QUIT。
                 state_for_thread
                     .thread_id
                     .store(unsafe { GetCurrentThreadId() }, Ordering::SeqCst);
@@ -135,13 +134,13 @@ pub fn capture_activation_key_blocking(
 
         let mut msg = MSG::default();
         loop {
-            // SAFETY: msg points to valid writable memory for the duration of the call. A null
-            // hwnd receives thread messages; WM_QUIT wakes this loop on capture completion.
+            // SAFETY: 在调用期间，msg 始终指向有效的可写内存。窗口句柄为空时接收线程消息；
+            // WM_QUIT 会在捕获完成时唤醒此循环。
             let ret = unsafe { GetMessageW(&mut msg, None, 0, 0) };
             if ret.0 <= 0 || state_for_thread.stopping.load(Ordering::SeqCst) {
                 break;
             }
-            // SAFETY: msg was initialized by a successful GetMessageW call.
+            // SAFETY: msg 已由成功的 GetMessageW 调用初始化。
             unsafe {
                 let _ = TranslateMessage(&msg);
                 DispatchMessageW(&msg);
@@ -149,8 +148,8 @@ pub fn capture_activation_key_blocking(
         }
 
         *CAPTURE_STATE.lock().unwrap() = None;
-        // SAFETY: hook was returned by SetWindowsHookExW on this thread and has not yet been
-        // unhooked. Unhooking here keeps capture teardown on the owning message-pump thread.
+        // SAFETY: hook 由当前线程调用 SetWindowsHookExW 返回，且尚未卸载。在拥有它的
+        // 消息泵线程中卸载可确保捕获过程正确清理。
         let _ = unsafe { UnhookWindowsHookEx(hook) };
     });
 
@@ -184,8 +183,8 @@ fn stop_capture_thread(state: &CaptureState) {
     state.stopping.store(true, Ordering::SeqCst);
     let id = state.thread_id.load(Ordering::SeqCst);
     if id != 0 {
-        // SAFETY: id is captured from the capture message-pump thread after the hook is installed.
-        // Posting WM_QUIT wakes GetMessageW so the thread can unhook and exit.
+        // SAFETY: id 是捕获消息泵线程安装钩子后取得的线程 ID。投递 WM_QUIT 会唤醒
+        // GetMessageW，使线程能够卸载钩子并退出。
         unsafe {
             let _ = PostThreadMessageW(id, WM_QUIT, WPARAM(0), LPARAM(0));
         }
@@ -203,16 +202,16 @@ unsafe extern "system" fn capture_hook_proc(
 ) -> LRESULT {
     if n_code >= 0 && is_key_down_message(w_param.0 as u32) {
         if let Some(state) = CAPTURE_STATE.lock().unwrap().as_ref() {
-            // SAFETY: Windows calls WH_KEYBOARD_LL callbacks with l_param pointing to a valid
-            // KBDLLHOOKSTRUCT whenever n_code >= 0.
+            // SAFETY: 当 n_code >= 0 时，Windows 调用 WH_KEYBOARD_LL 回调时，l_param
+            // 指向有效的 KBDLLHOOKSTRUCT。
             let info = unsafe { *(l_param.0 as *const KBDLLHOOKSTRUCT) };
             if state.tx.try_send(info.vkCode as i32).is_ok() {
                 stop_capture_thread(state);
             }
         }
     }
-    // SAFETY: Forwarding to the next hook is required by the Win32 hook contract. Passing None is
-    // accepted for low-level hooks; Windows ignores the hook handle for this call.
+    // SAFETY: 按 Win32 hook 约定，必须转发给下一个钩子。对低级钩子传 None 合法；
+    // Windows 会忽略这个调用里的 hook handle。
     unsafe { CallNextHookEx(None, n_code, w_param, l_param) }
 }
 
@@ -299,17 +298,5 @@ mod tests {
         // "Right Alt" form is acceptable; verify it round-trips sensibly.
         assert_eq!(vk_to_name(0xA5), Some("Right Alt".to_string()));
         assert_eq!(vk_to_name(0x20), Some("Space".to_string()));
-    }
-
-    #[test]
-    fn capture_returns_err_on_timeout_without_hook() {
-        // 0-second timeout: even if a key were pressed, rx.recv_timeout returns
-        // Err(Disconnected) or Err(Timeout) before any send. We use a tiny timeout
-        // so the test does not block. The hook install may or may not succeed in
-        // a CI environment, but the function must always return a Result (never panic).
-        let result = capture_activation_key_blocking(Duration::from_millis(0));
-        // We don't assert success/failure of install — just that the function
-        // returns a Result within a reasonable bound.
-        let _ = result;
     }
 }

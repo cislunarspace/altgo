@@ -216,7 +216,6 @@ mod tests {
     use crate::error::{RecorderError, TranscriberError};
     use crate::history::HistoryStore;
     use crate::polisher::{LLMFormatter, PolishLevel};
-    use crate::transcriber::Transcriber;
     use std::sync::Arc;
     use std::time::Duration;
 
@@ -326,18 +325,7 @@ mod tests {
         use crate::polisher::LLMFormatter;
 
         let mut recorder = super::super::test_doubles::FakeRecorder::new(vec![0u8; 44]);
-        let sink = super::super::test_doubles::MockSink::new();
-        let sink_arc: Arc<dyn PipelineSink> = Arc::new(sink);
-
-        recorder.start_recording().unwrap();
-
-        let transcriber: Box<dyn Transcriber> = Box::new(crate::transcriber::LocalWhisper::new(
-            "/nonexistent/model".to_string(),
-            "zh".to_string(),
-            "whisper-cli".to_string(),
-            0,
-            0,
-        ));
+        let transcriber = super::super::test_doubles::FakeTranscriber::with_success("", "zh");
         let formatter = LLMFormatter::new(
             "test-key".to_string(),
             "http://localhost".to_string(),
@@ -345,15 +333,28 @@ mod tests {
             std::time::Duration::from_secs(5),
         )
         .unwrap();
+        let sink = super::super::test_doubles::MockSink::new();
+        let sink_arc: Arc<dyn PipelineSink> = Arc::new(sink.clone());
+
+        recorder.start_recording().unwrap();
 
         handle_stop_record(
             &mut recorder,
-            &*transcriber,
+            &transcriber,
             &formatter,
             PolishLevel::None,
             sink_arc,
         )
         .await;
+
+        assert_eq!(recorder.stop_count(), 1);
+        assert_eq!(transcriber.call_count(), 1);
+        assert_eq!(sink.status_changes(), vec![PipelineStatus::Processing]);
+        assert_eq!(sink.results().len(), 1);
+        assert!(sink.results()[0].text.is_empty());
+        assert!(sink.results()[0].raw_text.is_empty());
+        assert!(!sink.results()[0].polish_failed);
+        assert!(sink.errors().is_empty());
     }
 
     // ---------------------------------------------------------------------------
