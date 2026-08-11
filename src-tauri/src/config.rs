@@ -236,6 +236,13 @@ impl Config {
     /// 环境变量 `ALTGO_TRANSCRIBER_API_KEY` 和 `ALTGO_POLISHER_API_KEY`
     /// 会覆盖配置文件中的对应字段。
     pub fn load(path: &Path) -> Result<Self, ConfigError> {
+        Self::load_with_env(path, |name| std::env::var(name))
+    }
+
+    fn load_with_env<E>(path: &Path, env_var: E) -> Result<Self, ConfigError>
+    where
+        E: Fn(&str) -> Result<String, std::env::VarError>,
+    {
         let mut cfg = if path.exists() {
             let content = std::fs::read_to_string(path)?;
             toml::from_str(&content)
@@ -244,13 +251,7 @@ impl Config {
             Config::default()
         };
 
-        // Environment variable overrides for API keys.
-        if let Ok(key) = std::env::var("ALTGO_TRANSCRIBER_API_KEY") {
-            cfg.transcriber.api_key = key;
-        }
-        if let Ok(key) = std::env::var("ALTGO_POLISHER_API_KEY") {
-            cfg.polisher.api_key = key;
-        }
+        apply_api_key_overrides(&mut cfg, env_var);
 
         Ok(cfg)
     }
@@ -342,6 +343,18 @@ impl Config {
             .unwrap_or_else(|| PathBuf::from("."))
             .join("altgo")
             .join("altgo.toml")
+    }
+}
+
+fn apply_api_key_overrides<E>(cfg: &mut Config, env_var: E)
+where
+    E: Fn(&str) -> Result<String, std::env::VarError>,
+{
+    if let Ok(key) = env_var("ALTGO_TRANSCRIBER_API_KEY") {
+        cfg.transcriber.api_key = key;
+    }
+    if let Ok(key) = env_var("ALTGO_POLISHER_API_KEY") {
+        cfg.polisher.api_key = key;
     }
 }
 
@@ -559,19 +572,16 @@ prefer_polished = false
     }
 
     #[test]
-    #[allow(deprecated)]
     fn test_env_override() {
-        // std::env::set_var is deprecated in Rust 1.94+ due to thread-safety concerns.
-        // Acceptable here: single-threaded test, no concurrent access.
-        std::env::set_var("ALTGO_TRANSCRIBER_API_KEY", "test-trans-key");
-        std::env::set_var("ALTGO_POLISHER_API_KEY", "test-polish-key");
+        let cfg = Config::load_with_env(Path::new("/nonexistent.toml"), |name| match name {
+            "ALTGO_TRANSCRIBER_API_KEY" => Ok("test-trans-key".to_string()),
+            "ALTGO_POLISHER_API_KEY" => Ok("test-polish-key".to_string()),
+            _ => Err(std::env::VarError::NotPresent),
+        })
+        .unwrap();
 
-        let cfg = Config::load(Path::new("/nonexistent.toml")).unwrap();
         assert_eq!(cfg.transcriber.api_key, "test-trans-key");
         assert_eq!(cfg.polisher.api_key, "test-polish-key");
-
-        std::env::remove_var("ALTGO_TRANSCRIBER_API_KEY");
-        std::env::remove_var("ALTGO_POLISHER_API_KEY");
     }
 
     #[test]
