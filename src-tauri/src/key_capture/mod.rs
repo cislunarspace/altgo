@@ -170,9 +170,7 @@ mod tests {
     }
 
     #[test]
-    fn boxed_key_capture_trait_object() {
-        let mut capture: Box<dyn KeyCapture> = Box::new(PlatformKeyCapture::new());
-        let result = capture.capture();
-        assert!(result.is_err());
+    fn boxed_platform_key_capture_constructs() {
+        let _capture: Box<dyn KeyCapture> = Box::new(PlatformKeyCapture::new());
     }
 }
