@@ -189,15 +189,13 @@ trait 边界一律返回自定义 thiserror 枚举：`RecorderError` / `OutputEr
 
 ### 命令
 
-`cmd.rs` 暴露 16 个命令：
+`cmd.rs` 暴露 14 个命令：
 
 - 配置 3：`get_config`、`save_config`、`capture_activation_key`
-- 流水线 3：`start_pipeline`、`stop_pipeline`、`get_status`
+- 流水线 1：`start_pipeline`
 - 浮窗 2：`copy_text`、`hide_overlay`
 - 模型 4：`list_models`、`download_model`、`delete_model`、`resolve_model`
 - 历史 4：`list_history`、`delete_history_entries`、`clear_history`、`polish_history_entry`
-
-注意：`get_status` 与 `stop_pipeline` 已注册但前端零调用，疑为死代码。
 
 ### 事件
 
@@ -221,7 +219,6 @@ trait 边界一律返回自定义 thiserror 枚举：`RecorderError` / `OutputEr
 
 - `notify-send` 从未实现，结果展示统一走 Tauri overlay。
 - `prompt_store` 没有热重载，改文件需重启。
-- `get_status` / `stop_pipeline` 疑为死代码。
 
 ### 架构资产
 

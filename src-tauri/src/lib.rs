@@ -134,8 +134,6 @@ pub fn run() {
             cmd::get_config,
             cmd::save_config,
             cmd::start_pipeline,
-            cmd::stop_pipeline,
-            cmd::get_status,
             cmd::copy_text,
             cmd::hide_overlay,
             cmd::list_models,

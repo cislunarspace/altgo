@@ -75,7 +75,7 @@ Key Listener → State Machine → Recorder → Transcriber → Polisher → Out
 ### 模块（位于 `src-tauri/src/`）
 
 - **`lib.rs`** —— Tauri 应用入口：`run()` 装配 managed state（`ConfigStore`、`HistoryStore`、`PipelineController`、`Arc<dyn Output>`），`spawn_pipeline_thread` 在独立 OS 线程的 tokio 运行时上拉起 `voice_pipeline::run`（从 managed state 取 Output 与 HistoryStore，构造 `TranscriptionDispatcherImpl` 和 `TauriPipelineSink`）。
-- **`cmd.rs`** —— 通过 IPC 暴露给前端的 Tauri 命令，共 16 个：配置（`get_config`、`save_config`、`capture_activation_key`）、pipeline（`start_pipeline`、`stop_pipeline`、`get_status`）、浮窗（`copy_text`、`hide_overlay`）、模型（`list_models`、`download_model`、`delete_model`、`resolve_model`）、历史记录（`list_history`、`delete_history_entries`、`clear_history`、`polish_history_entry`）。历史追加由 `tauri_sink.rs` 经 `TranscriptionDispatch` 驱动，写入成功后发出 `history-updated` 事件，并优先在润色后文本经 trim 后非空时展示润色文本。
+- **`cmd.rs`** —— 通过 IPC 暴露给前端的 Tauri 命令，共 14 个：配置（`get_config`、`save_config`、`capture_activation_key`）、pipeline（`start_pipeline`）、浮窗（`copy_text`、`hide_overlay`）、模型（`list_models`、`download_model`、`delete_model`、`resolve_model`）、历史记录（`list_history`、`delete_history_entries`、`clear_history`、`polish_history_entry`）。历史追加由 `tauri_sink.rs` 经 `TranscriptionDispatch` 驱动，写入成功后发出 `history-updated` 事件，并优先在润色后文本经 trim 后非空时展示润色文本。
 - **`history.rs`** —— `HistoryStore`：对 `history.json` 的追加/列出/删除/清空/更新/计数（camelCase JSON，文件 I/O 使用 `Mutex`）。`HistoryStore` 是唯一对外接口，调用方不直接接触文件路径或内部辅助函数。不保存音频。
 - **`config.rs`** —— 使用 `serde(default)` 加载每个字段的 TOML 配置；`ConfigPatch` 补丁逻辑与字段定义共处一处。API 密钥可通过环境变量覆盖（例如 `ALTGO_POLISHER_API_KEY`；若使用 API 引擎，则转写器密钥同样可覆盖）。
 - **`config_store.rs`** —— `Config` 的持久化封装；所有变更经 `apply_patch` 校验并写盘。校验失败时内存已部分应用、不落盘（非原子回滚）。
@@ -87,7 +87,7 @@ Key Listener → State Machine → Recorder → Transcriber → Polisher → Out
 - **`polisher.rs`** —— 使用 LLM 对文本进行 4 档润色（`none`/`light`/`medium`/`heavy`），支持 OpenAI 兼容聊天 API 与 Anthropic Messages API 两种协议。指数退避重试（3 次）。`polisher/protocol.rs` 定义 API 协议类型（`ApiProtocol`）。
 - **`prompt_store.rs`** —— 润色 prompt 模板管理：从 `resources/prompts/` 组合 `base.txt` + 各档后缀，启动时加载一次，改文件需重启应用生效。
 - **`voice_pipeline/`** —— 核心处理流水线（录音→转写→润色）的单一深模块。`sink.rs` 定义 `PipelineSink` 接缝（状态变更、错误、结果、进度、按键后端通知）与 `TranscriptionResult` / `DispatchOutcome`；`dispatcher.rs` 是 sink 注入的业务 seam（剪贴板写入 + 历史追加，归到 `TranscriptionDispatch` trait），生产实现 `TranscriptionDispatcherImpl` 转调 `process_transcription_result`；`handlers.rs` 留有 `dispatch_history_polish` 编排 `store.get + formatter.polish + store.polish_entry`。`context.rs` 主循环是 `tokio::select!` 三分支（按键、状态机超时、停止信号），转写与润色在循环内串行完成（单次转写互斥）。
-- **`pipeline_controller.rs`** —— 流水线生命周期与状态跟踪（`PipelineStatus`：Idle/Recording/Processing/Done/Stopped 五态），对应 `start`/`stop`/`get_status`。
+- **`pipeline_controller.rs`** —— 流水线生命周期与状态跟踪（`PipelineStatus`：Idle/Recording/Processing/Done/Stopped 五态），由 `start_pipeline` 与 `save_config` 内的 `restart_pipeline` 驱动。
 - **`tauri_sink.rs`** —— `PipelineSink` 的 Tauri 适配器：把管道事件转成前端事件，并把悬浮窗操作委托给 `OverlayManager`。剪贴板/历史业务由 `TranscriptionDispatch` trait 注入（构造时一次性决定），本模块不再持有 `Output` 或 `HistoryStore`。
 - **`model.rs`** —— whisper.cpp GGML 模型管理（下载、切换；存储在 `dirs::config_dir()/altgo/models/`，Linux 为 `~/.config/altgo/models/`，Windows 为 `%APPDATA%/altgo/models/`）。
 - **`tray.rs`** —— 系统托盘配置（显示窗口、退出菜单）。

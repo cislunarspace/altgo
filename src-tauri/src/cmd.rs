@@ -123,19 +123,6 @@ pub async fn start_pipeline(
         .await
 }
 
-#[tauri::command]
-pub async fn stop_pipeline(controller: State<'_, PipelineController>) -> Result<(), String> {
-    controller.stop().await;
-    Ok(())
-}
-
-#[tauri::command]
-pub async fn get_status(
-    controller: State<'_, PipelineController>,
-) -> Result<PipelineStatus, String> {
-    Ok(controller.current_status())
-}
-
 async fn copy_text_core(output: Arc<dyn output::Output>, text: String) -> Result<(), String> {
     let out = output.clone_box();
     tokio::task::spawn_blocking(move || out.write_clipboard(&text))

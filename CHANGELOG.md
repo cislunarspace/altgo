@@ -1,5 +1,11 @@
 # Changelog
 
+## v2.5.6 (2026-08-12)
+
+### Refactor
+
+- **移除 IPC 死代码命令**：`get_status` 与 `stop_pipeline` 已注册但前端零调用（状态由 `tauri_sink` 推送 `pipeline-status` 事件、停止由 `save_config` 内部 `restart_pipeline` 完成），删除命令与注册，IPC 契约 16 → 14；同步清理 architecture.md / CLAUDE.md 中「疑为死代码」标注（#112）。
+
 ## v2.5.5 (2026-08-11)
 
 ### Fixes
