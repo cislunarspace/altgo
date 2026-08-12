@@ -14,7 +14,7 @@ use crate::{
     output,
     overlay::manager::{OverlayManager, OverlayState},
     overlay::tauri::TauriOverlayWindow,
-    pipeline_controller::{PipelineController, PipelineStatus},
+    pipeline_controller::PipelineController,
     polisher, voice_pipeline,
 };
 
