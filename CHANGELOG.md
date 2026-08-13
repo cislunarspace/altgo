@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- **CI/release 提速与加固**：固定 runner 版本（ci.yml 与 release 的 Windows job 用 `windows-2025`，release 的 release job 与 docs 部署用 `ubuntu-24.04`）；release 的 flatpak 构建补上 `Swatinem/rust-cache` 增量编译；各 workflow 的 `actions/checkout` 加 `persist-credentials: false`（构建/上传走注入的 GITHUB_TOKEN，不依赖 checkout 持久凭据）。参考 e2m2e#405。
+
 ## v2.5.6 (2026-08-12)
 
 ### Refactor

@@ -16,6 +16,8 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -35,6 +37,8 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -73,6 +77,8 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -112,8 +118,13 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - uses: dtolnay/rust-toolchain@stable
+
+      # cargo 编译缓存：flatpak 构建同样全量编译 Rust，增量省时。
+      - uses: Swatinem/rust-cache@v2
 
       - uses: ./.github/actions/setup-linux-build
         with:
@@ -161,9 +172,11 @@ jobs:
   build-windows:
     name: Build MSI (Windows)
     needs: [test]
-    runs-on: windows-latest
+    runs-on: windows-2025
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Install Rust (stable, MSVC)
         uses: dtolnay/rust-toolchain@stable
@@ -207,6 +220,8 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Download deb artifact
         uses: actions/download-artifact@v4
@@ -244,11 +259,12 @@ jobs:
   release:
     name: Create Release
     needs: [build-deb, build-rpm, build-flatpak, build-windows, gen-aur]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Write release notes from CHANGELOG
         env:

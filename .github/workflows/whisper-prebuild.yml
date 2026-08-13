@@ -39,6 +39,8 @@ jobs:
       ALTGO_WHISPER_SKIP_PREBUILT: '1'
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Read whisper version
         id: ver
