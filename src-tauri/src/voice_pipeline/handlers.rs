@@ -66,7 +66,10 @@ pub async fn handle_stop_record(
         }
     });
 
-    let transcribe_result = transcriber.transcribe(&wav_data, progress_cb).await;
+    let transcribe_result = transcriber
+        .transcribe(&wav_data, Arc::clone(&progress_cb))
+        .await;
+    drop(progress_cb);
     let _ = forwarder.await;
     let result = match transcribe_result {
         Ok(r) => r,
