@@ -13,5 +13,5 @@ source_aarch64=("${pkgname}_${pkgver}_arm64.deb::https://github.com/cislunarspac
 sha256sums_aarch64=('ARM64_SHA256_PLACEHOLDER')
 
 package() {
-    bsdtar -xf "${srcdir}/data.tar.xz" -C "${pkgdir}"
+    bsdtar -xf "${srcdir}"/data.tar.* -C "${pkgdir}"
 }
