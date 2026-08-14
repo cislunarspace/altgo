@@ -31,6 +31,7 @@ const HF_MIRROR_BASE_URL: &str =
 
 /// 主模型文件名（其余文件为配套资源）。
 const MAIN_MODEL_FILENAME: &str = "model.int8.onnx";
+const TOKENS_FILENAME: &str = "tokens.txt";
 
 fn model_download_bases() -> Vec<String> {
     if let Ok(s) = std::env::var(ENV_MODEL_BASE_URL) {
@@ -83,7 +84,7 @@ const SENSE_VOICE_FILES: &[ModelFile] = &[
         size_bytes: 230 * 1024 * 1024,
     },
     ModelFile {
-        filename: "tokens.txt",
+        filename: TOKENS_FILENAME,
         size_bytes: 8 * 1024,
     },
 ];
@@ -111,9 +112,11 @@ pub fn model_dir(name: &str) -> PathBuf {
     models_dir().join(name)
 }
 
-/// 模型主文件是否齐全（目录存在且主模型文件存在）。
+/// 模型文件是否齐全。
 fn model_files_ready(dir: &Path) -> bool {
-    dir.join(MAIN_MODEL_FILENAME).exists()
+    SENSE_VOICE_FILES
+        .iter()
+        .all(|file| dir.join(file.filename).is_file())
 }
 
 /// 扫描已下载的模型，返回存在的模型名称列表。
@@ -409,6 +412,13 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         // 只有 tokens.txt 没有主模型 → 视为未下载
         std::fs::write(dir.path().join("tokens.txt"), b"tok").unwrap();
+        assert!(resolve_model_dir(dir.path().to_str().unwrap()).is_none());
+    }
+
+    #[test]
+    fn test_resolve_model_dir_missing_tokens() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join(MAIN_MODEL_FILENAME), b"model").unwrap();
         assert!(resolve_model_dir(dir.path().to_str().unwrap()).is_none());
     }
 
