@@ -16,6 +16,9 @@ use crate::transcriber::Transcriber;
 
 use super::sink::{PipelineSink, TranscriptionResult};
 
+type ProgressEvent = (String, Option<f32>);
+type ProgressEvents = Arc<Mutex<Vec<ProgressEvent>>>;
+
 // ---------------------------------------------------------------------------
 // KeyListener fake
 // ---------------------------------------------------------------------------
@@ -241,6 +244,7 @@ pub(super) struct MockSink {
     status_changes: Arc<Mutex<Vec<PipelineStatus>>>,
     errors: Arc<Mutex<Vec<String>>>,
     results: Arc<Mutex<Vec<TranscriptionResult>>>,
+    progress: ProgressEvents,
 }
 
 impl MockSink {
@@ -249,6 +253,7 @@ impl MockSink {
             status_changes: Arc::new(Mutex::new(Vec::new())),
             errors: Arc::new(Mutex::new(Vec::new())),
             results: Arc::new(Mutex::new(Vec::new())),
+            progress: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
@@ -263,6 +268,10 @@ impl MockSink {
     pub(super) fn results(&self) -> Vec<TranscriptionResult> {
         self.results.lock().unwrap().clone()
     }
+
+    pub(super) fn progress(&self) -> Vec<ProgressEvent> {
+        self.progress.lock().unwrap().clone()
+    }
 }
 
 impl PipelineSink for MockSink {
@@ -275,7 +284,12 @@ impl PipelineSink for MockSink {
     fn on_transcription_result(&self, output: &TranscriptionResult) {
         self.results.lock().unwrap().push(output.clone());
     }
-    fn on_progress(&self, _: &str, _: Option<f32>) {}
+    fn on_progress(&self, phase: &str, fraction: Option<f32>) {
+        self.progress
+            .lock()
+            .unwrap()
+            .push((phase.to_string(), fraction));
+    }
     fn on_key_listener_backend(&self, _: &str) {}
 }
 

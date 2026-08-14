@@ -52,22 +52,13 @@ pub async fn handle_stop_record(
 
     sink.on_progress("transcribe", None);
 
-    // Bridge the trait's Arc<dyn Fn> progress callback to the sink — the
-    // callback must own its data, so we run a small forwarder task that
-    // listens to an mpsc channel and invokes the callback.
-    let (progress_tx, mut progress_rx) = tokio::sync::mpsc::unbounded_channel::<f32>();
+    // Progress callbacks are synchronous, so forward them directly to the sink.
+    let progress_sink = sink.clone();
     let progress_cb: Arc<dyn Fn(f32) + Send + Sync> = Arc::new(move |fr: f32| {
-        let _ = progress_tx.send(fr);
-    });
-    let forwarder_sink = sink.clone();
-    let forwarder = tokio::spawn(async move {
-        while let Some(fr) = progress_rx.recv().await {
-            forwarder_sink.on_progress("transcribe", Some(fr));
-        }
+        progress_sink.on_progress("transcribe", Some(fr));
     });
 
     let transcribe_result = transcriber.transcribe(&wav_data, progress_cb).await;
-    let _ = forwarder.await;
     let result = match transcribe_result {
         Ok(r) => r,
         Err(e) => {
@@ -384,6 +375,83 @@ mod tests {
     // ---------------------------------------------------------------------------
     // handle_stop_record 成功与失败分支测试
     // ---------------------------------------------------------------------------
+
+    type ProgressCallback = Arc<dyn Fn(f32) + Send + Sync>;
+
+    struct RetainingProgressTranscriber {
+        progress: std::sync::Mutex<Option<ProgressCallback>>,
+    }
+
+    impl RetainingProgressTranscriber {
+        fn new() -> Self {
+            Self {
+                progress: std::sync::Mutex::new(None),
+            }
+        }
+    }
+
+    impl crate::transcriber::Transcriber for RetainingProgressTranscriber {
+        fn transcribe<'life0, 'life1>(
+            &'life0 self,
+            _audio: &'life1 [u8],
+            on_progress: Arc<dyn Fn(f32) + Send + Sync>,
+        ) -> std::pin::Pin<
+            Box<
+                dyn std::future::Future<
+                        Output = Result<crate::transcriber::TranscribeResult, TranscriberError>,
+                    > + Send
+                    + 'life0,
+            >,
+        >
+        where
+            'life1: 'life0,
+        {
+            on_progress(0.5);
+            *self.progress.lock().unwrap() = Some(on_progress);
+            Box::pin(async {
+                Ok(crate::transcriber::TranscribeResult {
+                    text: String::new(),
+                    language: "zh".to_string(),
+                })
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn handle_stop_record_does_not_wait_for_retained_progress_callback() {
+        let wav = make_test_wav();
+        let mut recorder = super::super::test_doubles::FakeRecorder::new(wav);
+        let transcriber = RetainingProgressTranscriber::new();
+        let formatter = failing_formatter();
+        let sink = super::super::test_doubles::MockSink::new();
+        let sink_arc: Arc<dyn PipelineSink> = Arc::new(sink.clone());
+
+        recorder.start_recording().unwrap();
+
+        tokio::time::timeout(
+            Duration::from_secs(1),
+            handle_stop_record(
+                &mut recorder,
+                &transcriber,
+                &formatter,
+                PolishLevel::None,
+                sink_arc,
+            ),
+        )
+        .await
+        .expect("transcription result must not wait for a retained progress callback");
+
+        assert!(transcriber.progress.lock().unwrap().is_some());
+        assert_eq!(
+            sink.progress(),
+            vec![
+                ("transcribe".to_string(), None),
+                ("transcribe".to_string(), Some(0.5)),
+                ("done".to_string(), Some(1.0))
+            ]
+        );
+        assert_eq!(sink.results().len(), 1);
+    }
 
     #[tokio::test]
     async fn handle_stop_record_success_chain_falls_back_to_raw_on_polish_failure() {
