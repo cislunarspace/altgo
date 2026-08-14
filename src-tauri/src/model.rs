@@ -136,29 +136,37 @@ fn file_sha256(path: &Path) -> std::io::Result<String> {
     Ok(format!("{:x}", hasher.finalize()))
 }
 
-fn model_file_ready(file: &ModelFile, path: &Path) -> bool {
+fn model_file_structurally_ready(file: &ModelFile, path: &Path) -> bool {
     let Ok(metadata) = std::fs::metadata(path) else {
         return false;
     };
-    if !metadata.is_file()
-        || (file.filename == MAIN_MODEL_FILENAME && metadata.len() < MIN_MODEL_FILE_BYTES)
-        || (file.filename != MAIN_MODEL_FILENAME && metadata.len() == 0)
-    {
-        return false;
-    }
-
-    file_sha256(path).is_ok_and(|sha256| sha256 == file.sha256)
+    metadata.is_file()
+        && ((file.filename == MAIN_MODEL_FILENAME && metadata.len() >= MIN_MODEL_FILE_BYTES)
+            || (file.filename != MAIN_MODEL_FILENAME && metadata.len() > 0))
 }
 
-fn model_files_ready_with(dir: &Path, files: &[ModelFile]) -> bool {
+fn model_file_ready(file: &ModelFile, path: &Path) -> bool {
+    model_file_structurally_ready(file, path)
+        && file_sha256(path).is_ok_and(|sha256| sha256 == file.sha256)
+}
+
+fn model_files_ready_with<F>(dir: &Path, files: &[ModelFile], is_ready: F) -> bool
+where
+    F: Fn(&ModelFile, &Path) -> bool,
+{
     files
         .iter()
-        .all(|file| model_file_ready(file, &dir.join(file.filename)))
+        .all(|file| is_ready(file, &dir.join(file.filename)))
 }
 
-/// 模型文件是否齐全且校验和匹配官方发布版本。
+/// 内置模型文件是否齐全且校验和匹配官方发布版本。
 fn model_files_ready(dir: &Path) -> bool {
-    model_files_ready_with(dir, SENSE_VOICE_FILES)
+    model_files_ready_with(dir, SENSE_VOICE_FILES, model_file_ready)
+}
+
+/// 自定义模型目录是否包含可供 SenseVoice 加载的文件。
+fn custom_model_files_ready(dir: &Path) -> bool {
+    model_files_ready_with(dir, SENSE_VOICE_FILES, model_file_structurally_ready)
 }
 
 /// 扫描已下载的模型，返回存在的模型名称列表。
@@ -227,14 +235,19 @@ pub fn validate_name(name: &str) -> Result<(), ModelError> {
     }
 }
 
-/// 删除指定模型的本地目录。
-pub fn delete(name: &str) -> Result<(), ModelError> {
+/// 删除指定根目录下的模型目录。
+fn delete_from_root(name: &str, root: &Path) -> Result<(), ModelError> {
     validate_name(name)?;
-    let path = model_dir(name);
+    let path = root.join(name);
     if path.exists() {
-        std::fs::remove_dir_all(&path)?;
+        std::fs::remove_dir_all(path)?;
     }
     Ok(())
+}
+
+/// 删除指定模型的本地目录。
+pub fn delete(name: &str) -> Result<(), ModelError> {
+    delete_from_root(name, &models_dir())
 }
 
 /// 解析配置中的模型值，返回模型目录（含 `model.int8.onnx` 与 `tokens.txt`）。
@@ -258,14 +271,14 @@ pub fn resolve_model_dir(config_model: &str) -> Option<PathBuf> {
 
     // Check if it's a directory path.
     let path = Path::new(config_model);
-    if path.is_dir() && model_files_ready(path) {
+    if path.is_dir() && custom_model_files_ready(path) {
         return Some(path.to_path_buf());
     }
 
     // Check if it's a direct .onnx file path.
     if path.is_file() && path.file_name().is_some_and(|n| n == MAIN_MODEL_FILENAME) {
         if let Some(parent) = path.parent() {
-            if model_files_ready(parent) {
+            if custom_model_files_ready(parent) {
                 return Some(parent.to_path_buf());
             }
         }
@@ -312,79 +325,122 @@ where
     let dir = root_dir.join(info.name);
     std::fs::create_dir_all(&dir)?;
 
-    let total_bytes: u64 = info.files.iter().map(|f| f.size_bytes).sum();
-    let mut done_bytes: u64 = 0;
+    let total_bytes = info.files.iter().map(|file| file.size_bytes).sum();
+    download_model_files(info.files, &bases, &dir, total_bytes, &mut on_progress).await?;
+    Ok(dir)
+}
 
-    for file in info.files {
-        let dest = dir.join(file.filename);
-        if model_file_ready(file, &dest) {
-            done_bytes += file.size_bytes;
-            continue;
+async fn download_model_files<F>(
+    files: &[ModelFile],
+    bases: &[String],
+    dir: &Path,
+    total_bytes: u64,
+    on_progress: &mut F,
+) -> Result<(), ModelError>
+where
+    F: FnMut(u64, u64),
+{
+    let mut done_bytes = 0;
+    for file in files {
+        done_bytes +=
+            download_model_file(file, bases, dir, done_bytes, total_bytes, on_progress).await?;
+    }
+    Ok(())
+}
+
+async fn download_model_file<F>(
+    file: &ModelFile,
+    bases: &[String],
+    dir: &Path,
+    done_bytes: u64,
+    total_bytes: u64,
+    on_progress: &mut F,
+) -> Result<u64, ModelError>
+where
+    F: FnMut(u64, u64),
+{
+    let dest = dir.join(file.filename);
+    if model_file_ready(file, &dest) {
+        return Ok(file.size_bytes);
+    }
+    remove_invalid_model_file(&dest)?;
+
+    let tmp_path = dir.join(format!("{}.tmp", file.filename));
+    download_model_file_with_retries(
+        file,
+        bases,
+        &dest,
+        &tmp_path,
+        done_bytes,
+        total_bytes,
+        on_progress,
+    )
+    .await?;
+    Ok(file.size_bytes)
+}
+
+fn remove_invalid_model_file(path: &Path) -> Result<(), ModelError> {
+    if !path.exists() {
+        return Ok(());
+    }
+    if !path.is_file() {
+        return Err(ModelError::DownloadFailed(format!(
+            "模型资源路径不是文件: {}",
+            path.display()
+        )));
+    }
+    std::fs::remove_file(path)?;
+    Ok(())
+}
+
+async fn download_model_file_with_retries<F>(
+    file: &ModelFile,
+    bases: &[String],
+    dest: &Path,
+    tmp_path: &Path,
+    done_bytes: u64,
+    total_bytes: u64,
+    on_progress: &mut F,
+) -> Result<(), ModelError>
+where
+    F: FnMut(u64, u64),
+{
+    let mut last_err = None;
+    for attempt in 0..DOWNLOAD_ATTEMPTS {
+        if attempt > 0 {
+            let _ = std::fs::remove_file(tmp_path);
+            tokio::time::sleep(Duration::from_secs(2 * u64::from(attempt))).await;
         }
-        if dest.exists() {
-            if dest.is_file() {
-                std::fs::remove_file(&dest)?;
-            } else {
-                return Err(ModelError::DownloadFailed(format!(
-                    "模型资源路径不是文件: {}",
-                    dest.display()
-                )));
-            }
-        }
-
-        let tmp_path = dir.join(format!("{}.tmp", file.filename));
-        let mut last_err: Option<ModelError> = None;
-
-        for attempt in 0..DOWNLOAD_ATTEMPTS {
-            if attempt > 0 {
-                let _ = std::fs::remove_file(&tmp_path);
-                tokio::time::sleep(Duration::from_secs(2 * u64::from(attempt))).await;
-            }
-
-            for base in &bases {
-                let url = format!("{}/{}", base, file.filename);
-                match download_once_to_tmp(
-                    &url,
-                    done_bytes,
-                    total_bytes,
-                    &tmp_path,
-                    &mut on_progress,
-                )
+        for base in bases {
+            let url = format!("{}/{}", base, file.filename);
+            let result = download_once_to_tmp(&url, done_bytes, total_bytes, tmp_path, on_progress)
                 .await
-                {
-                    Ok(()) => {
-                        if !model_file_ready(file, &tmp_path) {
-                            let _ = std::fs::remove_file(&tmp_path);
-                            return Err(ModelError::DownloadFailed(format!(
-                                "下载的模型文件校验失败: {}",
-                                file.filename
-                            )));
-                        }
-                        std::fs::rename(&tmp_path, &dest)?;
-                        done_bytes += file.size_bytes;
-                        last_err = None;
-                        break;
-                    }
-                    Err(e) => {
-                        last_err = Some(e);
-                        let _ = std::fs::remove_file(&tmp_path);
-                    }
-                }
-                if last_err.is_none() {
-                    break;
+                .and_then(|()| finalize_model_download(file, tmp_path, dest));
+            match result {
+                Ok(()) => return Ok(()),
+                Err(error) => {
+                    last_err = Some(error);
+                    let _ = std::fs::remove_file(tmp_path);
                 }
             }
-            if last_err.is_none() {
-                break;
-            }
-        }
-
-        if let Some(e) = last_err {
-            return Err(e);
         }
     }
+    Err(last_err.expect("download attempts must produce an error"))
+}
 
-    Ok(dir)
+fn finalize_model_download(
+    file: &ModelFile,
+    tmp_path: &Path,
+    dest: &Path,
+) -> Result<(), ModelError> {
+    if !model_file_ready(file, tmp_path) {
+        return Err(ModelError::DownloadFailed(format!(
+            "下载的模型文件校验失败: {}",
+            file.filename
+        )));
+    }
+    std::fs::rename(tmp_path, dest)?;
+    Ok(())
 }
 
 async fn download_once_to_tmp<F>(
@@ -529,6 +585,21 @@ mod tests {
     }
 
     #[test]
+    fn test_resolve_custom_model_dir_uses_structural_checks() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join(MAIN_MODEL_FILENAME),
+            vec![0; MIN_MODEL_FILE_BYTES as usize],
+        )
+        .unwrap();
+        std::fs::write(dir.path().join(TOKENS_FILENAME), b"custom tokens").unwrap();
+        assert_eq!(
+            resolve_model_dir(dir.path().to_str().unwrap()),
+            Some(dir.path().to_path_buf())
+        );
+    }
+
+    #[test]
     fn test_model_file_ready_requires_matching_checksum() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("test-model");
@@ -580,8 +651,9 @@ mod tests {
 
     #[test]
     fn test_delete_missing_dir_ok() {
-        // 模型目录大概率不存在，删除应静默成功
-        let _ = delete("sense-voice");
+        let dir = tempfile::tempdir().unwrap();
+        delete_from_root("sense-voice", dir.path()).unwrap();
+        assert!(!dir.path().join("sense-voice").exists());
     }
 
     #[tokio::test]
@@ -720,6 +792,7 @@ mod tests {
             .mock("GET", "/model.int8.onnx")
             .with_status(200)
             .with_body(&model_payload)
+            .expect_at_least(1)
             .create_async()
             .await;
 
