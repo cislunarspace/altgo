@@ -76,7 +76,7 @@ impl FatalError {
         match self {
             Self::ModelNotFound { model, searched } => {
                 format!(
-                    "本地模型未找到（配置值: {:?}）。\n搜索路径: {:?}\n请在 GUI 设置中下载模型，或将 [transcriber] model 设为已下载模型的名称（如 \"base\"）或完整文件路径。",
+                    "本地模型未找到（配置值: {:?}）。\n搜索路径: {:?}\n请在 GUI 设置中下载模型，或将 [transcriber] model 设为已下载模型的名称（如 \"sense-voice\"）、包含 model.int8.onnx 与 tokens.txt 的目录，或 model.int8.onnx 文件路径。",
                     model, searched
                 )
             }
@@ -314,7 +314,7 @@ mod tests {
     #[test]
     fn test_fatal_error_classification() {
         let err = PipelineError::Fatal(FatalError::ModelNotFound {
-            model: "base".to_string(),
+            model: "sense-voice".to_string(),
             searched: vec![],
         });
         assert!(err.is_fatal());
@@ -331,12 +331,12 @@ mod tests {
     #[test]
     fn test_fatal_error_messages() {
         let err = PipelineError::Fatal(FatalError::ModelNotFound {
-            model: "base".to_string(),
+            model: "sense-voice".to_string(),
             searched: vec![PathBuf::from("/models")],
         });
         let msg = err.message();
         assert!(msg.contains("本地模型未找到"));
-        assert!(msg.contains("base"));
+        assert!(msg.contains("sense-voice"));
     }
 
     #[test]
