@@ -61,8 +61,8 @@ type: 简短描述
 
 ## CI、Release 与 GitHub Pages
 
-- **CI**（`.github/workflows/ci.yml`）：向 `master` 推送或开 PR 时在 `amd64` 与 `arm64` 两个 Linux job 上运行 `fmt` / `clippy` / `test`，并构建 **deb**。
-- **Release**（`.github/workflows/release.yml`）：推送符合 `v*` 的 **tag**（例如 `v1.5.0`）时构建 **Linux deb / rpm**（`amd64` 与 `arm64`）及双架构 AUR PKGBUILD，生成 `checksums.txt` 并创建 GitHub Release。发版前请将 `src-tauri/Cargo.toml` / `tauri.conf.json` 中版本与 tag 对齐。
+- **CI**（`.github/workflows/ci.yml`）：向 `master` 推送或开 PR 时在 `amd64` 与 `arm64` 两个 Linux job 上运行 Rust 测试并构建 **deb**；前端测试、`fmt` 和 `clippy` 只在 `amd64` job 执行一次，因为这些检查不依赖目标架构。
+- **Release**（`.github/workflows/release.yml`）：推送符合 `v*` 的 **tag**（例如 `v1.5.0`）时，先校验 tag、Cargo、Tauri 配置、前端版本和 CHANGELOG，再构建 **Linux deb / rpm**（`amd64` 与 `arm64`）及双架构 AUR PKGBUILD，生成 `checksums.txt` 并创建 GitHub Release。发版前请将 `src-tauri/Cargo.toml`、`tauri.conf.json` 和 `frontend/package.json` 中版本与 tag 对齐。
 - **文档站**（`.github/workflows/deploy-docs.yml`）：`master` 上的 **CI 成功后**才构建 Docusaurus 并部署到 **GitHub Pages**（`workflow_run` 触发），避免 CI 失败时仍把文档发出去。首次需在仓库 **Settings → Pages** 中将 **Build and deployment** 的 Source 设为 **GitHub Actions**（勿选 branch 静态目录）。文档地址见 `docs-site/docusaurus.config.ts` 中的 `url` / `baseUrl`（例如 `https://<org>.github.io/altgo/`）。也可在 Actions 中手动 **Run workflow** 触发部署。
 
 ## 问题反馈

@@ -216,5 +216,8 @@ jobs:
         with:
           body_path: release_notes.md
           files: |
-            release-assets/*
+            release-assets/**/*.deb
+            release-assets/**/*.rpm
+            release-assets/PKGBUILD
+            release-assets/.SRCINFO
             checksums.txt
