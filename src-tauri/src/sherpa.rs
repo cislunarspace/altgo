@@ -102,7 +102,7 @@ impl SherpaTranscriber {
             .map_err(TranscriberError::WavDecodeFailed)?;
 
         let stream = self.recognizer.create_stream();
-        stream.accept_waveform(16_000, &samples);
+        stream.accept_waveform(crate::recorder::SAMPLE_RATE as i32, &samples);
         self.recognizer.decode(&stream);
 
         let text = stream

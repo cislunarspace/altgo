@@ -103,7 +103,9 @@ pub struct RecorderConfig {
 
 impl Default for RecorderConfig {
     fn default() -> Self {
-        Self { sample_rate: 16000 }
+        Self {
+            sample_rate: crate::recorder::SAMPLE_RATE,
+        }
     }
 }
 
@@ -233,6 +235,14 @@ impl Config {
     /// Validate the loaded configuration.
     /// Call this after `load()` to check the polisher API key when polishing is enabled.
     pub fn validate(&self) -> Result<(), ConfigError> {
+        if self.recorder.sample_rate != crate::recorder::SAMPLE_RATE {
+            return Err(ConfigError::ValidationFailed(format!(
+                "SenseVoice 只支持 {}Hz 单声道输入，请将 [recorder] sample_rate 设为 {}。",
+                crate::recorder::SAMPLE_RATE,
+                crate::recorder::SAMPLE_RATE
+            )));
+        }
+
         // Only require polisher API key when polishing is actually enabled.
         if self.polisher.level != "none" && self.polisher.api_key.trim().is_empty() {
             let config_path = Self::default_config_path();
@@ -538,6 +548,14 @@ language = "zh"
         cfg.polisher.level = "none".to_string();
         cfg.polisher.api_key = String::new();
         assert!(cfg.validate().is_ok());
+    }
+
+    #[test]
+    fn test_validate_rejects_non_sensevoice_sample_rate() {
+        let mut cfg = Config::default();
+        cfg.recorder.sample_rate = 48_000;
+        let err = cfg.validate().unwrap_err();
+        assert!(err.to_string().contains("16000"));
     }
 
     #[test]

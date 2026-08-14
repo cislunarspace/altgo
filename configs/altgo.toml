@@ -12,6 +12,7 @@ double_click_interval_ms = 300      # 双击判定间隔（毫秒）
 min_press_duration_ms = 100         # 最短按下时长（毫秒），过滤 IME 抖动
 
 [recorder]
+# SenseVoice 固定使用 16kHz 单声道输入；其他采样率会被启动校验拒绝。
 sample_rate = 16000
 
 [transcriber]

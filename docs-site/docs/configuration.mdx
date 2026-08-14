@@ -111,8 +111,8 @@ min_press_duration_ms = 100        # 最短按下时长，过滤 IME 抖动
 
 ```toml
 [recorder]
-sample_rate = 16000                # 采样率
-channels = 1                       # 声道数
+sample_rate = 16000                # SenseVoice 固定采样率；其他值会被拒绝
+channels = 1                       # 单声道
 ```
 
 ## 输出配置

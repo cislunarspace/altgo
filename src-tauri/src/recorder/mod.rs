@@ -10,6 +10,9 @@ pub type PlatformRecorder = PulseRecorder;
 
 pub use crate::error::RecorderError;
 
+/// SenseVoice 的固定输入采样率（Hz）。
+pub const SAMPLE_RATE: u32 = 16_000;
+
 pub trait Recorder: Send {
     fn start_recording(&mut self) -> Result<(), RecorderError>;
     fn stop_recording(&self) -> Result<Vec<u8>, RecorderError>;
@@ -18,7 +21,7 @@ pub trait Recorder: Send {
 
 #[cfg(test)]
 mod tests {
-    use super::PulseRecorder;
+    use super::{PulseRecorder, SAMPLE_RATE};
     use crate::error::RecorderError;
     use crate::recorder::Recorder;
 
@@ -29,7 +32,7 @@ mod tests {
     /// be a regression.
     #[test]
     fn pulse_recorder_returns_typed_recorder_error_on_empty_stop() {
-        let rec = PulseRecorder::new(16000);
+        let rec = PulseRecorder::new(SAMPLE_RATE);
         // No recording thread started; stop_recording joins nothing,
         // sees an empty buffer, and returns EmptyRecording.
         let err = rec.stop_recording().unwrap_err();
