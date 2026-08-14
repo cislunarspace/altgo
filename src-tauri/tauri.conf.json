@@ -45,7 +45,11 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["deb", "rpm", "msi"],
+    "targets": [
+      "deb",
+      "rpm",
+      "msi"
+    ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -53,15 +57,29 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "resources": {
-      "../target/deps/bin/*": "./bin/"
-    },
     "linux": {
       "deb": {
-        "depends": ["libwebkit2gtk-4.1-0", "libgtk-3-0", "libayatana-appindicator3-1", "xclip", "pulseaudio-utils", "libnotify-bin", "evtest", "xinput", "x11-xserver-utils"]
+        "depends": [
+          "libwebkit2gtk-4.1-0",
+          "libgtk-3-0",
+          "libayatana-appindicator3-1",
+          "xclip",
+          "pulseaudio-utils",
+          "libnotify-bin",
+          "evtest",
+          "xinput",
+          "x11-xserver-utils"
+        ]
       },
       "rpm": {
-        "depends": ["webkit2gtk4.1", "gtk3", "libayatana-appindicator-gtk3", "xclip", "pulseaudio-utils", "libnotify"]
+        "depends": [
+          "webkit2gtk4.1",
+          "gtk3",
+          "libayatana-appindicator-gtk3",
+          "xclip",
+          "pulseaudio-utils",
+          "libnotify"
+        ]
       }
     },
     "windows": {
