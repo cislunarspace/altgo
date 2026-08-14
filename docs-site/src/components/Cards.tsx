@@ -28,7 +28,7 @@ const features: FeatureItem[] = [
     icon: Infinity,
   },
   {
-    title: '本地 + 云端 ASR',
+    title: '本地 SenseVoice 转写',
     description: '本地 SenseVoice 转写，无需联网。',
     icon: Brain,
   },

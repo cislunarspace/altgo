@@ -29,7 +29,7 @@ const features = [
   },
   {
     icon: Brain,
-    title: '本地 + 云端 ASR',
+    title: '本地 SenseVoice 转写',
     description: 'SenseVoice 本地转写完全断网可用。',
   },
   {
@@ -77,7 +77,7 @@ export default function Home(): JSX.Element {
         <div className={clsx('container', styles.heroInner)}>
           <div className={styles.heroBadge}>
             <span className={styles.heroBadgeDot} />
-            跨平台语音转文字桌面工具
+            Linux 语音转文字桌面工具
           </div>
           <h1 className={styles.heroTitle}>
             无需打字

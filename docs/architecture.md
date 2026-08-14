@@ -155,7 +155,7 @@ lib.rs
 
 | 分类 | 用途 | 典型枚举 |
 |------|------|----------|
-| `FatalError` | 构建期，管道不启动 | `ModelNotFound` / `ApiAuthFailed` / `KeyListenerFailed` / `TranscriberInitFailed` / `PolisherInitFailed` / `RecorderInitFailed` |
+| `FatalError` | 构建期，管道不启动 | `ModelNotFound` / `KeyListenerFailed` / `TranscriberInitFailed` / `PolisherInitFailed` / `RecorderInitFailed` |
 | `RecoverableError` | 运行时，降级继续 | `TranscriptionFailed` / `PolishingFailed` / `RecordingFailed` / `EmptyTranscription` |
 
 trait 边界一律返回自定义 thiserror 枚举：`RecorderError` / `OutputError` / `KeyListenerError` / `ModelError` / `ConfigError` / `HistoryError`。`recorder/mod.rs:45-52` 专门测试防止回退到 `anyhow`。
@@ -164,14 +164,14 @@ trait 边界一律返回自定义 thiserror 枚举：`RecorderError` / `OutputEr
 
 ## 五、平台抽象
 
-平台差异通过 **trait + `cfg` 类型别名** 隔离：
+平台服务通过 trait 隔离：
 
 | 模块 | Trait | Linux 实现 |
-|------|-------|------------|--------------|
-| `key_listener` | `KeyListener::start()` | `xinput test-xi2` / `evtest` | `WH_KEYBOARD_LL` 独立消息泵线程 |
+|------|-------|------------|
+| `key_listener` | `KeyListener::start()` | `xinput test-xi2` / `evtest` |
 | `recorder` | `Recorder::start/stop/is_recording` | `parecord` 子进程 |
 | `output` | `Output::write_clipboard` + `clone_box` | `xclip`/`xsel`/`wl-copy` 探测一次 |
-| `key_capture` | 无（`cfg` 自由函数） | `evtest` 枚举 `/dev/input` 等一次按键 | 一次性 `WH_KEYBOARD_LL` 钩子消息泵 |
+| `key_capture` | 无（自由函数） | `evtest` 枚举 `/dev/input` 等一次按键 |
 
 录音输出由 Linux `parecord` 直接提供 16kHz 单声道 WAV。
 
@@ -215,6 +215,6 @@ trait 边界一律返回自定义 thiserror 枚举：`RecorderError` / `OutputEr
 ### 架构资产
 
 - `voice_pipeline` 完全不 import Tauri，全靠 trait seam。
-- 状态机、`overlay/manager`、`recorder/dsp` 都是干净的叶子/纯逻辑，测试覆盖好。
+- 状态机、`overlay/manager` 都是干净的叶子/纯逻辑，测试覆盖好。
 - 回退链设计成熟：转写网、`prompt` 三级、模型下载官方→镜像。
 - 错误分类致命/可恢复边界清晰。
