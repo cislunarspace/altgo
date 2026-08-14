@@ -1,10 +1,18 @@
 # Changelog
 
-## Unreleased
+## v2.5.7 (2026-08-14)
+
+### Fixes
+
+- **修复转写完成后进度转发卡住**：进度回调此前经 mpsc 通道转发给 sink，并在转写完成后等待转发任务退出；若转写器保留回调、返回结果后才调用（如本地 whisper 完成时），转发任务永不退出，`handle_stop_record` 挂起、流水线停在转写中。改为回调直接同步转发到 sink，不再等待转发任务（#116）。
 
 ### Changed
 
 - **CI/release 提速与加固**：固定 runner 版本（ci.yml 与 release 的 Windows job 用 `windows-2025`，release 的 release job 与 docs 部署用 `ubuntu-24.04`）；release 的 flatpak 构建补上 `Swatinem/rust-cache` 增量编译；各 workflow 的 `actions/checkout` 加 `persist-credentials: false`（构建/上传走注入的 GITHUB_TOKEN，不依赖 checkout 持久凭据）。参考 e2m2e#405。
+
+### Docs
+
+- **README 重组**：重组「使用」与「开发」文档结构，修复失效链接（#116）。
 
 ## v2.5.6 (2026-08-12)
 
