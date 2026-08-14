@@ -12,8 +12,18 @@ permissions:
 
 jobs:
   test:
-    name: Run tests
-    runs-on: ubuntu-22.04
+    name: Run tests (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runs-on: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+          - arch: arm64
+            runs-on: ubuntu-22.04-arm
+            target: aarch64-unknown-linux-gnu
+    runs-on: ${{ matrix.runs-on }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -21,10 +31,10 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: x86_64-unknown-linux-gnu
+          targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
         with:
-          key: x86_64-unknown-linux-gnu-release-test
+          key: ${{ matrix.target }}-release-test
 
       - uses: ./.github/actions/setup-linux-build
 
@@ -129,75 +139,6 @@ jobs:
           path: src-tauri/target/release/bundle/rpm/*.rpm
           if-no-files-found: error
 
-  build-flatpak:
-    name: Build Flatpak (${{ matrix.arch }})
-    needs: [test]
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - arch: amd64
-            runs-on: ubuntu-22.04
-            target: x86_64-unknown-linux-gnu
-          - arch: arm64
-            runs-on: ubuntu-22.04-arm
-            target: aarch64-unknown-linux-gnu
-    runs-on: ${{ matrix.runs-on }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
-
-      # cargo 编译缓存：flatpak 构建同样全量编译 Rust，增量省时。
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: ${{ matrix.target }}-release-flatpak
-
-      - uses: ./.github/actions/setup-linux-build
-        with:
-          extra-packages: 'flatpak flatpak-builder'
-
-      - name: Install Flatpak SDK
-        run: |
-          sudo flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
-          sudo flatpak install -y --noninteractive flathub org.freedesktop.Platform//23.08 org.freedesktop.Sdk//23.08
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-
-      - name: Install frontend dependencies
-        run: npm ci
-        working-directory: frontend
-
-      - name: Build Tauri binary (no bundle)
-        run: cargo tauri build --no-bundle
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Stage sources for Flatpak
-        run: |
-          mkdir -p flatpak-src/icons
-          cp src-tauri/target/release/altgo flatpak-src/altgo
-          cp src-tauri/icons/128x128.png flatpak-src/icons/
-          cp packaging/flatpak/com.github.altgo.desktop flatpak-src/com.github.altgo.desktop
-
-      - name: Build Flatpak bundle
-        run: |
-          sudo flatpak-builder --force-clean --repo=repo build-dir packaging/flatpak/com.github.altgo.yml
-          sudo flatpak build-bundle repo altgo-${{ matrix.arch }}.flatpak com.github.altgo
-
-      - name: Upload flatpak artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: altgo-${{ matrix.arch }}-flatpak
-          path: altgo-${{ matrix.arch }}.flatpak
-          if-no-files-found: error
-
   gen-aur:
     name: Generate AUR PKGBUILD
     needs: [build-deb]
@@ -245,7 +186,7 @@ jobs:
 
   release:
     name: Create Release
-    needs: [build-deb, build-rpm, build-flatpak, gen-aur]
+    needs: [build-deb, build-rpm, gen-aur]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -271,7 +212,7 @@ jobs:
       - name: Generate checksums
         run: |
           cd release-assets
-          find . -type f \( -name '*.deb' -o -name '*.rpm' -o -name '*.flatpak' \) -exec sha256sum {} \; > ../checksums.txt
+          find . -type f \( -name '*.deb' -o -name '*.rpm' \) -exec sha256sum {} \; > ../checksums.txt
           cd ..
           cat checksums.txt
 
