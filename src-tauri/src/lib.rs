@@ -19,12 +19,12 @@ pub mod polisher;
 pub mod prompt_store;
 pub mod recorder;
 pub mod resource;
+pub mod sherpa;
 pub mod state_machine;
 pub mod tauri_sink;
 pub mod transcriber;
 pub mod tray;
 pub mod voice_pipeline;
-pub mod whisper_server;
 
 use std::sync::Arc;
 use tauri::Manager;

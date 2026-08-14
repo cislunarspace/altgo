@@ -173,7 +173,7 @@ where
             serde_json::json!({
                 "name": name,
                 "downloaded": 0_u64,
-                "total": info.size_bytes,
+                "total": info.files.iter().map(|f| f.size_bytes).sum::<u64>(),
             }),
         );
     }
@@ -245,7 +245,7 @@ pub async fn delete_model(name: String) -> Result<(), String> {
 
 #[tauri::command]
 pub async fn resolve_model(model: String) -> Result<Option<String>, String> {
-    Ok(crate::model::resolve_model_path(&model).map(|p| p.to_string_lossy().to_string()))
+    Ok(crate::model::resolve_model_dir(&model).map(|p| p.to_string_lossy().to_string()))
 }
 
 #[tauri::command]
@@ -549,11 +549,11 @@ mod tests {
             events2.lock().unwrap().push((event.to_string(), payload))
         });
 
-        download_model_with_emitter("tiny", emit, |_name, mut on_progress| async move {
+        download_model_with_emitter("sense-voice", emit, |_name, mut on_progress| async move {
             on_progress(0, 100);
             on_progress(50, 100);
             on_progress(100, 100);
-            Ok(PathBuf::from("/models/ggml-tiny.bin"))
+            Ok(PathBuf::from("/models/sense-voice"))
         })
         .await
         .unwrap();
@@ -562,14 +562,17 @@ mod tests {
         assert_eq!(events.len(), 5);
 
         assert_eq!(events[0].0, "model-download-progress");
-        assert_eq!(events[0].1["name"], "tiny");
+        assert_eq!(events[0].1["name"], "sense-voice");
         assert_eq!(events[0].1["downloaded"], 0);
-        let tiny_size = crate::model::models_info()
+        let total_size: u64 = crate::model::models_info()
             .iter()
-            .find(|m| m.name == "tiny")
+            .find(|m| m.name == "sense-voice")
             .unwrap()
-            .size_bytes;
-        assert_eq!(events[0].1["total"], tiny_size);
+            .files
+            .iter()
+            .map(|f| f.size_bytes)
+            .sum();
+        assert_eq!(events[0].1["total"], total_size);
 
         assert_eq!(events[1].0, "model-download-progress");
         assert_eq!(events[1].1["downloaded"], 0);
@@ -578,7 +581,7 @@ mod tests {
 
         assert_eq!(events[4].0, "model-download-finished");
         assert_eq!(events[4].1["success"], true);
-        assert_eq!(events[4].1["path"], "/models/ggml-tiny.bin");
+        assert_eq!(events[4].1["path"], "/models/sense-voice");
     }
 
     #[tokio::test]
@@ -590,7 +593,7 @@ mod tests {
             events2.lock().unwrap().push((event.to_string(), payload))
         });
 
-        download_model_with_emitter("tiny", emit, |_name, _on_progress| async move {
+        download_model_with_emitter("sense-voice", emit, |_name, _on_progress| async move {
             Err(ModelError::DownloadFailed("network down".to_string()))
         })
         .await

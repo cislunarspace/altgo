@@ -115,7 +115,7 @@ impl Default for RecorderConfig {
 #[derive(Debug, Deserialize, Clone, serde::Serialize)]
 #[serde(default)]
 pub struct TranscriberConfig {
-    /// 引擎类型：`"local"`（本地 whisper.cpp）、`"api"`（Whisper API）或 `"mimo"`（小米 MiMo ASR）
+    /// 引擎类型：`"local"`（本地 SenseVoice/sherpa-onnx）、`"api"`（Whisper API）或 `"mimo"`（小米 MiMo ASR）
     pub engine: String,
     /// API 密钥（可通过 `ALTGO_TRANSCRIBER_API_KEY` 环境变量覆盖）
     pub api_key: String,
@@ -123,10 +123,8 @@ pub struct TranscriberConfig {
     pub api_base_url: String,
     /// 模型名称（API 模式）或模型文件路径（本地模式）
     pub model: String,
-    /// 语言代码（如 `"zh"`、`"en"`）
+    /// 语言代码（如 `"zh"`、`"en"`；本地引擎空字符串表示自动检测）
     pub language: String,
-    /// whisper-cli 二进制文件路径（为空时自动在 PATH 中查找）
-    pub whisper_path: String,
     /// 请求超时时间（秒）
     #[serde(with = "duration_secs", alias = "timeout_seconds")]
     pub timeout: Duration,
@@ -134,10 +132,8 @@ pub struct TranscriberConfig {
     pub temperature: f32,
     /// Whisper API prompt，提供上下文/词汇提示以提升识别准确率
     pub prompt: String,
-    /// 本地引擎线程数；`0` 表示按 CPU 并行度自动取满（whisper 默认仅 min(4, hw)）
+    /// 本地引擎线程数；`0` 表示按 CPU 并行度自动取满
     pub threads: u32,
-    /// 本地引擎 beam search 宽度；`<= 1` 时走贪心解码（最快），默认 0
-    pub beam_size: u32,
 }
 
 impl Default for TranscriberConfig {
@@ -148,12 +144,10 @@ impl Default for TranscriberConfig {
             api_base_url: "https://api.openai.com".to_string(),
             model: String::new(),
             language: "zh".to_string(),
-            whisper_path: String::new(),
             timeout: Duration::from_secs(30),
             temperature: 0.0,
             prompt: String::new(),
             threads: 0,
-            beam_size: 0,
         }
     }
 }
@@ -269,8 +263,8 @@ impl Config {
                     export ALTGO_TRANSCRIBER_API_KEY=\"your-key\"\n\
                  2. 在配置文件中填写 api_key：\n\
                     编辑 {}，在 [transcriber] 下填写 api_key = \"your-key\"\n\
-                 3. 使用本地 whisper.cpp（无需 API 密钥）：\n\
-                    将 transcriber.engine 改为 \"local\"",
+                 3. 使用本地 SenseVoice（无需 API 密钥）：\n\
+                    将 transcriber.engine 改为 \"local\" 并在设置中下载模型",
                 config_path.display()
             )));
         }
@@ -284,8 +278,8 @@ impl Config {
                     export ALTGO_TRANSCRIBER_API_KEY=\"your-key\"\n\
                  2. 在配置文件中填写 api_key：\n\
                     编辑 {}，在 [transcriber] 下填写 api_key = \"your-key\"\n\
-                 3. 使用本地 whisper.cpp（无需 API 密钥）：\n\
-                    将 transcriber.engine 改为 \"local\"",
+                 3. 使用本地 SenseVoice（无需 API 密钥）：\n\
+                    将 transcriber.engine 改为 \"local\" 并在设置中下载模型",
                 config_path.display()
             )));
         }

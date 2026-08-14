@@ -32,6 +32,7 @@ regex = "1"
 thiserror = "1"
 rubato = { version = "0.16", default-features = false }
 base64 = "0.22"
+sherpa-onnx = "1.13.5"
 
 [dev-dependencies]
 mockito = "1"

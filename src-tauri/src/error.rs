@@ -132,14 +132,14 @@ pub enum TranscriberError {
     #[error("API key not configured")]
     MissingApiKey,
 
-    #[error("Whisper API returned {status}: {body}")]
+    #[error("API returned {status}: {body}")]
     ApiError { status: u16, body: String },
 
-    #[error("whisper-cli not found at: {path}")]
-    WhisperCliNotFound { path: String },
+    #[error("failed to load local model: {reason}")]
+    ModelLoadFailed { reason: String },
 
-    #[error("whisper-cli failed (exit code {code}): {output}")]
-    WhisperCliFailed { code: i32, output: String },
+    #[error("audio decode error: {0}")]
+    WavDecodeFailed(&'static str),
 
     #[error("HTTP client error: {0}")]
     HttpError(String),
@@ -154,14 +154,10 @@ impl TranscriberError {
             Self::EmptyAudio => "音频数据为空，请重新录音。".to_string(),
             Self::MissingApiKey => "转写 API 密钥未配置。请在设置中添加 API 密钥。".to_string(),
             Self::ApiError { status, body } => {
-                format!("Whisper API 错误（HTTP {}）: {}", status, body)
+                format!("转写 API 错误（HTTP {}）: {}", status, body)
             }
-            Self::WhisperCliNotFound { path } => {
-                format!("whisper-cli 未找到: {}\n请在配置中设置正确的 whisper_path 或将 whisper-cli 添加到 PATH。", path)
-            }
-            Self::WhisperCliFailed { code, output } => {
-                format!("whisper-cli 执行失败（退出码 {}）:\n{}", code, output)
-            }
+            Self::ModelLoadFailed { reason } => format!("本地模型加载失败: {}", reason),
+            Self::WavDecodeFailed(msg) => format!("音频解码失败: {}", msg),
             Self::HttpError(msg) => format!("HTTP 请求失败: {}", msg),
             Self::JsonError(msg) => format!("JSON 解析失败: {}", msg),
         }

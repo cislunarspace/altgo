@@ -33,30 +33,28 @@ impl PipelineBuilder {
     pub fn build_transcriber(&self) -> Result<Box<dyn Transcriber>, PipelineError> {
         let cfg = &self.cfg.transcriber;
 
-        let model_path = if cfg.engine == "local" {
-            match crate::model::resolve_model_path(&cfg.model) {
-                Some(p) => p.to_string_lossy().to_string(),
-                None => {
-                    return Err(PipelineError::Fatal(FatalError::ModelNotFound {
-                        model: cfg.model.clone(),
-                        searched: vec![dirs::config_dir().unwrap_or_default().join("altgo/models")],
-                    }));
-                }
-            }
-        } else {
-            cfg.model.clone()
-        };
-
         let transcriber: Box<dyn Transcriber> = match cfg.engine.as_str() {
-            "local" => Box::new(crate::whisper_server::ResidentWhisper::new(
-                model_path,
-                cfg.language.clone(),
-                cfg.whisper_path.clone(),
-                cfg.temperature,
-                cfg.threads,
-                cfg.beam_size,
-                cfg.timeout,
-            )),
+            "local" => {
+                let model_dir = match crate::model::resolve_model_dir(&cfg.model) {
+                    Some(d) => d,
+                    None => {
+                        return Err(PipelineError::Fatal(FatalError::ModelNotFound {
+                            model: cfg.model.clone(),
+                            searched: vec![dirs::config_dir()
+                                .unwrap_or_default()
+                                .join("altgo/models")],
+                        }));
+                    }
+                };
+                Box::new(
+                    crate::sherpa::SherpaTranscriber::new(
+                        model_dir,
+                        cfg.language.clone(),
+                        cfg.threads,
+                    )
+                    .map_err(PipelineError::fatal_transcriber)?,
+                )
+            }
             "mimo" => {
                 let base_url =
                     if cfg.api_base_url.is_empty() || cfg.api_base_url.contains("openai.com") {

@@ -111,7 +111,6 @@ pub fn encode_wav(
 }
 
 /// 将 16 位 PCM WAV 数据解码为 `f32` 采样（范围 [-1.0, 1.0]）。
-#[cfg(test)]
 pub fn decode_wav_to_f32(wav_data: &[u8]) -> Result<Vec<f32>, &'static str> {
     if wav_data.len() < 44 {
         return Err("WAV data too short");

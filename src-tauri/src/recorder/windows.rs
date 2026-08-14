@@ -8,7 +8,7 @@
 //! - cpal `Stream` 存在 `Mutex<Option<Stream>>`，start 时放入、stop 时 take 出（drop 即停采集）。
 //! - 回调保持轻量：只做格式转换 + 降混，不在实时音频线程上做重采样。
 //! - 16kHz/i16 优先；设备不支持时用默认配置并在停止时批量重采样。
-//! - 输出始终为单声道（回调内 downmix），满足 whisper 输入要求。
+//! - 输出始终为单声道 16kHz（回调内 downmix），满足 ASR 输入要求。
 
 use crate::audio::{self, Buffer};
 use crate::error::RecorderError;

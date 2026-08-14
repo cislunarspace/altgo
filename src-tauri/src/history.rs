@@ -17,7 +17,7 @@ static HISTORY_IO_LOCK: Mutex<()> = Mutex::new(());
 pub struct HistoryEntry {
     pub id: String,
     pub created_at_ms: u64,
-    /// Whisper 原始转写（快捷润色以此为输入）
+    /// 原始转写（快捷润色以此为输入）
     pub raw_text: String,
     /// 当前展示文本（润色后或与 raw 相同）
     pub text: String,
