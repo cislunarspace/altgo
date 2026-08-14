@@ -52,23 +52,13 @@ pub async fn handle_stop_record(
 
     sink.on_progress("transcribe", None);
 
-    // Bridge the trait's Arc<dyn Fn> progress callback to the sink — the
-    // callback must own its data, so we run a small forwarder task that
-    // listens to an mpsc channel and invokes the callback.
-    let (progress_tx, mut progress_rx) = tokio::sync::mpsc::unbounded_channel::<f32>();
+    // Progress callbacks are synchronous, so forward them directly to the sink.
+    let progress_sink = sink.clone();
     let progress_cb: Arc<dyn Fn(f32) + Send + Sync> = Arc::new(move |fr: f32| {
-        let _ = progress_tx.send(fr);
-    });
-    let forwarder_sink = sink.clone();
-    let forwarder = tokio::spawn(async move {
-        while let Some(fr) = progress_rx.recv().await {
-            forwarder_sink.on_progress("transcribe", Some(fr));
-        }
+        progress_sink.on_progress("transcribe", Some(fr));
     });
 
     let transcribe_result = transcriber.transcribe(&wav_data, progress_cb).await;
-    forwarder.abort();
-    let _ = forwarder.await;
     let result = match transcribe_result {
         Ok(r) => r,
         Err(e) => {
@@ -414,6 +404,7 @@ mod tests {
         where
             'life1: 'life0,
         {
+            on_progress(0.5);
             *self.progress.lock().unwrap() = Some(on_progress);
             Box::pin(async {
                 Ok(crate::transcriber::TranscribeResult {
@@ -436,7 +427,7 @@ mod tests {
         recorder.start_recording().unwrap();
 
         tokio::time::timeout(
-            Duration::from_millis(200),
+            Duration::from_secs(1),
             handle_stop_record(
                 &mut recorder,
                 &transcriber,
@@ -449,6 +440,14 @@ mod tests {
         .expect("transcription result must not wait for a retained progress callback");
 
         assert!(transcriber.progress.lock().unwrap().is_some());
+        assert_eq!(
+            sink.progress(),
+            vec![
+                ("transcribe".to_string(), None),
+                ("transcribe".to_string(), Some(0.5)),
+                ("done".to_string(), Some(1.0))
+            ]
+        );
         assert_eq!(sink.results().len(), 1);
     }
 

@@ -241,6 +241,7 @@ pub(super) struct MockSink {
     status_changes: Arc<Mutex<Vec<PipelineStatus>>>,
     errors: Arc<Mutex<Vec<String>>>,
     results: Arc<Mutex<Vec<TranscriptionResult>>>,
+    progress: Arc<Mutex<Vec<(String, Option<f32>)>>>,
 }
 
 impl MockSink {
@@ -249,6 +250,7 @@ impl MockSink {
             status_changes: Arc::new(Mutex::new(Vec::new())),
             errors: Arc::new(Mutex::new(Vec::new())),
             results: Arc::new(Mutex::new(Vec::new())),
+            progress: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
@@ -263,6 +265,10 @@ impl MockSink {
     pub(super) fn results(&self) -> Vec<TranscriptionResult> {
         self.results.lock().unwrap().clone()
     }
+
+    pub(super) fn progress(&self) -> Vec<(String, Option<f32>)> {
+        self.progress.lock().unwrap().clone()
+    }
 }
 
 impl PipelineSink for MockSink {
@@ -275,7 +281,12 @@ impl PipelineSink for MockSink {
     fn on_transcription_result(&self, output: &TranscriptionResult) {
         self.results.lock().unwrap().push(output.clone());
     }
-    fn on_progress(&self, _: &str, _: Option<f32>) {}
+    fn on_progress(&self, phase: &str, fraction: Option<f32>) {
+        self.progress
+            .lock()
+            .unwrap()
+            .push((phase.to_string(), fraction));
+    }
     fn on_key_listener_backend(&self, _: &str) {}
 }
 
