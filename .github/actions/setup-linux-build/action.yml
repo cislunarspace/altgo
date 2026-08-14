@@ -2,7 +2,7 @@ name: 'Setup Linux Build Environment'
 description: 'Install system deps and Tauri CLI'
 inputs:
   extra-packages:
-    description: 'Extra apt packages to install (e.g. rpm, flatpak flatpak-builder)'
+    description: 'Extra apt packages to install (e.g. rpm)'
     required: false
     default: ''
 runs:

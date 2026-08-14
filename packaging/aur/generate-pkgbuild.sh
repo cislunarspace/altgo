@@ -9,7 +9,8 @@ VERSION="${1:?Usage: generate-pkgbuild.sh <version> [path-to-amd64-deb] [path-to
 AMD64_DEB="${2:-}"
 ARM64_DEB="${3:-}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-TEMPLATE="${SCRIPT_DIR}/PKGBUILD.in"
+PKGBUILD_TEMPLATE="${SCRIPT_DIR}/PKGBUILD.in"
+SRCINFO_TEMPLATE="${SCRIPT_DIR}/SRCINFO.in"
 
 echo "[INFO] Generating PKGBUILD for v${VERSION}..."
 
@@ -37,18 +38,14 @@ ARM64_SHA256=$(checksum_for_deb "arm64" "${ARM64_DEB}")
 echo "[OK] amd64 sha256: ${AMD64_SHA256}"
 echo "[OK] arm64 sha256: ${ARM64_SHA256}"
 
-# Generate PKGBUILD from template
-sed \
-    -e "s/VERSION/${VERSION}/g" \
-    -e "s/AMD64_SHA256_PLACEHOLDER/${AMD64_SHA256}/g" \
-    -e "s/ARM64_SHA256_PLACEHOLDER/${ARM64_SHA256}/g" \
-    "${TEMPLATE}" > PKGBUILD
+render_template() {
+    sed \
+        -e "s/VERSION/${VERSION}/g" \
+        -e "s/AMD64_SHA256_PLACEHOLDER/${AMD64_SHA256}/g" \
+        -e "s/ARM64_SHA256_PLACEHOLDER/${ARM64_SHA256}/g" \
+        "$1"
+}
 
-# Generate .SRCINFO (requires makepkg)
-if command -v makepkg &>/dev/null; then
-    makepkg --printsrcinfo > .SRCINFO
-    echo "[OK] Generated PKGBUILD and .SRCINFO"
-else
-    echo "[WARN] makepkg not found, skipping .SRCINFO generation"
-    echo "[OK] Generated PKGBUILD"
-fi
+render_template "${PKGBUILD_TEMPLATE}" > PKGBUILD
+render_template "${SRCINFO_TEMPLATE}" > .SRCINFO
+echo "[OK] Generated PKGBUILD and .SRCINFO"

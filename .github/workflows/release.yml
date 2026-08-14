@@ -182,7 +182,7 @@ jobs:
           path: |
             aur-output/PKGBUILD
             aur-output/.SRCINFO
-          if-no-files-found: warn
+          if-no-files-found: error
 
   release:
     name: Create Release
