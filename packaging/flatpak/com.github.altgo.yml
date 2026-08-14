@@ -18,8 +18,6 @@ modules:
     buildsystem: simple
     build-commands:
       - install -Dm755 altgo /app/bin/altgo
-      - mkdir -p /app/altgo/bin
-      - cp -r bin/* /app/altgo/bin/
       - mkdir -p /app/share/icons/hicolor/128x128/apps
       - install -Dm644 icons/128x128.png /app/share/icons/hicolor/128x128/apps/com.github.altgo.png
       - install -Dm644 com.github.altgo.desktop /app/share/applications/com.github.altgo.desktop
@@ -27,11 +25,7 @@ modules:
       - type: file
         path: ../../src-tauri/target/release/altgo
       - type: dir
-        path: ../../target/deps/bin
-        dest: bin
-      - type: dir
         path: ../../src-tauri/icons
         dest: icons
       - type: file
-        path: ../../packaging/appimage/altgo.desktop.in
-        dest-filename: com.github.altgo.desktop
+        path: ../../packaging/flatpak/com.github.altgo.desktop

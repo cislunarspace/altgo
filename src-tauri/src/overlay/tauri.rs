@@ -90,43 +90,11 @@ impl OverlayWindow for TauriOverlayWindow {
     }
 }
 
-#[cfg(target_os = "linux")]
 fn platform_primary_monitor_geometry() -> Option<(i32, i32, i32, i32)> {
     xrandr_primary_monitor()
 }
 
-#[cfg(target_os = "windows")]
-fn platform_primary_monitor_geometry() -> Option<(i32, i32, i32, i32)> {
-    use windows::Win32::Foundation::POINT;
-    use windows::Win32::Graphics::Gdi::{
-        GetMonitorInfoW, MonitorFromPoint, MONITORINFO, MONITOR_DEFAULTTOPRIMARY,
-    };
-    // Probe (0, 0) so MONITOR_DEFAULTTOPRIMARY resolves to the primary monitor
-    // even when no top-level window has been created yet.
-    let monitor = unsafe { MonitorFromPoint(POINT { x: 0, y: 0 }, MONITOR_DEFAULTTOPRIMARY) };
-    if monitor.is_invalid() {
-        return None;
-    }
-    let mut info = MONITORINFO {
-        cbSize: std::mem::size_of::<MONITORINFO>() as u32,
-        ..Default::default()
-    };
-    // SAFETY: `info` is a valid, properly-sized MONITORINFO for the duration of the call.
-    let ok = unsafe { GetMonitorInfoW(monitor, &mut info) };
-    if !ok.as_bool() {
-        return None;
-    }
-    let rect = &info.rcWork;
-    Some(geometry_from_work_rect(
-        rect.left,
-        rect.top,
-        rect.right,
-        rect.bottom,
-    ))
-}
-
 /// Uses `xrandr` to get primary monitor geometry in physical pixels.
-#[cfg(target_os = "linux")]
 fn xrandr_primary_monitor() -> Option<(i32, i32, i32, i32)> {
     let output = std::process::Command::new("xrandr").output().ok()?;
     if !output.status.success() {
@@ -146,7 +114,6 @@ fn xrandr_primary_monitor() -> Option<(i32, i32, i32, i32)> {
         })
 }
 
-#[cfg(target_os = "linux")]
 fn parse_xrandr_geometry(output: &str) -> Vec<(i32, i32, i32, i32, bool)> {
     let mut monitors = Vec::new();
     for line in output.lines() {
@@ -204,7 +171,6 @@ mod tests {
     use super::*;
 
     #[test]
-    #[cfg(target_os = "linux")]
     fn test_parse_xrandr_geometry() {
         let sample = r#"
 DP-1 connected primary 3840x2160+0+0 (normal left inverted right x axis y axis) 597mm x 336mm
@@ -217,7 +183,6 @@ DP-2 connected 1920x1080+3840+0 (normal left inverted right x axis y axis) 527mm
     }
 
     #[test]
-    #[cfg(target_os = "linux")]
     fn test_parse_xrandr_skips_disconnected() {
         let sample = "DP-1 disconnected (normal left inverted right x axis y axis)";
         assert!(parse_xrandr_geometry(sample).is_empty());
@@ -225,11 +190,8 @@ DP-2 connected 1920x1080+3840+0 (normal left inverted right x axis y axis) 527mm
 
     #[test]
     fn test_platform_primary_monitor_geometry_runs_without_panicking() {
-        // Both Linux (xrandr) and Windows (GetMonitorInfoW) implementations
-        // should return Some geometry on a real machine. The function may
-        // return None on stripped-down CI without a display, but it must
-        // not panic. Issue #23 (Windows) was previously a stub returning
-        // None unconditionally; this test catches accidental regressions.
+        // The function may return None on stripped-down CI without a display,
+        // but it must not panic.
         let _ = platform_primary_monitor_geometry();
     }
 
@@ -259,37 +221,5 @@ DP-2 connected 1920x1080+3840+0 (normal left inverted right x axis y axis) 527mm
         // Secondary monitor placed to the left of the primary has negative x.
         let (x, y, w, h) = geometry_from_work_rect(-1920, 0, 0, 1080);
         assert_eq!((x, y, w, h), (-1920, 0, 1920, 1080));
-    }
-
-    #[test]
-    #[cfg(target_os = "windows")]
-    fn test_win32_geometry_extraction_from_monitorinfo() {
-        use windows::Win32::Foundation::RECT;
-        use windows::Win32::Graphics::Gdi::MONITORINFO;
-        // Simulate a 1920x1080 monitor with a 40px taskbar at the bottom.
-        let info = MONITORINFO {
-            cbSize: std::mem::size_of::<MONITORINFO>() as u32,
-            rcMonitor: RECT {
-                left: 0,
-                top: 0,
-                right: 1920,
-                bottom: 1080,
-            },
-            rcWork: RECT {
-                left: 0,
-                top: 0,
-                right: 1920,
-                bottom: 1040,
-            },
-            dwFlags: 0,
-        };
-        let (x, y, w, h) = geometry_from_work_rect(
-            info.rcWork.left,
-            info.rcWork.top,
-            info.rcWork.right,
-            info.rcWork.bottom,
-        );
-        // Verifies that we picked rcWork (bottom=1040), not rcMonitor (bottom=1080).
-        assert_eq!((x, y, w, h), (0, 0, 1920, 1040));
     }
 }

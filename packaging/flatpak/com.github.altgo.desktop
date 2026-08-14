@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=altgo
+Comment=Voice typing with local SenseVoice transcription
+Exec=altgo
+Icon=com.github.altgo
+Terminal=false
+Type=Application
+Categories=Utility;
+StartupWMClass=altgo

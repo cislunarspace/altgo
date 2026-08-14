@@ -157,7 +157,6 @@ fn capture_activation_key_blocking() -> Result<CaptureActivationResponse, String
     Ok(CaptureActivationResponse {
         key_name,
         linux_evdev_code: Some(code),
-        windows_vk: None,
     })
 }
 

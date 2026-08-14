@@ -2,20 +2,11 @@
 //!
 //! 使用 `xinput test-xi2`（XInput2 扩展）监听按键事件。
 
-#[cfg(target_os = "linux")]
 mod linux;
-#[cfg(target_os = "windows")]
-mod windows;
 
-#[cfg(target_os = "linux")]
 pub use linux::{list_keyboard_devices, X11Listener};
-#[cfg(target_os = "windows")]
-pub use windows::{vk_from_key_name, WindowsListener};
 
-#[cfg(target_os = "linux")]
 pub type PlatformListener = X11Listener;
-#[cfg(target_os = "windows")]
-pub type PlatformListener = WindowsListener;
 
 /// 按键事件。
 #[derive(Debug)]
@@ -28,10 +19,9 @@ use crate::error::KeyListenerError;
 
 /// 持续监听激活键的 trait seam。
 ///
-/// 由平台 adapter 实现（`X11Listener`、`WindowsListener`）。
-/// pipeline 以 `Box<dyn KeyListener>` 消费，便于注入测试 fake。
+/// 由 Linux adapter 实现；pipeline 以 `Box<dyn KeyListener>` 消费，便于注入测试 fake。
 pub trait KeyListener: Send {
-    /// 开始监听，返回事件通道与后端标识（如 `"xinput"` / `"wh_keyboard_ll"`）。
+    /// 开始监听，返回事件通道与后端标识（如 `"xinput"`）。
     fn start(
         &mut self,
     ) -> Result<(tokio::sync::mpsc::UnboundedReceiver<KeyEvent>, &'static str), KeyListenerError>;
