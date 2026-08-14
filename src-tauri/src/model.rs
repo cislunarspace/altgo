@@ -112,11 +112,26 @@ pub fn model_dir(name: &str) -> PathBuf {
     models_dir().join(name)
 }
 
-/// 模型文件是否齐全。
+fn model_file_ready(file: &ModelFile, path: &Path) -> bool {
+    let Ok(metadata) = std::fs::metadata(path) else {
+        return false;
+    };
+    if !metadata.is_file() {
+        return false;
+    }
+
+    if file.filename == MAIN_MODEL_FILENAME {
+        metadata.len() >= MIN_MODEL_FILE_BYTES
+    } else {
+        metadata.len() > 0
+    }
+}
+
+/// 模型文件是否齐全且未明显损坏。
 fn model_files_ready(dir: &Path) -> bool {
     SENSE_VOICE_FILES
         .iter()
-        .all(|file| dir.join(file.filename).is_file())
+        .all(|file| model_file_ready(file, &dir.join(file.filename)))
 }
 
 /// 扫描已下载的模型，返回存在的模型名称列表。
@@ -264,9 +279,19 @@ where
 
     for file in info.files {
         let dest = dir.join(file.filename);
-        if dest.exists() {
+        if model_file_ready(file, &dest) {
             done_bytes += file.size_bytes;
             continue;
+        }
+        if dest.exists() {
+            if dest.is_file() {
+                std::fs::remove_file(&dest)?;
+            } else {
+                return Err(ModelError::DownloadFailed(format!(
+                    "模型资源路径不是文件: {}",
+                    dest.display()
+                )));
+            }
         }
 
         let tmp_path = dir.join(format!("{}.tmp", file.filename));
@@ -423,10 +448,38 @@ mod tests {
     }
 
     #[test]
-    fn test_resolve_model_dir_ready_dir() {
+    fn test_resolve_model_dir_rejects_small_model() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join(MAIN_MODEL_FILENAME), b"model").unwrap();
-        std::fs::write(dir.path().join("tokens.txt"), b"tok").unwrap();
+        std::fs::write(dir.path().join(TOKENS_FILENAME), b"tok").unwrap();
+        assert!(resolve_model_dir(dir.path().to_str().unwrap()).is_none());
+    }
+
+    #[test]
+    fn test_resolve_model_dir_rejects_empty_tokens() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join(MAIN_MODEL_FILENAME),
+            vec![0; MIN_MODEL_FILE_BYTES as usize],
+        )
+        .unwrap();
+        std::fs::write(dir.path().join(TOKENS_FILENAME), b"").unwrap();
+        assert!(resolve_model_dir(dir.path().to_str().unwrap()).is_none());
+    }
+
+    fn write_ready_model(dir: &Path) {
+        std::fs::write(
+            dir.join(MAIN_MODEL_FILENAME),
+            vec![0; MIN_MODEL_FILE_BYTES as usize],
+        )
+        .unwrap();
+        std::fs::write(dir.join(TOKENS_FILENAME), b"tok").unwrap();
+    }
+
+    #[test]
+    fn test_resolve_model_dir_ready_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        write_ready_model(dir.path());
         let resolved = resolve_model_dir(dir.path().to_str().unwrap()).unwrap();
         assert_eq!(resolved, dir.path());
     }
@@ -434,8 +487,7 @@ mod tests {
     #[test]
     fn test_resolve_model_dir_onnx_file_path() {
         let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join(MAIN_MODEL_FILENAME), b"model").unwrap();
-        std::fs::write(dir.path().join("tokens.txt"), b"tok").unwrap();
+        write_ready_model(dir.path());
         let onnx = dir.path().join(MAIN_MODEL_FILENAME);
         let resolved = resolve_model_dir(onnx.to_str().unwrap()).unwrap();
         assert_eq!(resolved, dir.path());
@@ -540,6 +592,41 @@ mod tests {
     fn total_bytes_of(name: &str) -> u64 {
         let info = MODELS.iter().find(|m| m.name == name).unwrap();
         info.files.iter().map(|f| f.size_bytes).sum()
+    }
+
+    #[tokio::test]
+    async fn test_download_replaces_incomplete_existing_model() {
+        let mut server = mockito::Server::new_async().await;
+        let model_payload = vec![0u8; MIN_MODEL_FILE_BYTES as usize + 1];
+        let model_mock = server
+            .mock("GET", "/model.int8.onnx")
+            .with_status(200)
+            .with_body(&model_payload)
+            .create_async()
+            .await;
+
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let dest_dir = tmp_dir.path().join("sense-voice");
+        std::fs::create_dir_all(&dest_dir).unwrap();
+        std::fs::write(dest_dir.join(MAIN_MODEL_FILENAME), b"incomplete").unwrap();
+        std::fs::write(dest_dir.join(TOKENS_FILENAME), b"tok").unwrap();
+
+        download_with_progress_to(
+            "sense-voice",
+            vec![server.url()],
+            tmp_dir.path().to_path_buf(),
+            |_d, _t| {},
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            std::fs::metadata(dest_dir.join(MAIN_MODEL_FILENAME))
+                .unwrap()
+                .len(),
+            model_payload.len() as u64
+        );
+        model_mock.assert_async().await;
     }
 
     #[tokio::test]
@@ -649,8 +736,12 @@ mod tests {
         let tmp_dir = tempfile::tempdir().unwrap();
         let dest_dir = tmp_dir.path().join("sense-voice");
         std::fs::create_dir_all(&dest_dir).unwrap();
-        std::fs::write(dest_dir.join(MAIN_MODEL_FILENAME), b"already here").unwrap();
-        std::fs::write(dest_dir.join("tokens.txt"), b"tok").unwrap();
+        std::fs::write(
+            dest_dir.join(MAIN_MODEL_FILENAME),
+            vec![0; MIN_MODEL_FILE_BYTES as usize],
+        )
+        .unwrap();
+        std::fs::write(dest_dir.join(TOKENS_FILENAME), b"tok").unwrap();
 
         // 全部文件已存在：即使下载源不可达也应直接成功
         let result = download_with_progress_to(
@@ -663,8 +754,10 @@ mod tests {
 
         assert_eq!(result.unwrap(), dest_dir);
         assert_eq!(
-            std::fs::read_to_string(dest_dir.join(MAIN_MODEL_FILENAME)).unwrap(),
-            "already here"
+            std::fs::metadata(dest_dir.join(MAIN_MODEL_FILENAME))
+                .unwrap()
+                .len(),
+            MIN_MODEL_FILE_BYTES
         );
     }
 }
