@@ -82,6 +82,52 @@ pub fn evdev_code_to_keysym_name(code: u16) -> String {
         54 => "Shift_R".to_string(),
         55 => "KP_Multiply".to_string(),
         56 => "Alt_L".to_string(),
+        57 => "space".to_string(),
+        58 => "Caps_Lock".to_string(),
+        59 => "F1".to_string(),
+        60 => "F2".to_string(),
+        61 => "F3".to_string(),
+        62 => "F4".to_string(),
+        63 => "F5".to_string(),
+        64 => "F6".to_string(),
+        65 => "F7".to_string(),
+        66 => "F8".to_string(),
+        67 => "F9".to_string(),
+        68 => "F10".to_string(),
+        69 => "Num_Lock".to_string(),
+        70 => "Scroll_Lock".to_string(),
+        87 => "F11".to_string(),
+        88 => "F12".to_string(),
+        96 => "KP_Enter".to_string(),
+        97 => "Control_R".to_string(),
+        98 => "KP_Divide".to_string(),
+        99 => "Print".to_string(),
+        100 => "ISO_Level3_Shift".to_string(),
+        102 => "Home".to_string(),
+        103 => "Up".to_string(),
+        104 => "Prior".to_string(),
+        105 => "Left".to_string(),
+        106 => "Right".to_string(),
+        107 => "End".to_string(),
+        108 => "Down".to_string(),
+        109 => "Next".to_string(),
+        110 => "Insert".to_string(),
+        111 => "Delete".to_string(),
+        113 => "Mute".to_string(),
+        114 => "VolumeDown".to_string(),
+        115 => "VolumeUp".to_string(),
+        125 => "Super_L".to_string(),
+        126 => "Super_R".to_string(),
         _ => format!("evdev_{code}"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn evdev_code_to_keysym_name_maps_right_alt() {
+        assert_eq!(evdev_code_to_keysym_name(100), "ISO_Level3_Shift");
     }
 }
