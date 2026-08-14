@@ -160,7 +160,7 @@ export default function Home(): JSX.Element {
                 <div className={styles.stepNum}>1</div>
                 <h3>安装并设置</h3>
                 <p>
-                  下载 deb / rpm / Flatpak 安装包，在设置中下载 SenseVoice 模型。
+                  下载 deb / rpm 安装包，在设置中下载 SenseVoice 模型。
                 </p>
               </div>
               <ArrowRight className={styles.stepArrow} size={24} />

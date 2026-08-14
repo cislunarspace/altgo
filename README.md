@@ -36,20 +36,18 @@ sudo usermod -aG input "$USER"
 
 然后：
 
-1. 从 [Releases](https://github.com/cislunarspace/altgo/releases) 下载对应安装包：`.deb`、`.rpm` 或 `.flatpak`。
+1. 从 [Releases](https://github.com/cislunarspace/altgo/releases) 下载对应安装包：`.deb` 或 `.rpm`。
 2. 安装下载的包，例如：
 
    ```bash
    sudo apt install ./altgo_*.deb
    # 或
    sudo dnf install ./altgo-*.rpm
-   # 或
-   flatpak install --user ./altgo-*.flatpak
    ```
 
 3. 重新登录后启动 altgo，在设置页完成转写配置。
 
-`.deb` 会声明桌面、音频、剪贴板、通知和 `evtest` 等依赖；`.rpm` 会声明主要桌面和音频依赖，若使用 Wayland，请确认系统已安装 `evtest` 且当前用户能读取 `/dev/input/event*`。
+`.deb` 和 `.rpm` 会声明桌面、音频、剪贴板、通知和 `evtest` 等依赖；若使用 Wayland，请确认系统已安装 `evtest` 且当前用户能读取 `/dev/input/event*`。
 
 ## 快速开始
 

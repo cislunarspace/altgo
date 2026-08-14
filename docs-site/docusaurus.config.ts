@@ -106,7 +106,7 @@ const config: Config = {
     prism: {
       theme: prismThemes.github,
       darkTheme: prismThemes.dracula,
-      additionalLanguages: ['toml', 'bash', 'powershell'],
+      additionalLanguages: ['toml', 'bash'],
     },
     docs: {
       sidebar: {

@@ -28,7 +28,7 @@ fi
   else
     echo "本版本在仓库 [CHANGELOG.md](https://github.com/${GITHUB_REPOSITORY}/blob/master/CHANGELOG.md) 中暂无独立小节。"
     echo
-    echo "安装请下载本页 **Assets** 中的 \`.deb\` / \`.rpm\` / \`.flatpak\`，并核对 \`checksums.txt\`。"
+    echo "安装请下载本页 **Assets** 中的 \`.deb\` / \`.rpm\`，并核对 \`checksums.txt\`。"
   fi
 
   prev_tag="$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || true)"

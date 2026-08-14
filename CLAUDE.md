@@ -146,7 +146,7 @@ cd frontend && npm install
 
 - 单元测试位于每个源文件的 `#[cfg(test)]` 模块内。
 - `config.rs`、`audio.rs`、`model.rs` 和 `history.rs` 有全面的测试。
-- `transcriber.rs` 和 `polisher.rs` 使用 `mockito` 进行 HTTP 级别的模拟。
+- `polisher.rs` 使用 `mockito` 进行 HTTP 级别的模拟；本地 SenseVoice 的模型存在性与加载失败由 `sherpa.rs` 单元测试覆盖。
 - 平台特定模块只有少量测试（仅构造/冒烟测试）。
 - CI 在 Linux `amd64` 与 `arm64` 两个 job 上运行，都会跑 `cargo test --lib`；release 发版前由独立 `test` job 再跑一遍测试。
 - 完整测试套件画像与维护提示见 `docs/testing.md`。

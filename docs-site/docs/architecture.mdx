@@ -35,15 +35,12 @@ src-tauri/src/
 ├── polisher.rs        # LLM 文本润色
 ├── pipeline.rs        # 音频处理核心（转写 + 润色）
 ├── key_listener/      # 按键监听
-│   ├── mod.rs         # 公共 trait + 去抖逻辑 + PlatformListener
 │   ├── mod.rs         # 公共 trait + PlatformListener
 │   └── linux.rs       # xinput test-xi2（X11）
 ├── recorder/          # 音频录制
 │   ├── mod.rs         # 公共 trait + PlatformRecorder
-│   ├── mod.rs         # 公共 trait + PlatformRecorder
 │   └── linux.rs       # parecord（PulseAudio）
 └── output/            # 剪贴板 + 通知
-    ├── mod.rs         # 公共 trait + PlatformOutput
     ├── mod.rs         # 公共 trait + PlatformOutput
     └── linux.rs       # xclip / xsel / wl-copy
 ```
@@ -94,6 +91,7 @@ src-tauri/src/
 ## 测试策略
 
 - `config.rs` / `audio.rs` / `history.rs` — 全面的单元测试
-- `transcriber.rs` / `polisher.rs` — 使用 `mockito` 进行 HTTP 级别 mock
+- `sherpa.rs` — SenseVoice 模型存在性与加载失败路径
+- `polisher.rs` — 使用 `mockito` 模拟 OpenAI/Anthropic 润色 API
 - 平台模块 — 仅构造/冒烟测试
 - CI 在 Linux `amd64` 与 `arm64` 上运行：`fmt`、`clippy`、`build --release`、`test`
