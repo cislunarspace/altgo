@@ -66,10 +66,8 @@ pub async fn handle_stop_record(
         }
     });
 
-    let transcribe_result = transcriber
-        .transcribe(&wav_data, Arc::clone(&progress_cb))
-        .await;
-    drop(progress_cb);
+    let transcribe_result = transcriber.transcribe(&wav_data, progress_cb).await;
+    forwarder.abort();
     let _ = forwarder.await;
     let result = match transcribe_result {
         Ok(r) => r,
@@ -387,6 +385,72 @@ mod tests {
     // ---------------------------------------------------------------------------
     // handle_stop_record 成功与失败分支测试
     // ---------------------------------------------------------------------------
+
+    struct RetainingProgressTranscriber {
+        progress: std::sync::Mutex<Option<Arc<dyn Fn(f32) + Send + Sync>>>,
+    }
+
+    impl RetainingProgressTranscriber {
+        fn new() -> Self {
+            Self {
+                progress: std::sync::Mutex::new(None),
+            }
+        }
+    }
+
+    impl crate::transcriber::Transcriber for RetainingProgressTranscriber {
+        fn transcribe<'life0, 'life1>(
+            &'life0 self,
+            _audio: &'life1 [u8],
+            on_progress: Arc<dyn Fn(f32) + Send + Sync>,
+        ) -> std::pin::Pin<
+            Box<
+                dyn std::future::Future<
+                        Output = Result<crate::transcriber::TranscribeResult, TranscriberError>,
+                    > + Send
+                    + 'life0,
+            >,
+        >
+        where
+            'life1: 'life0,
+        {
+            *self.progress.lock().unwrap() = Some(on_progress);
+            Box::pin(async {
+                Ok(crate::transcriber::TranscribeResult {
+                    text: String::new(),
+                    language: "zh".to_string(),
+                })
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn handle_stop_record_does_not_wait_for_retained_progress_callback() {
+        let wav = make_test_wav();
+        let mut recorder = super::super::test_doubles::FakeRecorder::new(wav);
+        let transcriber = RetainingProgressTranscriber::new();
+        let formatter = failing_formatter();
+        let sink = super::super::test_doubles::MockSink::new();
+        let sink_arc: Arc<dyn PipelineSink> = Arc::new(sink.clone());
+
+        recorder.start_recording().unwrap();
+
+        tokio::time::timeout(
+            Duration::from_millis(200),
+            handle_stop_record(
+                &mut recorder,
+                &transcriber,
+                &formatter,
+                PolishLevel::None,
+                sink_arc,
+            ),
+        )
+        .await
+        .expect("transcription result must not wait for a retained progress callback");
+
+        assert!(transcriber.progress.lock().unwrap().is_some());
+        assert_eq!(sink.results().len(), 1);
+    }
 
     #[tokio::test]
     async fn handle_stop_record_success_chain_falls_back_to_raw_on_polish_failure() {
