@@ -38,7 +38,7 @@ altgo 是基于 Tauri 的桌面语音转文字工具：Rust 后端承载整条�
 +-------------------+  +---------------------------+
 | 转写/润色后端      |  |      平台适配层            |
 | transcriber       |  | key_listener              |
-| whisper_server    |  | recorder                  |
+| sherpa            |  | recorder                  |
 | polisher          |  | key_capture               |
 | prompt_store      |  | output                    |
 | model             |  +---------------------------+
@@ -57,7 +57,7 @@ altgo 是基于 Tauri 的桌面语音转文字工具：Rust 后端承载整条�
 - 装配层 `lib.rs` 唯一负责把 Tauri-managed state 注入流水线。
 - `voice_pipeline` 是组合根（composition root），内部再向下组合 `state_machine` / `handlers` / `dispatcher` / `sink`。
 - `handlers` 调用 `transcriber` / `polisher` / `recorder`。
-- `transcriber` 调用 `whisper_server` 与 `resource`。
+- `transcriber` 调用 `resource`；`sherpa`（内嵌 sherpa-onnx）是本地引擎实现。
 - `polisher` 调用 `prompt_store`。
 - `model` / `config` / `error` / `resource` 是底层叶子。
 
@@ -69,7 +69,7 @@ lib.rs
         +-- state_machine  (纯同步叶子)
         +-- handlers
         |     +-- transcriber
-        |     |     +-- whisper_server
+        |     |     +-- sherpa
         |     |     +-- resource
         |     +-- polisher
         |     |     +-- prompt_store
@@ -131,17 +131,9 @@ lib.rs
 - 转写失败、润色失败都是**可恢复降级**。
 - 剪贴板失败、历史追加失败只 `tracing::warn!`，不中断结果返回（`handlers.rs:184-199`）。
 
-### 转写回退是一张网
+### 本地引擎：内嵌常驻
 
-`engine = "local"` 时走 `ResidentWhisper`：管道启动时一次性拉起 `whisper-server`，模型常驻内存，之后每句话只发一次本地 HTTP 请求。`whisper_server.rs:165-192` 保证任何失败都回退到一次性 `LocalWhisper`：
-
-- 二进制缺失
-- 端口冲突
-- 就绪超时（`READY_TIMEOUT = 120s`）
-- 运行期崩溃
-- 本地 HTTP 推理失败
-
-`ResidentWhisper::new()` 永不返回错误；`transcribe()` 永远有兜底。**没有独立的“常驻 vs 一次性”开关**——这是 local 引擎内建的双层策略。
+`engine = "local"` 走 `SherpaTranscriber`（`sherpa.rs`）：sherpa-onnx 编译进主程序，模型在管道启动时加载一次并常驻内存，之后每句话直接推理（`accept_waveform` → `decode`），没有进程启动与冷载成本。推理是 CPU 密集同步操作，经 `spawn_blocking` 放入阻塞线程池。模型文件缺失或加载失败在构造期报错（`ModelLoadFailed`）。
 
 ### 润色 prompt 三级回退
 

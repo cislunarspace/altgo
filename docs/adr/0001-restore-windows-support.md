@@ -41,14 +41,12 @@ altgo 最初是同时支持 Linux 与 Windows 的跨平台应用。2026 年 4 �
 
 ### 二进制依赖
 
-- `whisper-cli.exe` 经 `packaging/scripts/download-deps-windows.ps1` 下载
-- 版本经 `packaging/scripts/versions.sh` 统一
+- 无：转写引擎 sherpa-onnx 内嵌（模型由应用内下载）
 
 ### CI/CD
 
 - PR/push：Linux（fmt + clippy + `cargo test --lib`）+ windows-check（fmt + clippy + `cargo test --lib -- --skip tauri_sink`；tauri_sink 测试因 tao 主线程限制无法运行，精确跳过）
 - Tag push（release）：Linux（deb / rpm / flatpak）+ Windows MSI
-- 另有 whisper-prebuild workflow：预编译 whisper 产物到独立 release（PR #106/#107）
 
 ### 测试策略
 

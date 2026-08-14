@@ -20,9 +20,9 @@ Rust 测试按模块分布：
 | model | 14 | 下载、列表、删除 |
 | polisher | 12 | OpenAI 与 Anthropic 协议、重试 |
 | state_machine | 11 | 全行为 |
-| whisper_server | 10 | 启动、崩溃回退、probe |
+| sherpa | 3 | 模型/词表缺失报错、语言归一化 |
 | tauri_sink | 10 | 脱 Wry 后真实运行 |
-| transcriber | 9 | whisper/api/mimo |
+| transcriber | 9 | api/mimo |
 | history | 9 | 全行为 |
 | config_store | 9 | 补丁、校验、持久化 |
 | cmd | 9 | copy_text、download_model 事件等 |
@@ -63,7 +63,7 @@ vitest + jsdom + Testing Library。
 
 此前记录的大、中、小缺口已全部补齐，包括：
 
-- 重大缺口：model 下载（成功、HTTP 失败、小于 10MB 损坏检测、3 次重试、双 base 回退、URL 覆盖）、MimoAsr JSON/base64/解析、Anthropic 协议头与响应、polisher 重试耗尽与瞬时失败恢复、whisper_server 运行期崩溃回退与 probe_ready、cmd.rs 核心命令。
+- 重大缺口：model 下载（成功、HTTP 失败、小于 10MB 损坏检测、3 次重试、双 base 回退、URL 覆盖）、MimoAsr JSON/base64/解析、Anthropic 协议头与响应、polisher 重试耗尽与瞬时失败恢复、cmd.rs 核心命令。
 - 中缺口：handle_stop_record 成功链路、dispatch_history_polish、PipelineContext 端到端、config_store 非原子污染、mimo 引擎空 key 校验。
 - 小缺口：WAV 解码异常分支、DSP 升采样/NaN/极小输入、state_machine 连发边界、overlay 失败路径、config 权限位。
 

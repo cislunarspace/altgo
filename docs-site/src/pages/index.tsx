@@ -87,7 +87,7 @@ export default function Home(): JSX.Element {
           <p className={styles.heroTagline}>
             基于 Tauri + React + Rust 的语音转文字应用。
             <br />
-            按住 Alt 说话，松开后在本地用 whisper.cpp 转写，可接入 LLM 润色。
+            按住 Alt 说话，松开后在本地用 SenseVoice 转写，可接入 LLM 润色。
           </p>
           <div className={styles.buttons}>
             <Link

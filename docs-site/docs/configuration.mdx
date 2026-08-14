@@ -13,14 +13,13 @@ altgo 使用 TOML 格式的配置文件，所有字段都有默认值，只需�
 
 ## 转写引擎配置
 
-### 本地 whisper.cpp（推荐，无需 API 密钥）
+### 本地 SenseVoice（推荐，无需 API 密钥）
 
 ```toml
 [transcriber]
 engine = "local"
-model = "~/models/ggml-base.bin"
-whisper_path = ""
-language = "zh"
+model = "sense-voice"   # 设置页下载后自动填入；也可填模型目录路径
+language = "zh"          # 空字符串 = 自动检测（中/英/日/韩/粤）
 ```
 
 ### 云端 Whisper API

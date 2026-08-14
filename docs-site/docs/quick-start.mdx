@@ -7,7 +7,7 @@ title: 快速开始
 
 本软件支持 **Linux**（Ubuntu 20.04+）和 **Windows**。Linux 目前仅在 **Ubuntu 20.04** 上做过测试与部署验证；其他发行版可能可用但未保证。Windows 通过 MSI 安装包提供。
 
-**官方预编译包**（deb / rpm / Flatpak）会把 **whisper-cli** 与程序一并打包，安装后**开箱即用**，无需再为转写单独安装二进制。
+转写引擎内嵌 sherpa-onnx（SenseVoice），无需单独安装任何二进制。
 
 ## Linux：安装前必做（input 组）
 
@@ -52,13 +52,12 @@ sudo usermod -aG input "$USER"
 git clone https://github.com/cislunarspace/altgo.git
 cd altgo
 cd frontend && npm install && cd ..
-make deps-linux
 make build
 ```
 
 若需快速改前端 UI，可临时使用 `cargo tauri dev`；完整链路仍以 `make build` 为准。
 
-**Windows**：用 `.\build.ps1` 或 `build.cmd` 替代 `make build`（自动下载 whisper-cli 后 `cargo tauri build --bundles msi`）。需已安装 Rust（MSVC 工具链）、Node.js、PowerShell 7+。
+**Windows**：用 `cargo tauri build --bundles msi` 构建（与 Linux 相同，无需额外依赖）。需已安装 Rust（MSVC 工具链）、Node.js。
 
 ## 高级：仅当你要手改配置文件时
 

@@ -17,8 +17,7 @@
 
 - 长按右 Alt 录音，松开后自动转写
 - 双击右 Alt 进入连续录音，再次单击停止
-- 本地 `whisper.cpp` 转写，模型可在设置页下载和管理
-- 可选常驻 `whisper-server`，模型只加载一次；不可用时自动回退到 `whisper-cli`
+- 本地 SenseVoice 转写（内嵌 sherpa-onnx），模型只加载一次、响应快，可在设置页下载和管理
 - 支持 OpenAI 兼容的 Whisper API 和小米 MiMo ASR 云端转写
 - 支持 OpenAI 兼容 API 与 Anthropic Messages API 的 LLM 润色
 - 结果写入剪贴板，并在悬浮窗展示，可再次复制
@@ -51,7 +50,7 @@ sudo usermod -aG input "$USER"
 
 3. 重新登录后启动 altgo，在设置页完成转写配置。
 
-官方 Linux 安装包会捆绑 `whisper-cli`。`.deb` 会声明桌面、音频、剪贴板、通知和 `evtest` 等依赖；`.rpm` 会声明主要桌面和音频依赖，若使用 Wayland，请确认系统已安装 `evtest` 且当前用户能读取 `/dev/input/event*`。
+`.deb` 会声明桌面、音频、剪贴板、通知和 `evtest` 等依赖；`.rpm` 会声明主要桌面和音频依赖，若使用 Wayland，请确认系统已安装 `evtest` 且当前用户能读取 `/dev/input/event*`。
 
 ### Windows
 
@@ -108,7 +107,7 @@ Windows: %APPDATA%/altgo/altgo.toml
 ```toml
 [transcriber]
 engine = "local"
-model = ""              # 在设置页下载模型后选择，或填写 GGML 模型路径
+model = ""              # 在设置页下载模型后选择（"sense-voice"），或填写模型目录路径
 language = "zh"
 ```
 
@@ -172,7 +171,7 @@ RUST_LOG=altgo=debug altgo
 ### 能录音但没有转写结果
 
 - 先确认录音结束后悬浮窗是否进入“处理中”。
-- 本地模式确认已下载模型，并且 `whisper-cli` 可用。
+- 本地模式确认已在设置页下载模型（SenseVoice）。
 - API 模式确认 API Key、服务地址和模型名正确。
 - MiMo 模式确认使用了完整地址 `https://api.xiaomimimo.com/v1`。
 - 检查日志中的 `transcription failed`、模型路径和 API 返回错误。
@@ -197,11 +196,10 @@ RUST_LOG=altgo=debug altgo
 git clone https://github.com/cislunarspace/altgo.git
 cd altgo
 cd frontend && npm install && cd ..
-make deps-linux
 make build
 ```
 
-`make build` 会准备前端依赖和 `whisper.cpp` 相关二进制，然后执行 Tauri 生产构建。只想快速运行开发版时，可以使用：
+`make build` 会准备前端依赖并执行 Tauri 生产构建。只想快速运行开发版时，可以使用：
 
 ```bash
 cd frontend && npm install && cd ..
@@ -255,7 +253,7 @@ docs/                 面向维护者的设计与计划归档
 | `state_machine` | 长按、短按、双击和连续录音状态管理 |
 | `key_listener` | Linux / Windows 全局按键监听 |
 | `recorder` | Linux PulseAudio 与 Windows WASAPI 音频采集 |
-| `transcriber` | 本地 whisper.cpp、Whisper API、MiMo ASR |
+| `transcriber` | 本地 SenseVoice（sherpa-onnx）、Whisper API、MiMo ASR |
 | `polisher` | OpenAI 兼容或 Anthropic 协议润色 |
 | `voice_pipeline` | 编排录音、转写、润色和输出事件 |
 | `history` | 本地历史记录读写 |

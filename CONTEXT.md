@@ -20,7 +20,7 @@
 与某提供商预设关联的推荐模型列表。每条含模型 ID、显示名、描述、上下文窗口与输入模态（文本/音频/图像）。用户可从目录中挑选，无需手动输入模型名。
 
 **提供商分类（Provider Category）**
-API 提供商的分类：`official`（OpenAI、Anthropic）、`cn_official`（DeepSeek、Kimi、智谱）、`mimo`（小米）、`aggregator`（SiliconFlow、OpenRouter）、`custom`（本地 whisper）。决定预设选择器 UI 中的显示顺序与分组。
+API 提供商的分类：`official`（OpenAI、Anthropic）、`cn_official`（DeepSeek、Kimi、智谱）、`mimo`（小米）、`aggregator`（SiliconFlow、OpenRouter）、`custom`（本地 SenseVoice）。决定预设选择器 UI 中的显示顺序与分组。
 
 **管道状态（Pipeline Status）**
 语音管道任意时刻的生命周期阶段：`Idle`、`Recording`、`Processing`、`Done`、`Stopped`。在 Rust 后端以 `PipelineStatus` 枚举表示，跨 IPC 边界序列化为小写字符串给前端。
@@ -45,7 +45,7 @@ API 提供商的分类：`official`（OpenAI、Anthropic）、`cn_official`（De
 包装历史 JSON 文件，暴露具名操作：`list`、`count`、`append`、`delete`、`clear`、`get`、`update_text`。调用方从不接触文件路径或模块私有辅助函数。位于 `history.rs`。每个实例克隆便宜（只含一个 `PathBuf`）。
 
 **历史条目（HistoryEntry）**
-单条转写记录：`id`、`createdAtMs`、`rawText`（whisper 输出）、`text`（润色后，或与原文相同）。永不存音频。
+单条转写记录：`id`、`createdAtMs`、`rawText`（转写原文）、`text`（润色后，或与原文相同）。永不存音频。
 
 ## 输出
 
