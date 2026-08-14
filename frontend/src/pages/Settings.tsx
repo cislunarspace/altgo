@@ -20,12 +20,7 @@ import {
 } from "lucide-react";
 import { useTheme, type ThemePref } from "../ThemeContext";
 import { ProviderPresetSelector } from "../components/ProviderPresetSelector";
-import {
-  polisherPresets,
-  transcriberPresets,
-  type ProviderPreset,
-  type ModelCatalogEntry,
-} from "../config/modelPresets";
+import { polisherPresets, type ProviderPreset, type ModelCatalogEntry } from "../config/modelPresets";
 
 const KEY_PRESETS: { value: string; labelKey: string }[] = [
   { value: "Alt_R", labelKey: "settings.key_preset_right_alt" },
@@ -60,7 +55,7 @@ export default function Settings() {
     t,
     setLang,
     onAfterSave: (saved) => {
-      modelMgr.refreshResolved(saved.model, saved.engine);
+      modelMgr.refreshResolved(saved.model);
       modelMgr.refreshModels();
     },
   });
@@ -83,12 +78,12 @@ export default function Settings() {
 
   useEffect(() => {
     if (!config) return;
-    refreshResolved(config.model, config.engine);
-  }, [config?.model, config?.engine, refreshResolved]);
+    refreshResolved(config.model);
+  }, [config?.model, refreshResolved]);
 
   const applyLocalModel = async (name: string) => {
     if (!config) return;
-    await saveWith({ ...config, engine: "local", model: name });
+    await saveWith({ ...config, model: name });
   };
 
   const downloadAndUse = async (name: string) => {
@@ -107,55 +102,31 @@ export default function Settings() {
     return <div className="loading-container">{t("settings.loading")}</div>;
   }
 
-  const localReady =
-    config.engine === "local" && resolvedPath != null && resolvedPath !== "";
-  const localBlocked =
-    config.engine === "local" &&
-    config.model.trim() !== "" &&
-    resolvedPath === null;
+  const localReady = resolvedPath != null && resolvedPath !== "";
+  const localBlocked = config.model.trim() !== "" && resolvedPath === null;
 
   return (
     <div className="settings-page settings-page--v2">
       <div
         className={`settings-readiness ${
-          config.engine === "api" || config.engine === "mimo"
-            ? "settings-readiness--neutral"
-            : localReady
-              ? "settings-readiness--ok"
-              : "settings-readiness--warn"
+          localReady ? "settings-readiness--ok" : "settings-readiness--warn"
         }`}
       >
         <div className="settings-readiness-icon">
-          {config.engine === "api" || config.engine === "mimo" ? (
-            <Sparkles size={18} />
-          ) : localReady ? (
-            <CheckCircle2 size={18} />
-          ) : (
-            <AlertCircle size={18} />
-          )}
+          {localReady ? <CheckCircle2 size={18} /> : <AlertCircle size={18} />}
         </div>
         <div className="settings-readiness-text">
           <strong className="settings-readiness-title">
-            {config.engine === "api"
-              ? t("settings.readiness_api")
-              : config.engine === "mimo"
-                ? t("settings.readiness_mimo")
-                : localReady
-                  ? t("settings.readiness_local_ok")
-                  : t("settings.readiness_local_need")}
+            {localReady
+              ? t("settings.readiness_local_ok")
+              : t("settings.readiness_local_need")}
           </strong>
           <p className="settings-readiness-desc">
-            {config.engine === "api"
-              ? t("settings.readiness_api_desc")
-              : config.engine === "mimo"
-                ? t("settings.readiness_mimo_desc")
-                : localBlocked
-                  ? t("settings.readiness_path_missing")
-                  : t("settings.readiness_local_desc")}
+            {localBlocked
+              ? t("settings.readiness_path_missing")
+              : t("settings.readiness_local_desc")}
           </p>
-          {config.engine === "local" && resolvedPath && (
-            <code className="settings-readiness-path">{resolvedPath}</code>
-          )}
+          {resolvedPath && <code className="settings-readiness-path">{resolvedPath}</code>}
         </div>
       </div>
 
@@ -167,37 +138,7 @@ export default function Settings() {
           </h3>
           <p className="settings-section-lead">{t("settings.transcription_lead")}</p>
 
-          <div className="settings-engine-switch">
-            <button
-              type="button"
-              className={`settings-engine-btn ${config.engine === "local" ? "is-active" : ""}`}
-              onClick={() => update("engine", "local")}
-            >
-              {t("settings.engine_local")}
-            </button>
-            <button
-              type="button"
-              className={`settings-engine-btn ${config.engine === "api" ? "is-active" : ""}`}
-              onClick={() => update("engine", "api")}
-            >
-              {t("settings.engine_api")}
-            </button>
-            <button
-              type="button"
-              className={`settings-engine-btn ${config.engine === "mimo" ? "is-active" : ""}`}
-              onClick={() => {
-                update("engine", "mimo");
-                if (!config.apiBaseUrl || config.apiBaseUrl.includes("openai.com")) {
-                  update("apiBaseUrl", "https://api.xiaomimimo.com/v1");
-                }
-              }}
-            >
-              {t("settings.engine_mimo")}
-            </button>
-          </div>
-
-          {config.engine === "local" ? (
-            <>
+          <>
               <div className="settings-field">
                 <span className="settings-field-label-text">{t("settings.language")}</span>
                 <div className="settings-field-control settings-field-control--narrow">
@@ -301,99 +242,6 @@ export default function Settings() {
                 </div>
               )}
             </>
-          ) : config.engine === "api" ? (
-            <>
-              <ProviderPresetSelector
-                presets={transcriberPresets.filter((p) => p.apiFormat !== "mimo_asr")}
-                modelType="transcriber"
-                currentApiBaseUrl={config.apiBaseUrl}
-                currentModel={config.model}
-                lang={lang}
-                t={t}
-                onSelect={(preset: ProviderPreset, model?: ModelCatalogEntry) => {
-                  update("apiBaseUrl", preset.apiBaseUrl);
-                  update("model", model?.model || preset.defaultModel);
-                }}
-              />
-              <div className="settings-field">
-                <span className="settings-field-label-text">{t("settings.api_url")}</span>
-                <div className="settings-field-control">
-                  <input
-                    type="text"
-                    className="settings-input"
-                    value={config.apiBaseUrl}
-                    onChange={(e) => update("apiBaseUrl", e.target.value)}
-                    placeholder="https://api.openai.com"
-                  />
-                </div>
-              </div>
-              <div className="settings-field">
-                <span className="settings-field-label-text">{t("settings.api_key")}</span>
-                <div className="settings-field-control">
-                  <input
-                    type="password"
-                    className="settings-input"
-                    value={config.transcriberApiKey}
-                    onChange={(e) => update("transcriberApiKey", e.target.value)}
-                    placeholder={config.hasTranscriberApiKey ? "sk-***" : "sk-..."}
-                  />
-                </div>
-              </div>
-              <div className="settings-field">
-                <span className="settings-field-label-text">{t("settings.model")}</span>
-                <div className="settings-field-control">
-                  <input
-                    type="text"
-                    className="settings-input"
-                    value={config.model}
-                    onChange={(e) => update("model", e.target.value)}
-                    placeholder="whisper-1"
-                  />
-                </div>
-              </div>
-              <div className="settings-field">
-                <span className="settings-field-label-text">{t("settings.language")}</span>
-                <div className="settings-field-control settings-field-control--narrow">
-                  <input
-                    type="text"
-                    className="settings-input"
-                    value={config.language}
-                    onChange={(e) => update("language", e.target.value)}
-                    placeholder="zh"
-                  />
-                </div>
-              </div>
-            </>
-          ) : config.engine === "mimo" ? (
-            <>
-              <div className="settings-field">
-                <span className="settings-field-label-text">{t("settings.api_key")}</span>
-                <div className="settings-field-control">
-                  <input
-                    type="password"
-                    className="settings-input"
-                    value={config.transcriberApiKey}
-                    onChange={(e) => update("transcriberApiKey", e.target.value)}
-                    placeholder={config.hasTranscriberApiKey ? "tp-***" : "tp-..."}
-                  />
-                </div>
-              </div>
-              <div className="settings-field">
-                <span className="settings-field-label-text">{t("settings.language")}</span>
-                <div className="settings-field-control settings-field-control--narrow">
-                  <select
-                    className="settings-input"
-                    value={config.language}
-                    onChange={(e) => update("language", e.target.value)}
-                  >
-                    <option value="auto">auto (自动检测)</option>
-                    <option value="zh">zh (中文)</option>
-                    <option value="en">en (英文)</option>
-                  </select>
-                </div>
-              </div>
-            </>
-          ) : null}
         </section>
 
         <section className="settings-section">
@@ -416,7 +264,6 @@ export default function Settings() {
                           ...prev,
                           keyName: e.target.value,
                           linuxEvdevCode: null,
-                          windowsVk: null,
                         }
                       : prev,
                   );
@@ -437,7 +284,7 @@ export default function Settings() {
               )}
             </div>
           </div>
-          {!isPresetKeyName(config.keyName) && config.linuxEvdevCode == null && config.windowsVk == null && (
+          {!isPresetKeyName(config.keyName) && config.linuxEvdevCode == null && (
             <div className="settings-field">
               <span className="settings-field-label-text">{t("settings.key_custom_value")}</span>
               <div className="settings-field-control">
@@ -452,7 +299,6 @@ export default function Settings() {
                             ...prev,
                             keyName: e.target.value,
                             linuxEvdevCode: null,
-                            windowsVk: null,
                           }
                         : prev,
                     )

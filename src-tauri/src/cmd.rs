@@ -42,14 +42,11 @@ pub struct ConfigResponse {
     pub key_name: String,
     pub linux_evdev_code: Option<u16>,
     pub language: String,
-    pub engine: String,
     pub model: String,
-    pub api_base_url: String,
     pub polish_level: String,
     pub polish_model: String,
     pub polish_api_base_url: String,
     pub gui_language: String,
-    pub has_transcriber_api_key: bool,
     pub has_polisher_api_key: bool,
 }
 
@@ -58,14 +55,11 @@ fn build_config_response(cfg: &crate::config::Config) -> ConfigResponse {
         key_name: cfg.key_listener.key_name.clone(),
         linux_evdev_code: cfg.key_listener.linux_evdev_code,
         language: cfg.transcriber.language.clone(),
-        engine: cfg.transcriber.engine.clone(),
         model: cfg.transcriber.model.clone(),
-        api_base_url: cfg.transcriber.api_base_url.clone(),
         polish_level: cfg.polisher.level.clone(),
         polish_model: cfg.polisher.model.clone(),
         polish_api_base_url: cfg.polisher.api_base_url.clone(),
         gui_language: cfg.gui.language.clone(),
-        has_transcriber_api_key: !cfg.transcriber.api_key.trim().is_empty(),
         has_polisher_api_key: !cfg.polisher.api_key.trim().is_empty(),
     }
 }
@@ -468,8 +462,8 @@ mod tests {
         let temp_dir = tempfile::tempdir().unwrap();
         let path = temp_dir.path().join("altgo.toml");
         let mut cfg = Config::default();
-        cfg.transcriber.engine = "api".to_string();
-        cfg.transcriber.api_key = String::new();
+        cfg.polisher.level = "medium".to_string();
+        cfg.polisher.api_key = String::new();
         cfg.save(&path).unwrap();
 
         let store = ConfigStore::load(path);
@@ -486,7 +480,7 @@ mod tests {
         let err = result.unwrap_err();
         assert!(
             err.contains("api_key") || err.contains("API"),
-            "expected API key validation error, got: {err}"
+            "expected polisher API key validation error, got: {err}"
         );
     }
 
@@ -496,8 +490,7 @@ mod tests {
         cfg.key_listener.key_name = "space".to_string();
         cfg.key_listener.linux_evdev_code = Some(56);
         cfg.transcriber.language = "en".to_string();
-        cfg.transcriber.engine = "api".to_string();
-        cfg.transcriber.api_key = "trans-key".to_string();
+        cfg.transcriber.model = "sense-voice".to_string();
         cfg.polisher.level = "light".to_string();
         cfg.polisher.api_key = "polish-key".to_string();
 
@@ -505,8 +498,7 @@ mod tests {
         assert_eq!(resp.key_name, "space");
         assert_eq!(resp.linux_evdev_code, Some(56));
         assert_eq!(resp.language, "en");
-        assert_eq!(resp.engine, "api");
-        assert!(resp.has_transcriber_api_key);
+        assert_eq!(resp.model, "sense-voice");
         assert!(resp.has_polisher_api_key);
         assert_eq!(resp.polish_level, "light");
     }

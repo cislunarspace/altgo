@@ -27,66 +27,27 @@ impl PipelineBuilder {
         ))
     }
 
-    /// Build transcriber from config.
+    /// Build the local transcription engine from config.
     ///
-    /// Returns error if model not found (local engine) or API initialization fails.
+    /// Returns error if the configured local model is missing or fails to load.
     pub fn build_transcriber(&self) -> Result<Box<dyn Transcriber>, PipelineError> {
         let cfg = &self.cfg.transcriber;
 
-        let transcriber: Box<dyn Transcriber> = match cfg.engine.as_str() {
-            "local" => {
-                let model_dir = match crate::model::resolve_model_dir(&cfg.model) {
-                    Some(d) => d,
-                    None => {
-                        return Err(PipelineError::Fatal(FatalError::ModelNotFound {
-                            model: cfg.model.clone(),
-                            searched: vec![dirs::config_dir()
-                                .unwrap_or_default()
-                                .join("altgo/models")],
-                        }));
-                    }
-                };
-                Box::new(
-                    crate::sherpa::SherpaTranscriber::new(
-                        model_dir,
-                        cfg.language.clone(),
-                        cfg.threads,
-                    )
-                    .map_err(PipelineError::fatal_transcriber)?,
-                )
-            }
-            "mimo" => {
-                let base_url =
-                    if cfg.api_base_url.is_empty() || cfg.api_base_url.contains("openai.com") {
-                        "https://api.xiaomimimo.com/v1".to_string()
-                    } else {
-                        cfg.api_base_url.clone()
-                    };
-                let api = crate::transcriber::MimoAsr::new(
-                    cfg.api_key.clone(),
-                    base_url,
-                    cfg.language.clone(),
-                    cfg.timeout,
-                )
-                .map_err(PipelineError::fatal_transcriber)?;
-                Box::new(api)
-            }
-            _ => {
-                let api = crate::transcriber::WhisperApi::new(
-                    cfg.api_key.clone(),
-                    cfg.api_base_url.clone(),
-                    cfg.model.clone(),
-                    cfg.language.clone(),
-                    cfg.temperature,
-                    cfg.prompt.clone(),
-                    cfg.timeout,
-                )
-                .map_err(PipelineError::fatal_transcriber)?;
-                Box::new(api)
+        let model_dir = match crate::model::resolve_model_dir(&cfg.model) {
+            Some(d) => d,
+            None => {
+                return Err(PipelineError::Fatal(FatalError::ModelNotFound {
+                    model: cfg.model.clone(),
+                    searched: vec![dirs::config_dir().unwrap_or_default().join("altgo/models")],
+                }));
             }
         };
 
-        Ok(transcriber)
+        let transcriber =
+            crate::sherpa::SherpaTranscriber::new(model_dir, cfg.language.clone(), cfg.threads)
+                .map_err(PipelineError::fatal_transcriber)?;
+
+        Ok(Box::new(transcriber))
     }
 
     /// Build polisher from config.
@@ -164,7 +125,6 @@ mod tests {
         use crate::error::{FatalError, PipelineError};
 
         let mut cfg = test_config();
-        cfg.transcriber.engine = "local".to_string();
         cfg.transcriber.model = "nonexistent-model".to_string();
 
         let builder = PipelineBuilder::new(Arc::new(cfg));

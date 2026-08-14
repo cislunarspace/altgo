@@ -6,7 +6,6 @@
 # 若要用左侧 Alt，改为：key_name = "Alt_L"
 # 以下为可选，通常由设置页「按下以设置」自动写入：
 # linux_evdev_code = 100   # Linux Wayland/evtest 使用的 evdev 键码（十进制）
-# windows_vk = 165         # Windows 虚拟键码（十进制，如 165 = 0xA5 右 Alt）
 key_name = "Alt_R"
 long_press_threshold_ms = 200       # 长按/短按区分阈值（毫秒）
 double_click_interval_ms = 300      # 双击判定间隔（毫秒）
@@ -16,19 +15,12 @@ min_press_duration_ms = 100         # 最短按下时长（毫秒），过滤 IM
 sample_rate = 16000
 
 [transcriber]
-engine = "local"                     # "local"（本地 SenseVoice）、"api"（Whisper API）或 "mimo"（小米 MiMo ASR）
-api_key = ""                        # API/Mimo 模式下的 API Key
-api_base_url = ""                   # API 模式：Whisper API base URL；Mimo 模式：https://api.xiaomimimo.com/v1
-model = ""                          # API 模式：模型名（如 "whisper-1"）；本地模式："sense-voice" 或模型目录路径
-language = "zh"                     # 语言，如 "zh"（中文）、"en"（英文）；本地引擎空字符串表示自动检测
-                                     # （SenseVoice 支持中/英/日/韩/粤自动检测）
-timeout_seconds = 30
-temperature = 0.0                   # API 引擎专用：Whisper API temperature（0.0-1.0），越低越确定性
-prompt = ""                         # API 引擎专用：Whisper API 提示词，提供领域词汇以提升识别率
-threads = 0                         # 本地引擎线程数；0 = 自动取满 CPU 核数
-# 本地模式（engine="local"）使用内嵌 sherpa-onnx 的 SenseVoice 模型：
+model = "sense-voice"                  # 设置页下载后自动填入；也可填模型目录路径
+language = "zh"                        # 语言，如 "zh"（中文）、"en"（英文）；空字符串表示自动检测
+                                        # （SenseVoice 支持中/英/日/韩/粤自动检测）
+threads = 0                            # 本地引擎线程数；0 = 自动取满 CPU 核数
+# 本地转写始终使用内嵌 sherpa-onnx 的 SenseVoice 模型：
 # 模型在管道启动时载入一次内存，之后每句话直接推理，无进程启动与冷载开销。
-# Mimo 模式（engine="mimo"）使用小米 MiMo-V2.5-ASR 云端 API，响应速度快，适合实时转写。
 
 [polisher]
 protocol = "openai"                 # "openai"（OpenAI 兼容 API）或 "anthropic"（Anthropic Messages API）
@@ -42,7 +34,7 @@ temperature = 0.3                   # LLM temperature（0.0-2.0）
 system_prompt = ""                  # 自定义则完全替换内置；为空时按 [transcriber] language 生成（中文默认输出简体中文，勿繁体）
 
 [output]
-inject_at_cursor = true             # 尝试将文本注入到当前光标位置（仅 Windows）
+inject_at_cursor = true             # 尝试将文本注入到当前光标位置
 prefer_polished = true              # 注入/复制时优先使用润色后的文本
 
 [logging]

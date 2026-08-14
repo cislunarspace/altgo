@@ -22,7 +22,7 @@ export interface UseModelManagerResult {
   downloading: string | null;
   resolvedPath: string | null | undefined;
   refreshModels: () => void;
-  refreshResolved: (model: string, engine: string) => void;
+  refreshResolved: (model: string) => void;
   downloadAndUse: (name: string, onUse: (name: string) => Promise<void>) => Promise<void>;
   deleteModel: (name: string, onDeleted: (name: string) => void) => Promise<void>;
   getDownloadProgress: (name: string) => {
@@ -51,8 +51,8 @@ export function useModelManager({ t }: UseModelManagerOptions): UseModelManagerR
     invoke<ModelEntry[]>("list_models").then(setModels).catch((e) => reportError(t, e));
   }, [t]);
 
-  const refreshResolved = useCallback((model: string, engine: string) => {
-    if (engine !== "local" || !model.trim()) {
+  const refreshResolved = useCallback((model: string) => {
+    if (!model.trim()) {
       setResolvedPath(null);
       return;
     }

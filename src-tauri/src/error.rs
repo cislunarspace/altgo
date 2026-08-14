@@ -129,37 +129,19 @@ pub enum TranscriberError {
     #[error("Empty audio data")]
     EmptyAudio,
 
-    #[error("API key not configured")]
-    MissingApiKey,
-
-    #[error("API returned {status}: {body}")]
-    ApiError { status: u16, body: String },
-
     #[error("failed to load local model: {reason}")]
     ModelLoadFailed { reason: String },
 
     #[error("audio decode error: {0}")]
     WavDecodeFailed(&'static str),
-
-    #[error("HTTP client error: {0}")]
-    HttpError(String),
-
-    #[error("JSON parse error: {0}")]
-    JsonError(String),
 }
 
 impl TranscriberError {
     pub fn message(&self) -> String {
         match self {
             Self::EmptyAudio => "音频数据为空，请重新录音。".to_string(),
-            Self::MissingApiKey => "转写 API 密钥未配置。请在设置中添加 API 密钥。".to_string(),
-            Self::ApiError { status, body } => {
-                format!("转写 API 错误（HTTP {}）: {}", status, body)
-            }
             Self::ModelLoadFailed { reason } => format!("本地模型加载失败: {}", reason),
             Self::WavDecodeFailed(msg) => format!("音频解码失败: {}", msg),
-            Self::HttpError(msg) => format!("HTTP 请求失败: {}", msg),
-            Self::JsonError(msg) => format!("JSON 解析失败: {}", msg),
         }
     }
 }
@@ -359,8 +341,8 @@ mod tests {
 
     #[test]
     fn test_transcriber_error_messages() {
-        let err = TranscriberError::MissingApiKey;
-        assert!(err.message().contains("API 密钥未配置"));
+        let err = TranscriberError::EmptyAudio;
+        assert!(err.message().contains("音频数据为空"));
     }
 
     #[test]

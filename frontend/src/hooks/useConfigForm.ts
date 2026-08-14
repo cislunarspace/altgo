@@ -5,18 +5,13 @@ import { message as showMessageDialog } from "@tauri-apps/plugin-dialog";
 export interface AppConfig {
   keyName: string;
   linuxEvdevCode: number | null;
-  windowsVk: number | null;
   language: string;
-  engine: string;
   model: string;
-  apiBaseUrl: string;
   polishLevel: string;
   polishModel: string;
   polishApiBaseUrl: string;
   guiLanguage: string;
-  transcriberApiKey: string;
   polisherApiKey: string;
-  hasTranscriberApiKey: boolean;
   hasPolisherApiKey: boolean;
 }
 
@@ -24,12 +19,8 @@ export function saveRequestBody(c: AppConfig) {
   return {
     keyName: c.keyName,
     linuxEvdevCode: c.linuxEvdevCode,
-    windowsVk: c.windowsVk,
     language: c.language,
-    engine: c.engine,
     model: c.model,
-    ...(c.transcriberApiKey ? { apiKey: c.transcriberApiKey } : {}),
-    apiBaseUrl: c.apiBaseUrl,
     polishLevel: c.polishLevel,
     polishModel: c.polishModel,
     ...(c.polisherApiKey ? { polishApiKey: c.polisherApiKey } : {}),
@@ -42,10 +33,7 @@ export function normalizeConfig(c: AppConfig): AppConfig {
   return {
     ...c,
     linuxEvdevCode: c.linuxEvdevCode ?? null,
-    windowsVk: c.windowsVk ?? null,
-    transcriberApiKey: "",
     polisherApiKey: "",
-    hasTranscriberApiKey: c.hasTranscriberApiKey ?? false,
     hasPolisherApiKey: c.hasPolisherApiKey ?? false,
   };
 }
@@ -127,13 +115,11 @@ export function useConfigForm({
       const r = await invoke<{
         keyName: string;
         linuxEvdevCode?: number | null;
-        windowsVk?: number | null;
       }>("capture_activation_key");
       const next: AppConfig = {
         ...config,
         keyName: r.keyName,
         linuxEvdevCode: r.linuxEvdevCode ?? null,
-        windowsVk: r.windowsVk ?? null,
       };
       await saveWith(next);
     } catch (e) {

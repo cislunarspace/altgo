@@ -3,8 +3,7 @@
 //! 从 TOML 文件加载 altgo 配置，所有字段均通过 `serde(default)` 提供默认值，
 //! 因此部分配置文件也可以正常工作。
 //!
-//! API 密钥支持通过环境变量覆盖：
-//! - `ALTGO_TRANSCRIBER_API_KEY` — 覆盖语音识别 API 密钥
+//! 文本润色 API 密钥支持通过环境变量覆盖：
 //! - `ALTGO_POLISHER_API_KEY` — 覆盖文本润色 API 密钥
 //!
 //! 默认配置路径为 `~/.config/altgo/altgo.toml`。
@@ -71,8 +70,6 @@ pub struct KeyListenerConfig {
     pub key_name: String,
     /// Linux evtest 回退路径使用的 evdev 键码（由「按下以设置」捕获）；`None` 时沿用 Alt 预设的启发式映射
     pub linux_evdev_code: Option<u16>,
-    /// Windows low-level keyboard hook virtual-key code captured from Settings.
-    pub windows_vk: Option<i32>,
     /// 长按阈值（毫秒），超过此时间视为长按录音
     #[serde(with = "duration_ms", alias = "long_press_threshold_ms")]
     pub long_press_threshold: Duration,
@@ -89,7 +86,6 @@ impl Default for KeyListenerConfig {
         Self {
             key_name: "Alt_R".to_string(),
             linux_evdev_code: None,
-            windows_vk: None,
             long_press_threshold: Duration::from_millis(200),
             double_click_interval: Duration::from_millis(300),
             min_press_duration: Duration::from_millis(100),
@@ -111,27 +107,17 @@ impl Default for RecorderConfig {
     }
 }
 
-/// 语音识别配置。
+/// 本地语音识别配置。
+///
+/// 旧版本中的 `engine`、`api_key`、`api_base_url`、`temperature` 和 `prompt`
+/// 已从配置结构中移除；遗留 TOML 字段会被 `serde(default)` 忽略。
 #[derive(Debug, Deserialize, Clone, serde::Serialize)]
 #[serde(default)]
 pub struct TranscriberConfig {
-    /// 引擎类型：`"local"`（本地 SenseVoice/sherpa-onnx）、`"api"`（Whisper API）或 `"mimo"`（小米 MiMo ASR）
-    pub engine: String,
-    /// API 密钥（可通过 `ALTGO_TRANSCRIBER_API_KEY` 环境变量覆盖）
-    pub api_key: String,
-    /// API 基础 URL
-    pub api_base_url: String,
-    /// 模型名称（API 模式）或模型文件路径（本地模式）
+    /// 模型名称（如 "sense-voice"）或模型目录路径
     pub model: String,
-    /// 语言代码（如 `"zh"`、`"en"`；本地引擎空字符串表示自动检测）
+    /// 语言代码（如 `"zh"`、`"en"`；空字符串表示自动检测）
     pub language: String,
-    /// 请求超时时间（秒）
-    #[serde(with = "duration_secs", alias = "timeout_seconds")]
-    pub timeout: Duration,
-    /// Whisper API temperature（0.0 - 1.0），越低越确定性，默认 0
-    pub temperature: f32,
-    /// Whisper API prompt，提供上下文/词汇提示以提升识别准确率
-    pub prompt: String,
     /// 本地引擎线程数；`0` 表示按 CPU 并行度自动取满
     pub threads: u32,
 }
@@ -139,14 +125,8 @@ pub struct TranscriberConfig {
 impl Default for TranscriberConfig {
     fn default() -> Self {
         Self {
-            engine: "local".to_string(),
-            api_key: String::new(),
-            api_base_url: "https://api.openai.com".to_string(),
             model: String::new(),
             language: "zh".to_string(),
-            timeout: Duration::from_secs(30),
-            temperature: 0.0,
-            prompt: String::new(),
             threads: 0,
         }
     }
@@ -227,7 +207,7 @@ impl Default for GuiConfig {
 
 impl Config {
     /// 从指定路径加载配置文件。如果文件不存在，返回默认配置。
-    /// 环境变量 `ALTGO_TRANSCRIBER_API_KEY` 和 `ALTGO_POLISHER_API_KEY`
+    /// 环境变量 `ALTGO_POLISHER_API_KEY`
     /// 会覆盖配置文件中的对应字段。
     pub fn load(path: &Path) -> Result<Self, ConfigError> {
         Self::load_with_env(path, |name| std::env::var(name))
@@ -251,38 +231,8 @@ impl Config {
     }
 
     /// Validate the loaded configuration.
-    /// Call this after `load()` to check API keys are present when using API engines.
+    /// Call this after `load()` to check the polisher API key when polishing is enabled.
     pub fn validate(&self) -> Result<(), ConfigError> {
-        if self.transcriber.engine == "api" && self.transcriber.api_key.trim().is_empty() {
-            let config_path = Self::default_config_path();
-            return Err(ConfigError::ValidationFailed(format!(
-                "转写引擎设置为 'api'，但未配置 API 密钥。\n\
-                 \n\
-                 解决方法（任选一种）：\n\
-                 1. 设置环境变量：\n\
-                    export ALTGO_TRANSCRIBER_API_KEY=\"your-key\"\n\
-                 2. 在配置文件中填写 api_key：\n\
-                    编辑 {}，在 [transcriber] 下填写 api_key = \"your-key\"\n\
-                 3. 使用本地 SenseVoice（无需 API 密钥）：\n\
-                    将 transcriber.engine 改为 \"local\" 并在设置中下载模型",
-                config_path.display()
-            )));
-        }
-        if self.transcriber.engine == "mimo" && self.transcriber.api_key.trim().is_empty() {
-            let config_path = Self::default_config_path();
-            return Err(ConfigError::ValidationFailed(format!(
-                "转写引擎设置为 'mimo'，但未配置 API 密钥。\n\
-                 \n\
-                 解决方法（任选一种）：\n\
-                 1. 设置环境变量：\n\
-                    export ALTGO_TRANSCRIBER_API_KEY=\"your-key\"\n\
-                 2. 在配置文件中填写 api_key：\n\
-                    编辑 {}，在 [transcriber] 下填写 api_key = \"your-key\"\n\
-                 3. 使用本地 SenseVoice（无需 API 密钥）：\n\
-                    将 transcriber.engine 改为 \"local\" 并在设置中下载模型",
-                config_path.display()
-            )));
-        }
         // Only require polisher API key when polishing is actually enabled.
         if self.polisher.level != "none" && self.polisher.api_key.trim().is_empty() {
             let config_path = Self::default_config_path();
@@ -344,9 +294,6 @@ fn apply_api_key_overrides<E>(cfg: &mut Config, env_var: E)
 where
     E: Fn(&str) -> Result<String, std::env::VarError>,
 {
-    if let Ok(key) = env_var("ALTGO_TRANSCRIBER_API_KEY") {
-        cfg.transcriber.api_key = key;
-    }
     if let Ok(key) = env_var("ALTGO_POLISHER_API_KEY") {
         cfg.polisher.api_key = key;
     }
@@ -393,16 +340,6 @@ mod opt_patch_u16 {
     }
 }
 
-/// serde 辅助模块：将 `deserialize_opt_patch<i32>` 暴露为模块形式供 `deserialize_with` 使用。
-mod opt_patch_i32 {
-    pub fn deserialize<'de, D>(deserializer: D) -> Result<Option<Option<i32>>, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        super::deserialize_opt_patch::<D, i32>(deserializer)
-    }
-}
-
 /// Partial update applied to the in-memory config. All fields are optional;
 /// absent fields are left unchanged.
 #[derive(serde::Deserialize)]
@@ -415,13 +352,8 @@ pub struct ConfigPatch {
     pub linux_evdev_code: Option<Option<u16>>,
     /// `None` = field absent (no change); `Some(None)` = JSON `null` (clear);
     /// `Some(Some(v))` = set to v.
-    #[serde(default, deserialize_with = "opt_patch_i32::deserialize")]
-    pub windows_vk: Option<Option<i32>>,
     pub language: Option<String>,
-    pub engine: Option<String>,
     pub model: Option<String>,
-    pub api_key: Option<String>,
-    pub api_base_url: Option<String>,
     pub polish_level: Option<String>,
     pub polish_model: Option<String>,
     pub polish_api_key: Option<String>,
@@ -439,21 +371,11 @@ impl ConfigPatch {
             &mut cfg.key_listener.linux_evdev_code,
             self.linux_evdev_code,
         );
-        apply_nested_opt(&mut cfg.key_listener.windows_vk, self.windows_vk);
         if let Some(ref v) = self.language {
             cfg.transcriber.language = v.clone();
         }
-        if let Some(ref v) = self.engine {
-            cfg.transcriber.engine = v.clone();
-        }
         if let Some(ref v) = self.model {
             cfg.transcriber.model = v.clone();
-        }
-        if let Some(ref v) = self.api_key {
-            cfg.transcriber.api_key = v.clone();
-        }
-        if let Some(ref v) = self.api_base_url {
-            cfg.transcriber.api_base_url = v.clone();
         }
         if let Some(ref v) = self.polish_level {
             cfg.polisher.level = v.clone();
@@ -483,7 +405,6 @@ mod tests {
         let cfg = Config::default();
         assert_eq!(cfg.key_listener.key_name, "Alt_R");
         assert!(cfg.key_listener.linux_evdev_code.is_none());
-        assert!(cfg.key_listener.windows_vk.is_none());
         assert_eq!(
             cfg.key_listener.long_press_threshold,
             Duration::from_millis(200)
@@ -493,8 +414,8 @@ mod tests {
             Duration::from_millis(100)
         );
         assert_eq!(cfg.recorder.sample_rate, 16000);
-        assert_eq!(cfg.transcriber.engine, "local");
-        assert_eq!(cfg.transcriber.temperature, 0.0);
+        assert_eq!(cfg.transcriber.model, "");
+        assert_eq!(cfg.transcriber.language, "zh");
         assert_eq!(cfg.polisher.level, "none");
         assert_eq!(cfg.polisher.temperature, 0.3);
         assert!(cfg.output.prefer_polished);
@@ -521,7 +442,7 @@ key_name = "Alt_R"
 sample_rate = 48000
 
 [transcriber]
-engine = "api"
+model = "sense-voice"
 language = "en"
 
 [polisher]
@@ -536,10 +457,34 @@ prefer_polished = false
         let cfg = Config::load(&path).unwrap();
         assert_eq!(cfg.key_listener.key_name, "Alt_R");
         assert_eq!(cfg.recorder.sample_rate, 48000);
-        assert_eq!(cfg.transcriber.engine, "api");
+        assert_eq!(cfg.transcriber.model, "sense-voice");
         assert_eq!(cfg.transcriber.language, "en");
         assert_eq!(cfg.polisher.level, "heavy");
         assert!(!cfg.output.prefer_polished);
+    }
+
+    #[test]
+    fn test_load_ignores_legacy_cloud_transcriber_fields() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("altgo.toml");
+        std::fs::write(
+            &path,
+            r#"
+[transcriber]
+engine = "api"
+api_key = "legacy-key"
+api_base_url = "https://api.openai.com"
+temperature = 0.2
+prompt = "legacy prompt"
+model = "sense-voice"
+language = "zh"
+"#,
+        )
+        .unwrap();
+
+        let cfg = Config::load(&path).unwrap();
+        assert_eq!(cfg.transcriber.model, "sense-voice");
+        assert_eq!(cfg.transcriber.language, "zh");
     }
 
     #[test]
@@ -551,37 +496,19 @@ prefer_polished = false
     }
 
     #[test]
-    fn test_windows_vk_round_trips_through_toml() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("altgo.toml");
-        let mut cfg = Config::default();
-        cfg.key_listener.key_name = "Right Alt".to_string();
-        cfg.key_listener.windows_vk = Some(0xA5);
-
-        cfg.save(&path).unwrap();
-        let loaded = Config::load(&path).unwrap();
-
-        assert_eq!(loaded.key_listener.key_name, "Right Alt");
-        assert_eq!(loaded.key_listener.windows_vk, Some(0xA5));
-    }
-
-    #[test]
     fn test_env_override() {
         let cfg = Config::load_with_env(Path::new("/nonexistent.toml"), |name| match name {
-            "ALTGO_TRANSCRIBER_API_KEY" => Ok("test-trans-key".to_string()),
             "ALTGO_POLISHER_API_KEY" => Ok("test-polish-key".to_string()),
             _ => Err(std::env::VarError::NotPresent),
         })
         .unwrap();
 
-        assert_eq!(cfg.transcriber.api_key, "test-trans-key");
         assert_eq!(cfg.polisher.api_key, "test-polish-key");
     }
 
     #[test]
     fn test_duration_fields() {
         let cfg = Config::default();
-        assert_eq!(cfg.transcriber.timeout, Duration::from_secs(30));
         assert_eq!(cfg.polisher.timeout, Duration::from_secs(60));
         assert_eq!(
             cfg.key_listener.long_press_threshold,
@@ -605,56 +532,9 @@ prefer_polished = false
     }
 
     #[test]
-    fn test_validate_missing_api_key() {
-        let mut cfg = Config::default();
-        cfg.transcriber.engine = "api".to_string();
-        cfg.transcriber.api_key = String::new();
-        cfg.polisher.api_key = String::new();
-        assert!(cfg.validate().is_err());
-    }
-
-    #[test]
-    fn test_validate_success_with_api_key() {
-        let mut cfg = Config::default();
-        cfg.transcriber.engine = "api".to_string();
-        cfg.transcriber.api_key = "test-key".to_string();
-        cfg.polisher.api_key = "polish-key".to_string();
-        assert!(cfg.validate().is_ok());
-    }
-
-    #[test]
-    fn test_validate_mimo_missing_api_key_fails() {
-        let mut cfg = Config::default();
-        cfg.transcriber.engine = "mimo".to_string();
-        cfg.transcriber.api_key = String::new();
-        cfg.polisher.api_key = "polish-key".to_string();
-        assert!(cfg.validate().is_err());
-    }
-
-    #[test]
-    fn test_validate_mimo_with_api_key_succeeds() {
-        let mut cfg = Config::default();
-        cfg.transcriber.engine = "mimo".to_string();
-        cfg.transcriber.api_key = "test-key".to_string();
-        cfg.polisher.api_key = "polish-key".to_string();
-        assert!(cfg.validate().is_ok());
-    }
-
-    #[test]
-    fn test_validate_whitespace_api_key_fails() {
-        let mut cfg = Config::default();
-        cfg.transcriber.engine = "api".to_string();
-        cfg.transcriber.api_key = "   ".to_string();
-        cfg.polisher.api_key = "valid-key".to_string();
-        assert!(cfg.validate().is_err());
-    }
-
-    #[test]
     fn test_validate_local_mode_no_polisher_key() {
-        // Local transcriber with polishing disabled should not require API keys.
+        // Local transcription with polishing disabled should not require an API key.
         let mut cfg = Config::default();
-        cfg.transcriber.engine = "local".to_string();
-        cfg.transcriber.api_key = String::new();
         cfg.polisher.level = "none".to_string();
         cfg.polisher.api_key = String::new();
         assert!(cfg.validate().is_ok());
@@ -664,8 +544,6 @@ prefer_polished = false
     fn test_validate_polisher_requires_key_when_enabled() {
         // When polisher level != "none", API key is required.
         let mut cfg = Config::default();
-        cfg.transcriber.engine = "local".to_string();
-        cfg.transcriber.api_key = String::new();
         cfg.polisher.level = "medium".to_string();
         cfg.polisher.api_key = String::new();
         assert!(cfg.validate().is_err());
@@ -695,27 +573,6 @@ prefer_polished = false
     }
 
     #[test]
-    fn windows_vk_json_null_clears() {
-        let j = r#"{"windowsVk":null}"#;
-        let p: ConfigPatch = serde_json::from_str(j).unwrap();
-        assert_eq!(p.windows_vk, Some(None));
-    }
-
-    #[test]
-    fn windows_vk_missing_field_means_no_patch() {
-        let j = r#"{}"#;
-        let p: ConfigPatch = serde_json::from_str(j).unwrap();
-        assert!(p.windows_vk.is_none());
-    }
-
-    #[test]
-    fn windows_vk_number_sets() {
-        let j = r#"{"windowsVk":165}"#;
-        let p: ConfigPatch = serde_json::from_str(j).unwrap();
-        assert_eq!(p.windows_vk, Some(Some(165)));
-    }
-
-    #[test]
     fn patch_apply_to_config_updates_selected_fields() {
         let mut cfg = Config::default();
         let patch: ConfigPatch =
@@ -726,7 +583,7 @@ prefer_polished = false
         assert_eq!(cfg.transcriber.language, "en");
         assert_eq!(cfg.polisher.level, "heavy");
         // Unchanged fields keep defaults
-        assert_eq!(cfg.transcriber.engine, "local");
+        assert_eq!(cfg.transcriber.model, "");
     }
 
     #[test]
