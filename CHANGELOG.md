@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v2.5.8 (2026-08-14)
+
 ### Fixes
 
 - **校验 SenseVoice 模型与输入完整性**：模型目录必须同时包含 `model.int8.onnx` 与 `tokens.txt` 才会显示为可用；录音采样率必须为 16kHz，避免把其他采样率的 WAV 错误送入 SenseVoice。
