@@ -17,8 +17,10 @@ runs:
       shell: bash
       run: |
         # rust-cache 会恢复 ~/.cargo/bin；版本匹配时避免每个 job 重跑 cargo install。
-        installed_version="$(cargo tauri --version 2>/dev/null | awk 'NR == 1 { print $2; exit }')"
-        if [[ "${installed_version}" == "2.10.1" ]]; then
-          exit 0
+        if command -v cargo-tauri >/dev/null 2>&1; then
+          installed_version="$(cargo tauri --version | awk 'NR == 1 { print $2; exit }')"
+          if [[ "${installed_version}" == "2.10.1" ]]; then
+            exit 0
+          fi
         fi
         cargo install tauri-cli --version "2.10.1" --locked
