@@ -16,6 +16,9 @@ use crate::transcriber::Transcriber;
 
 use super::sink::{PipelineSink, TranscriptionResult};
 
+type ProgressEvent = (String, Option<f32>);
+type ProgressEvents = Arc<Mutex<Vec<ProgressEvent>>>;
+
 // ---------------------------------------------------------------------------
 // KeyListener fake
 // ---------------------------------------------------------------------------
@@ -241,7 +244,7 @@ pub(super) struct MockSink {
     status_changes: Arc<Mutex<Vec<PipelineStatus>>>,
     errors: Arc<Mutex<Vec<String>>>,
     results: Arc<Mutex<Vec<TranscriptionResult>>>,
-    progress: Arc<Mutex<Vec<(String, Option<f32>)>>>,
+    progress: ProgressEvents,
 }
 
 impl MockSink {
@@ -266,7 +269,7 @@ impl MockSink {
         self.results.lock().unwrap().clone()
     }
 
-    pub(super) fn progress(&self) -> Vec<(String, Option<f32>)> {
+    pub(super) fn progress(&self) -> Vec<ProgressEvent> {
         self.progress.lock().unwrap().clone()
     }
 }

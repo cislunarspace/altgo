@@ -376,8 +376,10 @@ mod tests {
     // handle_stop_record 成功与失败分支测试
     // ---------------------------------------------------------------------------
 
+    type ProgressCallback = Arc<dyn Fn(f32) + Send + Sync>;
+
     struct RetainingProgressTranscriber {
-        progress: std::sync::Mutex<Option<Arc<dyn Fn(f32) + Send + Sync>>>,
+        progress: std::sync::Mutex<Option<ProgressCallback>>,
     }
 
     impl RetainingProgressTranscriber {
