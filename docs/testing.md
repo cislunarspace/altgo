@@ -55,7 +55,7 @@ vitest + jsdom + Testing Library。
 - 前端基线：vitest 30 个全绿。
 - `tauri_sink.rs` 的 10 个测试已完成脱 Wry 改造（issue #104），现在在 Linux 真实运行。
 - CI 的 `amd64` 与 `arm64` 两个 job 均跑 `cargo test --lib`。
-- `release.yml` 已新增独立 `test` job，四个构建 job 均 `needs: [test]`，发版前必须过测试。
+- `release.yml` 有独立的双架构 `test` job；deb 与 rpm 构建均 `needs: [test]`，发版前必须通过两种架构的测试。
 - fmt/clippy 已加 `--all-targets`，测试代码也会接受 clippy 编译检查。
 
 ## 覆盖缺口
