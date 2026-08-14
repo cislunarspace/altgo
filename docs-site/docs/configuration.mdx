@@ -13,31 +13,15 @@ altgo 使用 TOML 格式的配置文件，所有字段都有默认值，只需�
 
 ## 转写引擎配置
 
-### 本地 SenseVoice（推荐，无需 API 密钥）
+### 本地 SenseVoice（唯一转写方式，无需 API 密钥）
 
 ```toml
 [transcriber]
-engine = "local"
 model = "sense-voice"   # 设置页下载后自动填入；也可填模型目录路径
 language = "zh"          # 空字符串 = 自动检测（中/英/日/韩/粤）
+threads = 0              # 0 = 自动取满 CPU 核数
 ```
 
-### 云端 Whisper API
-
-```toml
-[transcriber]
-engine = "api"
-api_key = "sk-your-key"
-api_base_url = "https://api.openai.com"
-model = "whisper-1"
-language = "zh"
-```
-
-也可以通过环境变量设置密钥：
-
-```bash
-export ALTGO_TRANSCRIBER_API_KEY="sk-your-key"
-```
 
 ## 润色配置
 
@@ -113,7 +97,7 @@ export ALTGO_POLISHER_API_KEY="sk-your-key"
 
 ## 按键配置
 
-与 [`configs/altgo.toml`](https://github.com/cislunarspace/altgo/blob/master/configs/altgo.toml) 一致；默认触发键为 **右 Alt**。若在设置页使用「按下以设置」，Linux 会写入 `linux_evdev_code` 字段，Windows 会写入 `windows_vk` 字段（虚拟键码）。
+与 [`configs/altgo.toml`](https://github.com/cislunarspace/altgo/blob/master/configs/altgo.toml) 一致；默认触发键为 **右 Alt**。若在设置页使用「按下以设置」，Linux 会写入 `linux_evdev_code` 字段。
 
 ```toml
 [key_listener]
@@ -138,7 +122,7 @@ channels = 1                       # 声道数
 prefer_polished = true             # 剪贴板/注入优先使用润色成功且非空的文本
 ```
 
-**Linux** 需要可用的 **`xclip`、`xsel` 或 `wl-copy`** 之一，否则自动写剪贴板会失败（仍可用悬浮窗或历史页复制）。**Windows** 通过 `arboard` crate 直接调用 Win32 剪贴板 API，无需额外工具。
+**Linux** 需要可用的 **`xclip`、`xsel` 或 `wl-copy`** 之一，否则自动写剪贴板会失败（仍可用悬浮窗或历史页复制）。
 
 ## 日志配置
 
@@ -155,7 +139,7 @@ RUST_LOG=altgo=debug altgo
 ```
 
 ```powershell
-# Windows
+# Linux
 $env:RUST_LOG="altgo=debug"; altgo
 ```
 
@@ -165,6 +149,5 @@ $env:RUST_LOG="altgo=debug"; altgo
 
 | 环境变量 | 覆盖字段 |
 |---------|---------|
-| `ALTGO_TRANSCRIBER_API_KEY` | `transcriber.api_key` |
 | `ALTGO_POLISHER_API_KEY` | `polisher.api_key` |
 | `RUST_LOG` | 日志级别 |

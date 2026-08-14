@@ -22,7 +22,7 @@ Rust 测试按模块分布：
 | state_machine | 11 | 全行为 |
 | sherpa | 3 | 模型/词表缺失报错、语言归一化 |
 | tauri_sink | 10 | 脱 Wry 后真实运行 |
-| transcriber | 9 | api/mimo |
+| transcriber | 0 | trait-only，经 sherpa.rs 覆盖 |
 | history | 9 | 全行为 |
 | config_store | 9 | 补丁、校验、持久化 |
 | cmd | 9 | copy_text、download_model 事件等 |
@@ -47,15 +47,14 @@ vitest + jsdom + Testing Library。
 | 类别 | 内容 | 数量 |
 |---|---|---|
 | 真实运行（Linux `check` job） | 平台无关 + 仅 Linux 测试 | 234 |
-| 真实运行（Windows `windows-check` job） | 平台无关 + 仅 Windows 测试 | 约 240 |
-| Linux 上从不编译 | Windows 专属 4 文件测试 | 30 |
+| Linux `amd64` / `arm64` CI job | 平台无关 + Linux 测试 | 约 194 |
 
 关键事实：
 
 - Linux 基线：`cargo test --lib` 234 个全绿，无跳过、无失败、无 `#[ignore]`。
 - 前端基线：vitest 30 个全绿。
 - `tauri_sink.rs` 的 10 个测试已完成脱 Wry 改造（issue #104），现在在 Linux 真实运行。
-- CI 的 `check` 与 `windows-check` 两个 job 均跑 `cargo test --lib`。
+- CI 的 `amd64` 与 `arm64` 两个 job 均跑 `cargo test --lib`。
 - `release.yml` 已新增独立 `test` job，四个构建 job 均 `needs: [test]`，发版前必须过测试。
 - fmt/clippy 已加 `--all-targets`，测试代码也会接受 clippy 编译检查。
 
@@ -63,8 +62,8 @@ vitest + jsdom + Testing Library。
 
 此前记录的大、中、小缺口已全部补齐，包括：
 
-- 重大缺口：model 下载（成功、HTTP 失败、小于 10MB 损坏检测、3 次重试、双 base 回退、URL 覆盖）、MimoAsr JSON/base64/解析、Anthropic 协议头与响应、polisher 重试耗尽与瞬时失败恢复、cmd.rs 核心命令。
-- 中缺口：handle_stop_record 成功链路、dispatch_history_polish、PipelineContext 端到端、config_store 非原子污染、mimo 引擎空 key 校验。
+- 重大缺口：model 下载（成功、HTTP 失败、小于 10MB 损坏检测、3 次重试、双 base 回退、URL 覆盖）、Anthropic 协议头与响应、polisher 重试耗尽与瞬时失败恢复、cmd.rs 核心命令。
+- 中缺口：handle_stop_record 成功链路、dispatch_history_polish、PipelineContext 端到端、config_store 非原子污染。
 - 小缺口：WAV 解码异常分支、DSP 升采样/NaN/极小输入、state_machine 连发边界、overlay 失败路径、config 权限位。
 
 新增功能应继续遵循既有测试替身范式：FakeRecorder、FakeTranscriber、MockSink、FakeListener、RecordingOverlayWindow、mockito HTTP mock。保持可注入，就能保持可测。

@@ -39,7 +39,7 @@ title: 使用说明
 
 录音结束后，后台会依次：
 
-1. **转写** — 本地 SenseVoice 或 Whisper API
+1. **转写** — 本地 SenseVoice
 2. **润色**（若级别不是 `none`）— 通过 LLM 优化文本
 3. **输出** — **写入系统剪贴板**、弹出**悬浮窗**、可选**桌面通知**
 
@@ -71,8 +71,7 @@ cargo tauri dev
 ```
 
 完整发布链路：
-- **Linux**：以仓库根目录的 **`make build`** 为准，与 CI 一致。
-- **Windows**：`cargo tauri build --bundles msi`。
+- 以仓库根目录的 **`make build`** 为准，与 CI 一致。
 
 ## 命令行（若已安装 `altgo` 可执行文件）
 

@@ -30,7 +30,7 @@ const features = [
   {
     icon: Brain,
     title: '本地 + 云端 ASR',
-    description: 'whisper.cpp 本地转写完全断网可用，也支持 Whisper API 云端转写。',
+    description: 'SenseVoice 本地转写完全断网可用。',
   },
   {
     icon: Sparkles,
@@ -160,7 +160,7 @@ export default function Home(): JSX.Element {
                 <div className={styles.stepNum}>1</div>
                 <h3>安装并设置</h3>
                 <p>
-                  下载 deb / rpm / Flatpak / MSI 安装包，在设置中选择转写引擎与模型。
+                  下载 deb / rpm / Flatpak 安装包，在设置中下载 SenseVoice 模型。
                 </p>
               </div>
               <ArrowRight className={styles.stepArrow} size={24} />

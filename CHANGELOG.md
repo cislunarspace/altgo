@@ -4,7 +4,8 @@
 
 ### Changed
 
-- **本地转写引擎换成 SenseVoice（sherpa-onnx 内嵌）**：移除 whisper.cpp 子进程体系（`whisper-cli`/`whisper-server`、`download-deps.sh`、CUDA 打包、whisper-prebuild workflow、`whisper_path`/`beam_size` 配置）。sherpa-onnx 编译进主程序，模型在管道启动时加载一次并常驻内存，之后每句话直接推理，无进程启动与冷载开销；SenseVoice 支持中/英/日/韩/粤自动检测，CPU 实时率远高于 whisper。模型下载体系改为 SenseVoice int8（`model.int8.onnx` + `tokens.txt`，约 230MB）；旧 GGML 模型需在设置页重新下载。打包不再捆绑转写二进制，deb/rpm/flatpak/MSI 体积同步下降。
+- **移除云端转写与 Windows/macOS 支持**：删除 `WhisperApi`、`MimoAsr`、转写引擎切换、转写 API 密钥/地址配置和全部 Windows 适配器；项目现在只支持 Linux（x86_64 / aarch64），本地 SenseVoice 是唯一转写方式。旧配置中的云端转写字段会被忽略，文本润色的云端 API 配置保留。
+- **本地转写引擎换成 SenseVoice（sherpa-onnx 内嵌）**：移除 whisper.cpp 子进程体系（`whisper-cli`/`whisper-server`、`download-deps.sh`、CUDA 打包、whisper-prebuild workflow、`whisper_path`/`beam_size` 配置）。sherpa-onnx 编译进主程序，模型在管道启动时加载一次并常驻内存，之后每句话直接推理，无进程启动与冷载开销；SenseVoice 支持中/英/日/韩/粤自动检测，CPU 实时率远高于 whisper。模型下载体系改为 SenseVoice int8（`model.int8.onnx` + `tokens.txt`，约 230MB）；旧 GGML 模型需在设置页重新下载。打包不再捆绑转写二进制，deb/rpm/Flatpak 体积同步下降。
 
 ## v2.5.7 (2026-08-14)
 

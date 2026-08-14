@@ -133,7 +133,7 @@ lib.rs
 
 ### 本地引擎：内嵌常驻
 
-`engine = "local"` 走 `SherpaTranscriber`（`sherpa.rs`）：sherpa-onnx 编译进主程序，模型在管道启动时加载一次并常驻内存，之后每句话直接推理（`accept_waveform` → `decode`），没有进程启动与冷载成本。推理是 CPU 密集同步操作，经 `spawn_blocking` 放入阻塞线程池。模型文件缺失或加载失败在构造期报错（`ModelLoadFailed`）。
+转写路径固定走 `SherpaTranscriber`（`sherpa.rs`）：sherpa-onnx 编译进主程序，模型在管道启动时加载一次并常驻内存，之后每句话直接推理（`accept_waveform` → `decode`），没有进程启动与冷载成本。推理是 CPU 密集同步操作，经 `spawn_blocking` 放入阻塞线程池。模型文件缺失或加载失败在构造期报错（`ModelLoadFailed`）。
 
 ### 润色 prompt 三级回退
 
@@ -166,14 +166,14 @@ trait 边界一律返回自定义 thiserror 枚举：`RecorderError` / `OutputEr
 
 平台差异通过 **trait + `cfg` 类型别名** 隔离：
 
-| 模块 | Trait | Linux 实现 | Windows 实现 |
+| 模块 | Trait | Linux 实现 |
 |------|-------|------------|--------------|
 | `key_listener` | `KeyListener::start()` | `xinput test-xi2` / `evtest` | `WH_KEYBOARD_LL` 独立消息泵线程 |
-| `recorder` | `Recorder::start/stop/is_recording` | `parecord` 子进程 | `cpal` WASAPI + `rubato` 重采样 |
-| `output` | `Output::write_clipboard` + `clone_box` | `xclip`/`xsel`/`wl-copy` 探测一次 | `arboard`（`!Send`，走 `spawn_blocking`） |
+| `recorder` | `Recorder::start/stop/is_recording` | `parecord` 子进程 |
+| `output` | `Output::write_clipboard` + `clone_box` | `xclip`/`xsel`/`wl-copy` 探测一次 |
 | `key_capture` | 无（`cfg` 自由函数） | `evtest` 枚举 `/dev/input` 等一次按键 | 一次性 `WH_KEYBOARD_LL` 钩子消息泵 |
 
-`recorder/dsp.rs` 是平台无关层，重采样、降混、WAV 封装可在 Linux 上编译测试。
+录音输出由 Linux `parecord` 直接提供 16kHz 单声道 WAV。
 
 `Box<dyn Trait>` 用于 `PipelineContext` 字段与 builder 返回值；`Arc<dyn Trait>` 用于 Tauri 侧注入。
 
