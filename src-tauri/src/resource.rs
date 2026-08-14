@@ -1,15 +1,11 @@
-//! 运行时捆绑资源定位模块。
-//!
-//! 查找与主程序一同安装的捆绑二进制文件（whisper-cli、whisper-server）。
-//! 当这些工具未安装在系统 PATH 中时，回退到捆绑位置。
+//! 运行时资源工具模块。
 
 use std::path::PathBuf;
 
-/// whisper-server 默认线程数下限的回退值（取不到 CPU 并行度时使用）。
+/// 默认线程数下限的回退值（取不到 CPU 并行度时使用）。
 const DEFAULT_THREADS_FALLBACK: u32 = 4;
 
-/// 解析有效线程数：配置 `> 0` 时用配置值，否则用 CPU 并行度（默认 whisper 仅用 min(4,hw)，
-/// 显式给满核数能直接提速）。
+/// 解析有效线程数：配置 `> 0` 时用配置值，否则用 CPU 并行度。
 pub fn effective_threads(configured: u32) -> u32 {
     if configured > 0 {
         configured
@@ -30,36 +26,19 @@ pub fn expand_tilde(path: &str) -> PathBuf {
     PathBuf::from(path)
 }
 
-/// 查找捆绑的二进制文件。
-///
-/// 搜索逻辑：
-/// - `/usr/lib/altgo/bin/{name}`（系统安装）
-/// - 可执行文件同级目录下的 `bin/{name}`（相对路径）
-pub fn bundled_bin(name: &str) -> Option<PathBuf> {
-    let exe_dir = std::env::current_exe().ok()?.parent()?.to_path_buf();
-
-    // If installed to /usr/bin, look for /usr/lib/altgo/bin/.
-    if exe_dir.ends_with("/usr/bin") || exe_dir.ends_with("/usr/local/bin") {
-        let candidate = PathBuf::from("/usr/lib/altgo/bin").join(name);
-        if candidate.exists() {
-            return Some(candidate);
-        }
+/// 在系统 PATH 上查找命令，返回其绝对路径；找不到返回 `None`。
+pub fn which_binary(name: &str) -> Option<PathBuf> {
+    let output = std::process::Command::new("which")
+        .arg(name)
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
     }
-    // Otherwise look relative to the exe.
-    let candidate = exe_dir.join("bin").join(name);
-    if candidate.exists() {
-        return Some(candidate);
-    }
-    None
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_bundled_bin_nonexistent() {
-        // Should return None for a binary that doesn't exist.
-        assert!(bundled_bin("nonexistent_tool_xyz").is_none());
+    let path = PathBuf::from(String::from_utf8_lossy(&output.stdout).trim());
+    if path.exists() {
+        Some(path)
+    } else {
+        None
     }
 }

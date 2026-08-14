@@ -38,7 +38,7 @@ altgo 是基于 Tauri 的桌面语音转文字工具：Rust 后端承载整条�
 +-------------------+  +---------------------------+
 | 转写/润色后端      |  |      平台适配层            |
 | transcriber       |  | key_listener              |
-| whisper_server    |  | recorder                  |
+| sherpa            |  | recorder                  |
 | polisher          |  | key_capture               |
 | prompt_store      |  | output                    |
 | model             |  +---------------------------+
@@ -57,7 +57,7 @@ altgo 是基于 Tauri 的桌面语音转文字工具：Rust 后端承载整条�
 - 装配层 `lib.rs` 唯一负责把 Tauri-managed state 注入流水线。
 - `voice_pipeline` 是组合根（composition root），内部再向下组合 `state_machine` / `handlers` / `dispatcher` / `sink`。
 - `handlers` 调用 `transcriber` / `polisher` / `recorder`。
-- `transcriber` 调用 `whisper_server` 与 `resource`。
+- `transcriber` 调用 `resource`；`sherpa`（内嵌 sherpa-onnx）是本地引擎实现。
 - `polisher` 调用 `prompt_store`。
 - `model` / `config` / `error` / `resource` 是底层叶子。
 
@@ -69,7 +69,7 @@ lib.rs
         +-- state_machine  (纯同步叶子)
         +-- handlers
         |     +-- transcriber
-        |     |     +-- whisper_server
+        |     |     +-- sherpa
         |     |     +-- resource
         |     +-- polisher
         |     |     +-- prompt_store
@@ -131,17 +131,9 @@ lib.rs
 - 转写失败、润色失败都是**可恢复降级**。
 - 剪贴板失败、历史追加失败只 `tracing::warn!`，不中断结果返回（`handlers.rs:184-199`）。
 
-### 转写回退是一张网
+### 本地引擎：内嵌常驻
 
-`engine = "local"` 时走 `ResidentWhisper`：管道启动时一次性拉起 `whisper-server`，模型常驻内存，之后每句话只发一次本地 HTTP 请求。`whisper_server.rs:165-192` 保证任何失败都回退到一次性 `LocalWhisper`：
-
-- 二进制缺失
-- 端口冲突
-- 就绪超时（`READY_TIMEOUT = 120s`）
-- 运行期崩溃
-- 本地 HTTP 推理失败
-
-`ResidentWhisper::new()` 永不返回错误；`transcribe()` 永远有兜底。**没有独立的“常驻 vs 一次性”开关**——这是 local 引擎内建的双层策略。
+转写路径固定走 `SherpaTranscriber`（`sherpa.rs`）：sherpa-onnx 编译进主程序，模型在管道启动时加载一次并常驻内存，之后每句话直接推理（`accept_waveform` → `decode`），没有进程启动与冷载成本。推理是 CPU 密集同步操作，经 `spawn_blocking` 放入阻塞线程池。模型文件缺失或加载失败在构造期报错（`ModelLoadFailed`）。
 
 ### 润色 prompt 三级回退
 
@@ -163,7 +155,7 @@ lib.rs
 
 | 分类 | 用途 | 典型枚举 |
 |------|------|----------|
-| `FatalError` | 构建期，管道不启动 | `ModelNotFound` / `ApiAuthFailed` / `KeyListenerFailed` / `TranscriberInitFailed` / `PolisherInitFailed` / `RecorderInitFailed` |
+| `FatalError` | 构建期，管道不启动 | `ModelNotFound` / `KeyListenerFailed` / `TranscriberInitFailed` / `PolisherInitFailed` / `RecorderInitFailed` |
 | `RecoverableError` | 运行时，降级继续 | `TranscriptionFailed` / `PolishingFailed` / `RecordingFailed` / `EmptyTranscription` |
 
 trait 边界一律返回自定义 thiserror 枚举：`RecorderError` / `OutputError` / `KeyListenerError` / `ModelError` / `ConfigError` / `HistoryError`。`recorder/mod.rs:45-52` 专门测试防止回退到 `anyhow`。
@@ -172,16 +164,16 @@ trait 边界一律返回自定义 thiserror 枚举：`RecorderError` / `OutputEr
 
 ## 五、平台抽象
 
-平台差异通过 **trait + `cfg` 类型别名** 隔离：
+平台服务通过 trait 隔离：
 
-| 模块 | Trait | Linux 实现 | Windows 实现 |
-|------|-------|------------|--------------|
-| `key_listener` | `KeyListener::start()` | `xinput test-xi2` / `evtest` | `WH_KEYBOARD_LL` 独立消息泵线程 |
-| `recorder` | `Recorder::start/stop/is_recording` | `parecord` 子进程 | `cpal` WASAPI + `rubato` 重采样 |
-| `output` | `Output::write_clipboard` + `clone_box` | `xclip`/`xsel`/`wl-copy` 探测一次 | `arboard`（`!Send`，走 `spawn_blocking`） |
-| `key_capture` | 无（`cfg` 自由函数） | `evtest` 枚举 `/dev/input` 等一次按键 | 一次性 `WH_KEYBOARD_LL` 钩子消息泵 |
+| 模块 | Trait | Linux 实现 |
+|------|-------|------------|
+| `key_listener` | `KeyListener::start()` | `xinput test-xi2` / `evtest` |
+| `recorder` | `Recorder::start/stop/is_recording` | `parecord` 子进程 |
+| `output` | `Output::write_clipboard` + `clone_box` | `xclip`/`xsel`/`wl-copy` 探测一次 |
+| `key_capture` | 无（自由函数） | `evtest` 枚举 `/dev/input` 等一次按键 |
 
-`recorder/dsp.rs` 是平台无关层，重采样、降混、WAV 封装可在 Linux 上编译测试。
+录音输出由 Linux `parecord` 直接提供 16kHz 单声道 WAV。
 
 `Box<dyn Trait>` 用于 `PipelineContext` 字段与 builder 返回值；`Arc<dyn Trait>` 用于 Tauri 侧注入。
 
@@ -223,6 +215,6 @@ trait 边界一律返回自定义 thiserror 枚举：`RecorderError` / `OutputEr
 ### 架构资产
 
 - `voice_pipeline` 完全不 import Tauri，全靠 trait seam。
-- 状态机、`overlay/manager`、`recorder/dsp` 都是干净的叶子/纯逻辑，测试覆盖好。
+- 状态机、`overlay/manager` 都是干净的叶子/纯逻辑，测试覆盖好。
 - 回退链设计成熟：转写网、`prompt` 三级、模型下载官方→镜像。
 - 错误分类致命/可恢复边界清晰。

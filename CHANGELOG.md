@@ -2,9 +2,33 @@
 
 ## Unreleased
 
+## v2.5.8 (2026-08-14)
+
+### Fixes
+
+- **校验 SenseVoice 模型与输入完整性**：模型目录必须同时包含 `model.int8.onnx` 与 `tokens.txt` 才会显示为可用；录音采样率必须为 16kHz，避免把其他采样率的 WAV 错误送入 SenseVoice。
+- **恢复 Linux 按键捕获映射**：设置页捕获右 Alt 等常用 evdev 键码后，会保存为可供 X11 监听路径解析的 keysym。
+- **修正双架构 AUR 元数据**：生成的 PKGBUILD 同时支持 `x86_64` 与 `aarch64`，使用 SenseVoice 描述及各自的 deb 下载地址和校验和。
+- **停止发布 Flatpak**：当前 Linux 运行依赖宿主级 `parecord`、`xinput`/`evtest` 和剪贴板工具，Flatpak 沙盒无法在不额外捆绑整套系统工具的情况下可靠完成核心流程；发布产物收敛为 deb、rpm 和双架构 AUR PKGBUILD。
+
+### Changed
+
+- **移除云端转写与 Windows/macOS 支持**：删除 `WhisperApi`、`MimoAsr`、转写引擎切换、转写 API 密钥/地址配置和全部 Windows 适配器；项目现在只支持 Linux（x86_64 / aarch64），本地 SenseVoice 是唯一转写方式。旧配置中的云端转写字段会被忽略，文本润色的云端 API 配置保留。
+- **本地转写引擎换成 SenseVoice（sherpa-onnx 内嵌）**：移除 whisper.cpp 子进程体系（`whisper-cli`/`whisper-server`、`download-deps.sh`、CUDA 打包、whisper-prebuild workflow、`whisper_path`/`beam_size` 配置）。sherpa-onnx 编译进主程序，模型在管道启动时加载一次并常驻内存，之后每句话直接推理，无进程启动与冷载开销；SenseVoice 支持中/英/日/韩/粤自动检测，CPU 实时率远高于 whisper。模型下载体系改为 SenseVoice int8（`model.int8.onnx` + `tokens.txt`，约 230MB）；旧 GGML 模型需在设置页重新下载。打包不再捆绑转写二进制，deb/rpm 体积同步下降。
+
+## v2.5.7 (2026-08-14)
+
+### Fixes
+
+- **修复转写完成后进度转发卡住**：进度回调此前经 mpsc 通道转发给 sink，并在转写完成后等待转发任务退出；若转写器保留回调、返回结果后才调用（如本地 whisper 完成时），转发任务永不退出，`handle_stop_record` 挂起、流水线停在转写中。改为回调直接同步转发到 sink，不再等待转发任务（#116）。
+
 ### Changed
 
 - **CI/release 提速与加固**：固定 runner 版本（ci.yml 与 release 的 Windows job 用 `windows-2025`，release 的 release job 与 docs 部署用 `ubuntu-24.04`）；release 的 flatpak 构建补上 `Swatinem/rust-cache` 增量编译；各 workflow 的 `actions/checkout` 加 `persist-credentials: false`（构建/上传走注入的 GITHUB_TOKEN，不依赖 checkout 持久凭据）。参考 e2m2e#405。
+
+### Docs
+
+- **README 重组**：重组「使用」与「开发」文档结构，修复失效链接（#116）。
 
 ## v2.5.6 (2026-08-12)
 

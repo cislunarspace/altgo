@@ -11,9 +11,19 @@ env:
 
 jobs:
   check:
-    name: Check
+    name: Check (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runs-on: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+          - arch: arm64
+            runs-on: ubuntu-22.04-arm
+            target: aarch64-unknown-linux-gnu
     # 与 release Linux 构建一致，避免仅在较新 runner 上能通过、deb 在 22.04 上 GLIBC 不兼容
-    runs-on: ubuntu-22.04
+    runs-on: ${{ matrix.runs-on }}
 
     steps:
       - uses: actions/checkout@v4
@@ -22,10 +32,10 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: x86_64-unknown-linux-gnu
+          targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
         with:
-          key: x86_64-unknown-linux-gnu
+          key: ${{ matrix.target }}
 
       # 系统依赖、打包用二进制、Tauri CLI 统一在 composite action 里装
       - uses: ./.github/actions/setup-linux-build
@@ -58,30 +68,3 @@ jobs:
         run: cargo tauri build --bundles deb
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  # Windows 只验证不打包：fmt + clippy + test，拦住 cfg(windows) 代码的问题
-  # （Linux job 编译不到那段）。
-  windows-check:
-    name: Windows Check
-    runs-on: windows-2025
-
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: x86_64-pc-windows-msvc
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: x86_64-pc-windows-msvc
-
-      - name: Check formatting
-        run: cargo fmt --manifest-path=src-tauri/Cargo.toml --all -- --check
-
-      - name: Clippy
-        run: cargo clippy --manifest-path=src-tauri/Cargo.toml --all-targets -- -D warnings
-
-      - name: Run tests
-        run: cargo test --manifest-path=src-tauri/Cargo.toml --lib

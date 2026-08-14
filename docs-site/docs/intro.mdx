@@ -4,9 +4,9 @@ slug: /
 
 # altgo 文档
 
-欢迎使用 **altgo**：基于 **Tauri + React + Rust** 的语音转文字桌面应用，支持 **Linux** 和 **Windows**（主要在 **Ubuntu 20.04** 上验证）。
+欢迎使用 **altgo**：基于 **Tauri + React + Rust** 的 Linux 语音转文字桌面应用，支持 **x86_64** 与 **aarch64** 架构（主要在 **Ubuntu 22.04** 上验证）。
 
-按住触发键（默认**右 Alt**）说话，松开后在本地用 **whisper.cpp** 转写，并可选用 **OpenAI 兼容 API** 做 LLM 润色。转写成功后会**尝试写入系统剪贴板**，同时用**悬浮窗**展示结果，方便核对或在剪贴板失败时手动复制。
+按住触发键（默认**右 Alt**）说话，松开后在本地用 **SenseVoice**（内嵌 sherpa-onnx）转写，并可选用 **OpenAI 兼容 API** 做 LLM 润色。转写成功后会**尝试写入系统剪贴板**，同时用**悬浮窗**展示结果，方便核对或在剪贴板失败时手动复制。
 
 ---
 
@@ -35,7 +35,7 @@ slug: /
 <a href="/docs/architecture" className="doc-nav-card">
   <div className="doc-nav-icon">🏗️</div>
   <h3>架构设计</h3>
-  <p>模块结构、状态机与跨平台策略</p>
+  <p>模块结构、状态机与 Linux 平台策略</p>
 </a>
 
 <a href="/docs/faq" className="doc-nav-card">
@@ -60,8 +60,7 @@ slug: /
 |------|------|
 | **长按即录** | 按住右 Alt 说话，松开自动转写 |
 | **连续模式** | 双击进入连续录音，适合长篇发言 |
-| **本地 ASR** | whisper.cpp 离线转写，无需 API 密钥 |
-| **云端 ASR** | 支持 OpenAI Whisper API |
+| **本地 ASR** | SenseVoice 离线转写，无需 API 密钥 |
 | **LLM 润色** | 四档强度，支持多种 Provider |
 | **剪贴板 + 悬浮窗** | 自动写入剪贴板，悬浮窗可二次复制 |
-| **平台支持** | Linux（X11 / Wayland）、Windows（MSI） |
+| **平台支持** | Linux（X11 / Wayland，x86_64 / aarch64） |

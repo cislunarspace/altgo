@@ -12,8 +12,18 @@ permissions:
 
 jobs:
   test:
-    name: Run tests
-    runs-on: ubuntu-22.04
+    name: Run tests (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runs-on: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+          - arch: arm64
+            runs-on: ubuntu-22.04-arm
+            target: aarch64-unknown-linux-gnu
+    runs-on: ${{ matrix.runs-on }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -21,10 +31,10 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: x86_64-unknown-linux-gnu
+          targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
         with:
-          key: x86_64-unknown-linux-gnu-release-test
+          key: ${{ matrix.target }}-release-test
 
       - uses: ./.github/actions/setup-linux-build
 
@@ -32,9 +42,19 @@ jobs:
         run: cargo test --manifest-path=src-tauri/Cargo.toml --lib
 
   build-deb:
-    name: Build DEB
+    name: Build DEB (${{ matrix.arch }})
     needs: [test]
-    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runs-on: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+          - arch: arm64
+            runs-on: ubuntu-22.04-arm
+            target: aarch64-unknown-linux-gnu
+    runs-on: ${{ matrix.runs-on }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -42,14 +62,12 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: x86_64-unknown-linux-gnu
+          targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
         with:
-          key: x86_64-unknown-linux-gnu-release-cuda
+          key: ${{ matrix.target }}-release-deb
 
       - uses: ./.github/actions/setup-linux-build
-        with:
-          enable-cuda: 'true'
 
       - uses: actions/setup-node@v4
         with:
@@ -67,14 +85,24 @@ jobs:
       - name: Upload deb artifact
         uses: actions/upload-artifact@v4
         with:
-          name: altgo-amd64-deb
+          name: altgo-${{ matrix.arch }}-deb
           path: src-tauri/target/release/bundle/deb/*.deb
           if-no-files-found: error
 
   build-rpm:
-    name: Build RPM
+    name: Build RPM (${{ matrix.arch }})
     needs: [test]
-    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runs-on: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+          - arch: arm64
+            runs-on: ubuntu-22.04-arm
+            target: aarch64-unknown-linux-gnu
+    runs-on: ${{ matrix.runs-on }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -82,14 +110,13 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: x86_64-unknown-linux-gnu
+          targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
         with:
-          key: x86_64-unknown-linux-gnu-release-rpm-cuda
+          key: ${{ matrix.target }}-release-rpm
 
       - uses: ./.github/actions/setup-linux-build
         with:
-          enable-cuda: 'true'
           extra-packages: 'rpm'
 
       - uses: actions/setup-node@v4
@@ -108,110 +135,8 @@ jobs:
       - name: Upload rpm artifact
         uses: actions/upload-artifact@v4
         with:
-          name: altgo-x86_64-rpm
+          name: altgo-${{ matrix.arch }}-rpm
           path: src-tauri/target/release/bundle/rpm/*.rpm
-          if-no-files-found: error
-
-  build-flatpak:
-    name: Build Flatpak
-    needs: [test]
-    runs-on: ubuntu-22.04
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-
-      - uses: dtolnay/rust-toolchain@stable
-
-      # cargo 编译缓存：flatpak 构建同样全量编译 Rust，增量省时。
-      - uses: Swatinem/rust-cache@v2
-
-      - uses: ./.github/actions/setup-linux-build
-        with:
-          enable-cuda: 'true'
-          extra-packages: 'flatpak flatpak-builder'
-
-      - name: Install Flatpak SDK
-        run: |
-          sudo flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
-          sudo flatpak install -y --noninteractive flathub org.freedesktop.Platform//23.08 org.freedesktop.Sdk//23.08
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-
-      - name: Install frontend dependencies
-        run: npm ci
-        working-directory: frontend
-
-      - name: Build Tauri binary (no bundle)
-        run: cargo tauri build --no-bundle
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Stage sources for Flatpak
-        run: |
-          mkdir -p flatpak-src/bin flatpak-src/icons
-          cp src-tauri/target/release/altgo flatpak-src/altgo
-          cp -r target/deps/bin/* flatpak-src/bin/
-          cp src-tauri/icons/128x128.png flatpak-src/icons/
-          cp packaging/appimage/altgo.desktop.in flatpak-src/com.github.altgo.desktop
-
-      - name: Build Flatpak bundle
-        run: |
-          sudo flatpak-builder --force-clean --repo=repo build-dir packaging/flatpak/com.github.altgo.yml
-          sudo flatpak build-bundle repo altgo-x86_64.flatpak com.github.altgo
-
-      - name: Upload flatpak artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: altgo-x86_64-flatpak
-          path: altgo-x86_64.flatpak
-          if-no-files-found: error
-
-  build-windows:
-    name: Build MSI (Windows)
-    needs: [test]
-    runs-on: windows-2025
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-
-      - name: Install Rust (stable, MSVC)
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: x86_64-pc-windows-msvc
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: x86_64-pc-windows-msvc-release-msi
-
-      - name: Install Tauri CLI
-        run: cargo install tauri-cli --version "^2" --locked
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-
-      - name: Install frontend dependencies
-        run: npm ci
-        working-directory: frontend
-
-      - name: Download bundled binaries
-        shell: pwsh
-        run: pwsh packaging/scripts/download-deps-windows.ps1
-
-      - name: Build MSI
-        run: cargo tauri build --bundles msi
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Upload MSI artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: altgo-x86_64-msi
-          path: src-tauri/target/release/bundle/msi/*.msi
           if-no-files-found: error
 
   gen-aur:
@@ -223,11 +148,12 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Download deb artifact
+      - name: Download deb artifacts
         uses: actions/download-artifact@v4
         with:
-          name: altgo-amd64-deb
+          pattern: altgo-*-deb
           path: deb-artifact
+          merge-multiple: true
 
       - name: Get version from tag
         id: version
@@ -237,15 +163,17 @@ jobs:
         run: |
           echo "Contents of deb-artifact:"
           find deb-artifact -type f || true
-          DEB_FILE=$(find deb-artifact -name '*.deb' -type f | head -1)
-          echo "Found deb: ${DEB_FILE}"
-          if [[ -z "${DEB_FILE}" ]]; then
-            echo "ERROR: No deb file found in deb-artifact/"
+          AMD64_DEB=$(find deb-artifact -name '*_amd64.deb' -type f | head -1)
+          ARM64_DEB=$(find deb-artifact -name '*_arm64.deb' -type f | head -1)
+          echo "Found amd64 deb: ${AMD64_DEB}"
+          echo "Found arm64 deb: ${ARM64_DEB}"
+          if [[ -z "${AMD64_DEB}" || -z "${ARM64_DEB}" ]]; then
+            echo "ERROR: both amd64 and arm64 deb artifacts are required"
             exit 1
           fi
           mkdir -p aur-output
           cd aur-output
-          bash ../packaging/aur/generate-pkgbuild.sh "${{ steps.version.outputs.value }}" "$(pwd)/../${DEB_FILE}"
+          bash ../packaging/aur/generate-pkgbuild.sh "${{ steps.version.outputs.value }}" "$(pwd)/../${AMD64_DEB}" "$(pwd)/../${ARM64_DEB}"
 
       - name: Upload AUR artifacts
         uses: actions/upload-artifact@v4
@@ -254,11 +182,12 @@ jobs:
           path: |
             aur-output/PKGBUILD
             aur-output/.SRCINFO
-          if-no-files-found: warn
+          if-no-files-found: error
+          include-hidden-files: true
 
   release:
     name: Create Release
-    needs: [build-deb, build-rpm, build-flatpak, build-windows, gen-aur]
+    needs: [build-deb, build-rpm, gen-aur]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -284,7 +213,7 @@ jobs:
       - name: Generate checksums
         run: |
           cd release-assets
-          find . -type f \( -name '*.deb' -o -name '*.rpm' -o -name '*.flatpak' -o -name '*.msi' \) -exec sha256sum {} \; > ../checksums.txt
+          find . -type f \( -name '*.deb' -o -name '*.rpm' \) -exec sha256sum {} \; > ../checksums.txt
           cd ..
           cat checksums.txt
 

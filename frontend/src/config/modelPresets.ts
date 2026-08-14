@@ -1,17 +1,14 @@
 /**
- * 模型预设配置
+ * 模型预设配置。
  *
- * 区分两种类型：
- * - polisher: 润色文本模型（LLM chat completion）
- * - transcriber: 语音识别模型（ASR / 多模态）
+ * 当前只保留文本润色供应商预设；本地转写使用 SenseVoice，无云端供应商。
  */
 
-export type ModelType = "polisher" | "transcriber";
+export type ModelType = "polisher";
 
 export type ProviderCategory =
   | "official"      // 官方（OpenAI、Anthropic）
   | "cn_official"   // 国产官方（DeepSeek、Kimi、智谱等）
-  | "mimo"          // 小米 MiMo
   | "aggregator"    // 聚合服务（OpenRouter、SiliconFlow 等）
   | "custom";       // 自定义
 
@@ -44,7 +41,7 @@ export interface ProviderPreset {
   /** 默认模型 */
   defaultModel: string;
   /** API 协议格式 */
-  apiFormat: "openai" | "anthropic" | "mimo_asr";
+  apiFormat: "openai" | "anthropic";
   /** 图标名称（用于 UI 展示） */
   icon?: string;
   /** 图标颜色 */
@@ -280,117 +277,11 @@ export const polisherPresets: ProviderPreset[] = [
   },
 ];
 
-// ─── 语音识别模型预设 ──────────────────────────────────────────────────────
-
-export const transcriberPresets: ProviderPreset[] = [
-  {
-    name: "MiMo ASR",
-    nameKey: "preset.mimo_asr",
-    websiteUrl: "https://mimo.mi.com",
-    apiKeyUrl: "https://platform.xiaomimimo.com/console/apikeys",
-    apiBaseUrl: "https://api.xiaomimimo.com/v1",
-    category: "mimo",
-    modelTypes: ["transcriber"],
-    apiFormat: "mimo_asr",
-    defaultModel: "mimo-v2.5-asr",
-    icon: "mimo",
-    iconColor: "#FF6900",
-    primePartner: true,
-    descriptionKey: "preset.mimo_asr_desc",
-    models: [
-      {
-        model: "mimo-v2.5-asr",
-        displayName: "MiMo V2.5 ASR",
-        description: "小米多模态语音识别，支持中英文自动检测、方言、噪声环境",
-        inputModalities: ["audio"],
-        recommended: true,
-      },
-    ],
-  },
-  {
-    name: "OpenAI Whisper",
-    websiteUrl: "https://platform.openai.com",
-    apiKeyUrl: "https://platform.openai.com/api-keys",
-    apiBaseUrl: "https://api.openai.com/v1",
-    category: "official",
-    modelTypes: ["transcriber"],
-    apiFormat: "openai",
-    defaultModel: "whisper-1",
-    icon: "openai",
-    iconColor: "#10A37F",
-    models: [
-      {
-        model: "whisper-1",
-        displayName: "Whisper",
-        description: "OpenAI 语音识别模型，支持多语言",
-        inputModalities: ["audio"],
-        recommended: true,
-      },
-    ],
-  },
-  {
-    name: "本地 whisper.cpp",
-    nameKey: "preset.local_whisper",
-    websiteUrl: "https://github.com/ggerganov/whisper.cpp",
-    apiBaseUrl: "",
-    category: "custom",
-    modelTypes: ["transcriber"],
-    apiFormat: "openai",
-    defaultModel: "base",
-    icon: "local",
-    iconColor: "#6B7280",
-    descriptionKey: "preset.local_whisper_desc",
-    models: [
-      {
-        model: "tiny",
-        displayName: "Tiny",
-        description: "最小模型，速度最快（75MB）",
-        inputModalities: ["audio"],
-      },
-      {
-        model: "base",
-        displayName: "Base",
-        description: "基础模型，推荐日常使用（142MB）",
-        inputModalities: ["audio"],
-        recommended: true,
-      },
-      {
-        model: "small",
-        displayName: "Small",
-        description: "小型模型，更好的准确率（466MB）",
-        inputModalities: ["audio"],
-      },
-      {
-        model: "medium",
-        displayName: "Medium",
-        description: "中型模型，推荐中文使用（1.5GB）",
-        inputModalities: ["audio"],
-        recommended: true,
-      },
-      {
-        model: "large-v3",
-        displayName: "Large V3",
-        description: "大型模型，最佳准确率（2.8GB）",
-        inputModalities: ["audio"],
-      },
-    ],
-  },
-];
-
-// ─── 分类显示顺序和标签 ──────────────────────────────────────────────────────
-
-export const categoryOrder: ProviderCategory[] = [
-  "mimo",
-  "official",
-  "cn_official",
-  "aggregator",
-  "custom",
-];
+export const categoryOrder: ProviderCategory[] = ["official", "cn_official", "aggregator"];
 
 export const categoryLabels: Record<ProviderCategory, string> = {
   official: "官方",
   cn_official: "国产",
-  mimo: "MiMo",
   aggregator: "聚合服务",
   custom: "本地/自定义",
 };
@@ -398,7 +289,6 @@ export const categoryLabels: Record<ProviderCategory, string> = {
 export const categoryLabelsEn: Record<ProviderCategory, string> = {
   official: "Official",
   cn_official: "Chinese",
-  mimo: "MiMo",
   aggregator: "Aggregator",
   custom: "Local/Custom",
 };

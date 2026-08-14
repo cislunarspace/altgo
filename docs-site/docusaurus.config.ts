@@ -46,7 +46,7 @@ const config: Config = {
       {
         name: 'description',
         content:
-          'altgo：跨平台语音转文字桌面工具（Tauri）。whisper.cpp 本地转写，可选 OpenAI 兼容 LLM 润色；剪贴板与悬浮窗输出。以 Linux 为第一目标平台。',
+          'altgo：Linux 语音转文字桌面工具（Tauri）。SenseVoice 本地转写，可选 OpenAI 兼容 LLM 润色；剪贴板与悬浮窗输出。支持 x86_64 与 aarch64。',
       },
     ],
     image: 'img/screenshot-main.png',
@@ -106,7 +106,7 @@ const config: Config = {
     prism: {
       theme: prismThemes.github,
       darkTheme: prismThemes.dracula,
-      additionalLanguages: ['toml', 'bash', 'powershell'],
+      additionalLanguages: ['toml', 'bash'],
     },
     docs: {
       sidebar: {

@@ -29,8 +29,8 @@ const features = [
   },
   {
     icon: Brain,
-    title: '本地 + 云端 ASR',
-    description: 'whisper.cpp 本地转写完全断网可用，也支持 Whisper API 云端转写。',
+    title: '本地 SenseVoice 转写',
+    description: 'SenseVoice 本地转写完全断网可用。',
   },
   {
     icon: Sparkles,
@@ -77,7 +77,7 @@ export default function Home(): JSX.Element {
         <div className={clsx('container', styles.heroInner)}>
           <div className={styles.heroBadge}>
             <span className={styles.heroBadgeDot} />
-            跨平台语音转文字桌面工具
+            Linux 语音转文字桌面工具
           </div>
           <h1 className={styles.heroTitle}>
             无需打字
@@ -87,7 +87,7 @@ export default function Home(): JSX.Element {
           <p className={styles.heroTagline}>
             基于 Tauri + React + Rust 的语音转文字应用。
             <br />
-            按住 Alt 说话，松开后在本地用 whisper.cpp 转写，可接入 LLM 润色。
+            按住 Alt 说话，松开后在本地用 SenseVoice 转写，可接入 LLM 润色。
           </p>
           <div className={styles.buttons}>
             <Link
@@ -160,7 +160,7 @@ export default function Home(): JSX.Element {
                 <div className={styles.stepNum}>1</div>
                 <h3>安装并设置</h3>
                 <p>
-                  下载 deb / rpm / Flatpak / MSI 安装包，在设置中选择转写引擎与模型。
+                  下载 deb / rpm 安装包，在设置中下载 SenseVoice 模型。
                 </p>
               </div>
               <ArrowRight className={styles.stepArrow} size={24} />

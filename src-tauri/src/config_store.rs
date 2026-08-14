@@ -115,7 +115,7 @@ mod tests {
     async fn snapshot_returns_current_config() {
         let (store, _dir) = temp_store();
         let cfg = store.snapshot().await;
-        assert_eq!(cfg.transcriber.engine, "local");
+        assert_eq!(cfg.transcriber.model, "");
         assert_eq!(cfg.polisher.level, "none");
     }
 
@@ -154,15 +154,16 @@ mod tests {
         let result = store.apply_patch(patch).await.unwrap();
         // Unchanged fields keep defaults
         assert_eq!(result.key_listener.key_name, "Alt_R");
-        assert_eq!(result.transcriber.engine, "local");
+        assert_eq!(result.transcriber.model, "");
         assert_eq!(result.transcriber.language, "en");
     }
 
     #[tokio::test]
     async fn apply_patch_rejects_invalid_config() {
         let (store, _dir) = temp_store();
-        // Empty api_key with api engine should fail validation
-        let patch: ConfigPatch = serde_json::from_str(r#"{"engine":"api"}"#).unwrap();
+        // Enabling polishing without an API key should fail validation.
+        let patch: ConfigPatch =
+            serde_json::from_str(r#"{"polishLevel":"light","polishApiKey":""}"#).unwrap();
         let result = store.apply_patch(patch).await;
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("api_key"));
@@ -172,26 +173,23 @@ mod tests {
     async fn apply_patch_invalid_config_rolls_back_memory() {
         let (store, _dir) = temp_store();
         // Set up a valid config with polishing enabled.
-        let patch: ConfigPatch = serde_json::from_str(
-            r#"{"engine":"local","polishLevel":"light","polishApiKey":"polish-key"}"#,
-        )
-        .unwrap();
+        let patch: ConfigPatch =
+            serde_json::from_str(r#"{"polishLevel":"light","polishApiKey":"polish-key"}"#).unwrap();
         store.apply_patch(patch).await.unwrap();
         let original = store.snapshot().await;
-        assert_eq!(original.transcriber.engine, "local");
+        assert_eq!(original.transcriber.model, "");
         assert_eq!(original.polisher.level, "light");
         assert_eq!(original.polisher.api_key, "polish-key");
 
         // Now apply an invalid patch that would partially mutate config.
         let invalid_patch: ConfigPatch =
-            serde_json::from_str(r#"{"engine":"api","polishLevel":"medium","polishApiKey":""}"#)
-                .unwrap();
+            serde_json::from_str(r#"{"polishLevel":"medium","polishApiKey":""}"#).unwrap();
         let result = store.apply_patch(invalid_patch).await;
         assert!(result.is_err());
 
         // Memory must be rolled back to the pre-patch state.
         let after = store.snapshot().await;
-        assert_eq!(after.transcriber.engine, "local");
+        assert_eq!(after.transcriber.model, "");
         assert_eq!(after.polisher.level, "light");
         assert_eq!(after.polisher.api_key, "polish-key");
     }
@@ -199,40 +197,23 @@ mod tests {
     #[tokio::test]
     async fn apply_patch_rollback_then_valid_patch_still_works() {
         let (store, _dir) = temp_store();
-        let patch: ConfigPatch = serde_json::from_str(
-            r#"{"engine":"local","polishLevel":"light","polishApiKey":"polish-key"}"#,
-        )
-        .unwrap();
+        let patch: ConfigPatch =
+            serde_json::from_str(r#"{"polishLevel":"light","polishApiKey":"polish-key"}"#).unwrap();
         store.apply_patch(patch).await.unwrap();
 
         let invalid_patch: ConfigPatch =
-            serde_json::from_str(r#"{"engine":"api","polishLevel":"medium","polishApiKey":""}"#)
-                .unwrap();
+            serde_json::from_str(r#"{"polishLevel":"medium","polishApiKey":""}"#).unwrap();
         assert!(store.apply_patch(invalid_patch).await.is_err());
 
         let valid_patch: ConfigPatch =
-            serde_json::from_str(r#"{"engine":"mimo","apiKey":"mimo-key"}"#).unwrap();
+            serde_json::from_str(r#"{"polishApiKey":"next-key","model":"sense-voice"}"#).unwrap();
         let result = store.apply_patch(valid_patch).await.unwrap();
-        assert_eq!(result.transcriber.engine, "mimo");
-        assert_eq!(result.transcriber.api_key, "mimo-key");
+        assert_eq!(result.polisher.api_key, "next-key");
+        assert_eq!(result.transcriber.model, "sense-voice");
 
         let snapshot = store.snapshot().await;
-        assert_eq!(snapshot.transcriber.engine, "mimo");
-        assert_eq!(snapshot.transcriber.api_key, "mimo-key");
-    }
-
-    #[tokio::test]
-    async fn apply_patch_windows_vk_null_clears() {
-        let (store, _dir) = temp_store();
-        // First set windows_vk
-        let patch: ConfigPatch = serde_json::from_str(r#"{"windowsVk":165}"#).unwrap();
-        let result = store.apply_patch(patch).await.unwrap();
-        assert_eq!(result.key_listener.windows_vk, Some(165));
-
-        // Then clear it
-        let patch: ConfigPatch = serde_json::from_str(r#"{"windowsVk":null}"#).unwrap();
-        let result = store.apply_patch(patch).await.unwrap();
-        assert!(result.key_listener.windows_vk.is_none());
+        assert_eq!(snapshot.polisher.api_key, "next-key");
+        assert_eq!(snapshot.transcriber.model, "sense-voice");
     }
 
     #[tokio::test]

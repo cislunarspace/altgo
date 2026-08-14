@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 /**
  * 将文本写入系统剪贴板。
  *
- * 优先走 Tauri 后端（xclip/wl-copy/arboard），失败后回退到 WebView API。
+ * 优先走 Tauri 后端（Linux 下为 xclip/xsel/wl-copy），失败后回退到 WebView API。
  * 两者都失败时返回 false。
  */
 export async function copyToClipboard(text: string): Promise<boolean> {

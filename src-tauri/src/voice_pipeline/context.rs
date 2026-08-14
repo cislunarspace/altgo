@@ -145,18 +145,9 @@ mod tests {
     fn make_context(listener: Option<Box<dyn KeyListener>>) -> PipelineContext {
         PipelineContext {
             recorder: Box::new(PlatformRecorder::new(16000)),
-            transcriber: Box::new(
-                crate::transcriber::WhisperApi::new(
-                    "test-key".to_string(),
-                    "http://localhost".to_string(),
-                    "test-model".to_string(),
-                    "en".to_string(),
-                    0.0,
-                    String::new(),
-                    std::time::Duration::from_secs(10),
-                )
-                .unwrap(),
-            ),
+            transcriber: Box::new(super::super::test_doubles::FakeTranscriber::with_success(
+                "hello", "en",
+            )),
             formatter: LLMFormatter::from_config(&test_polisher_config(), "en").unwrap(),
             polish_level: PolishLevel::None,
             listener: Mutex::new(listener),

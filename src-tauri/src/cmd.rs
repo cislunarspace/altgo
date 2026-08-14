@@ -42,14 +42,11 @@ pub struct ConfigResponse {
     pub key_name: String,
     pub linux_evdev_code: Option<u16>,
     pub language: String,
-    pub engine: String,
     pub model: String,
-    pub api_base_url: String,
     pub polish_level: String,
     pub polish_model: String,
     pub polish_api_base_url: String,
     pub gui_language: String,
-    pub has_transcriber_api_key: bool,
     pub has_polisher_api_key: bool,
 }
 
@@ -58,14 +55,11 @@ fn build_config_response(cfg: &crate::config::Config) -> ConfigResponse {
         key_name: cfg.key_listener.key_name.clone(),
         linux_evdev_code: cfg.key_listener.linux_evdev_code,
         language: cfg.transcriber.language.clone(),
-        engine: cfg.transcriber.engine.clone(),
         model: cfg.transcriber.model.clone(),
-        api_base_url: cfg.transcriber.api_base_url.clone(),
         polish_level: cfg.polisher.level.clone(),
         polish_model: cfg.polisher.model.clone(),
         polish_api_base_url: cfg.polisher.api_base_url.clone(),
         gui_language: cfg.gui.language.clone(),
-        has_transcriber_api_key: !cfg.transcriber.api_key.trim().is_empty(),
         has_polisher_api_key: !cfg.polisher.api_key.trim().is_empty(),
     }
 }
@@ -173,7 +167,7 @@ where
             serde_json::json!({
                 "name": name,
                 "downloaded": 0_u64,
-                "total": info.size_bytes,
+                "total": info.files.iter().map(|f| f.size_bytes).sum::<u64>(),
             }),
         );
     }
@@ -245,7 +239,7 @@ pub async fn delete_model(name: String) -> Result<(), String> {
 
 #[tauri::command]
 pub async fn resolve_model(model: String) -> Result<Option<String>, String> {
-    Ok(crate::model::resolve_model_path(&model).map(|p| p.to_string_lossy().to_string()))
+    Ok(crate::model::resolve_model_dir(&model).map(|p| p.to_string_lossy().to_string()))
 }
 
 #[tauri::command]
@@ -468,8 +462,8 @@ mod tests {
         let temp_dir = tempfile::tempdir().unwrap();
         let path = temp_dir.path().join("altgo.toml");
         let mut cfg = Config::default();
-        cfg.transcriber.engine = "api".to_string();
-        cfg.transcriber.api_key = String::new();
+        cfg.polisher.level = "medium".to_string();
+        cfg.polisher.api_key = String::new();
         cfg.save(&path).unwrap();
 
         let store = ConfigStore::load(path);
@@ -486,7 +480,7 @@ mod tests {
         let err = result.unwrap_err();
         assert!(
             err.contains("api_key") || err.contains("API"),
-            "expected API key validation error, got: {err}"
+            "expected polisher API key validation error, got: {err}"
         );
     }
 
@@ -496,8 +490,7 @@ mod tests {
         cfg.key_listener.key_name = "space".to_string();
         cfg.key_listener.linux_evdev_code = Some(56);
         cfg.transcriber.language = "en".to_string();
-        cfg.transcriber.engine = "api".to_string();
-        cfg.transcriber.api_key = "trans-key".to_string();
+        cfg.transcriber.model = "sense-voice".to_string();
         cfg.polisher.level = "light".to_string();
         cfg.polisher.api_key = "polish-key".to_string();
 
@@ -505,8 +498,7 @@ mod tests {
         assert_eq!(resp.key_name, "space");
         assert_eq!(resp.linux_evdev_code, Some(56));
         assert_eq!(resp.language, "en");
-        assert_eq!(resp.engine, "api");
-        assert!(resp.has_transcriber_api_key);
+        assert_eq!(resp.model, "sense-voice");
         assert!(resp.has_polisher_api_key);
         assert_eq!(resp.polish_level, "light");
     }
@@ -549,11 +541,11 @@ mod tests {
             events2.lock().unwrap().push((event.to_string(), payload))
         });
 
-        download_model_with_emitter("tiny", emit, |_name, mut on_progress| async move {
+        download_model_with_emitter("sense-voice", emit, |_name, mut on_progress| async move {
             on_progress(0, 100);
             on_progress(50, 100);
             on_progress(100, 100);
-            Ok(PathBuf::from("/models/ggml-tiny.bin"))
+            Ok(PathBuf::from("/models/sense-voice"))
         })
         .await
         .unwrap();
@@ -562,14 +554,17 @@ mod tests {
         assert_eq!(events.len(), 5);
 
         assert_eq!(events[0].0, "model-download-progress");
-        assert_eq!(events[0].1["name"], "tiny");
+        assert_eq!(events[0].1["name"], "sense-voice");
         assert_eq!(events[0].1["downloaded"], 0);
-        let tiny_size = crate::model::models_info()
+        let total_size: u64 = crate::model::models_info()
             .iter()
-            .find(|m| m.name == "tiny")
+            .find(|m| m.name == "sense-voice")
             .unwrap()
-            .size_bytes;
-        assert_eq!(events[0].1["total"], tiny_size);
+            .files
+            .iter()
+            .map(|f| f.size_bytes)
+            .sum();
+        assert_eq!(events[0].1["total"], total_size);
 
         assert_eq!(events[1].0, "model-download-progress");
         assert_eq!(events[1].1["downloaded"], 0);
@@ -578,7 +573,7 @@ mod tests {
 
         assert_eq!(events[4].0, "model-download-finished");
         assert_eq!(events[4].1["success"], true);
-        assert_eq!(events[4].1["path"], "/models/ggml-tiny.bin");
+        assert_eq!(events[4].1["path"], "/models/sense-voice");
     }
 
     #[tokio::test]
@@ -590,7 +585,7 @@ mod tests {
             events2.lock().unwrap().push((event.to_string(), payload))
         });
 
-        download_model_with_emitter("tiny", emit, |_name, _on_progress| async move {
+        download_model_with_emitter("sense-voice", emit, |_name, _on_progress| async move {
             Err(ModelError::DownloadFailed("network down".to_string()))
         })
         .await

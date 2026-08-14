@@ -489,11 +489,11 @@ mod tests {
     async fn handle_stop_record_transcription_failure_emits_error_and_idle() {
         let wav = make_test_wav();
         let mut recorder = super::super::test_doubles::FakeRecorder::new(wav);
-        let transcriber =
-            super::super::test_doubles::FakeTranscriber::new(Err(TranscriberError::ApiError {
-                status: 500,
-                body: "server error".to_string(),
-            }));
+        let transcriber = super::super::test_doubles::FakeTranscriber::new(Err(
+            TranscriberError::ModelLoadFailed {
+                reason: "server error".to_string(),
+            },
+        ));
         let formatter = failing_formatter();
         let sink = super::super::test_doubles::MockSink::new();
         let sink_arc: Arc<dyn PipelineSink> = Arc::new(sink.clone());

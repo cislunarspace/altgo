@@ -28,8 +28,8 @@ const features: FeatureItem[] = [
     icon: Infinity,
   },
   {
-    title: '本地 + 云端 ASR',
-    description: '支持本地 whisper.cpp（无需联网）和 OpenAI Whisper API 两种转写引擎。',
+    title: '本地 SenseVoice 转写',
+    description: '本地 SenseVoice 转写，无需联网。',
     icon: Brain,
   },
   {

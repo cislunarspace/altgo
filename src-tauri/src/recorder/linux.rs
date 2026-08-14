@@ -20,7 +20,7 @@ pub struct PulseRecorder {
 }
 
 impl PulseRecorder {
-    /// 创建新的录音器。输出固定为单声道（16kHz 单声道是 whisper 输入要求）。
+    /// 创建新的录音器。输出固定为单声道 16kHz（ASR 输入要求）。
     pub fn new(sample_rate: u32) -> Self {
         Self {
             sample_rate,

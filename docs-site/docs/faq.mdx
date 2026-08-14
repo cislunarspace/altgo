@@ -10,9 +10,8 @@ title: 常见问题
 ### 录音没有声音 / 转写结果为空
 
 1. 检查麦克风是否被系统识别
-2. **Linux**：确认录音工具已安装（`parecord`）
-3. **Windows**：检查系统声音设置中是否有可用输入设备；altgo 使用 WASAPI 默认设备
-4. 查看日志输出：`RUST_LOG=altgo=debug altgo`（Linux）或在 PowerShell 中 `$env:RUST_LOG="altgo=debug"; altgo`（Windows）
+2. 确认录音工具已安装（`parecord`）
+3. 查看日志输出：`RUST_LOG=altgo=debug altgo`
 
 ### 录音启动慢
 
@@ -30,12 +29,6 @@ title: 常见问题
 4. **Wayland**：仍依赖能访问 evdev；若仅用 XWayland 且无权限，现象与未加 `input` 组类似。剪贴板在 Wayland 上建议安装 **`wl-copy`**（或 `xclip`/`xsel` 经 XWayland）。
 5. 若使用 IME，可适当增大 `min_press_duration_ms` 减轻误触。
 
-**Windows：**
-
-1. 确认 altgo 窗口在前台或未被最小化。全局键盘钩子依赖消息循环。
-2. 某些安全软件（如企业杀毒、沙箱）可能拦截 `WH_KEYBOARD_LL` 全局钩子——检查是否有拦截提示。
-3. 若使用 IME，可适当增大 `min_press_duration_ms` 减轻误触。
-
 ### 误触发 / IME 冲突
 
 增加 `min_press_duration_ms` 的值（默认 100ms）来过滤短按抖动：
@@ -49,29 +42,12 @@ min_press_duration_ms = 200
 
 ### 中文识别效果不好
 
-1. 使用更大的模型（推荐 `medium` 或 `large`）
-2. 确认 `language = "zh"` 设置正确
-3. 如果使用 API 模式，可以设置 `prompt` 提供领域词汇
-
-```toml
-[transcriber]
-language = "zh"
-prompt = "技术会议，产品讨论"
-```
+1. 确认 `language = "zh"` 设置正确
+2. 确认模型文件完整下载（`model.int8.onnx` 与 `tokens.txt` 均存在）
 
 ### 本地模型在哪里下载？
 
-从 Hugging Face 下载 GGML 格式模型：
-
-| 模型 | 大小 | 中文效果 |
-|------|------|---------|
-| tiny | ~75 MB | 一般 |
-| base | ~148 MB | 日常够用 |
-| small | ~488 MB | 较好 |
-| medium | ~1.5 GB | 推荐 |
-| large | ~3 GB | 最佳 |
-
-下载地址：`https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-{size}.bin`
+在设置页的「本地模型」中点击下载即可（SenseVoice int8，约 230MB，中/英/日/韩/粤自动检测）。也可从 Hugging Face 仓库 `csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17` 手动下载 `model.int8.onnx` 与 `tokens.txt` 放入模型目录。
 
 ## 润色相关
 
@@ -95,8 +71,8 @@ system_prompt = "只修正标点和错别字，不要改变原文的意思和语
 
 ### 提示成功但粘贴出来是旧内容 / 剪贴板失败
 
-1. **Linux**：安装 `xclip`、`xsel` 或 `wl-copy` 之一，并确保在图形会话内运行 altgo。
-2. **Windows**：剪贴板通过 `arboard` crate 直接调用 Win32 API，通常无需额外操作。若其他程序锁定了剪贴板，稍后重试即可。
+1. 安装 `xclip`、`xsel` 或 `wl-copy` 之一，并确保在图形会话内运行 altgo。
+2. 若其他程序锁定了剪贴板，稍后重试即可。
 3. 在**悬浮窗**或**历史**页使用复制按钮（WebView 手势复制有时比后端剪贴板更稳）。
 4. 调试：`RUST_LOG=altgo=debug altgo` 查看是否有 clipboard 相关错误。
 
@@ -110,10 +86,6 @@ nohup altgo &
 # 或使用 systemd user service
 ```
 
-```powershell
-# Windows（PowerShell 后台）
-Start-Process -WindowStyle Hidden altgo
-```
 
 ### 如何查看日志？
 
@@ -122,9 +94,5 @@ Start-Process -WindowStyle Hidden altgo
 RUST_LOG=altgo=debug altgo
 ```
 
-```powershell
-# Windows
-$env:RUST_LOG="altgo=debug"; altgo
-```
 
 可用的日志级别：`debug`、`info`、`warn`、`error`

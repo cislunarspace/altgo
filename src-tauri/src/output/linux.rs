@@ -98,7 +98,7 @@ pub fn write_clipboard_with_tool(tool: ClipboardTool, text: &str) -> Result<(), 
 
 /// Check if a command exists in PATH.
 fn which(cmd: &str) -> bool {
-    crate::transcriber::which_binary(cmd).is_ok()
+    crate::resource::which_binary(cmd).is_some()
 }
 
 /// Linux `Output` adapter — wraps clipboard tools.
