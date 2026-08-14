@@ -6,6 +6,14 @@ on:
   pull_request:
     branches: [master]
 
+# 同一分支的新提交无需等待旧提交完成，避免重复占用双架构 runner。
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
 env:
   CARGO_TERM_COLOR: always
 
@@ -33,9 +41,13 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
+      # Cargo workspace 在 src-tauri；默认的根目录 target/ 不存在，必须显式指定。
+      # 保留 rust-cache 默认的 job 隔离，避免 debug 测试缓存抢占 release 打包缓存。
       - uses: Swatinem/rust-cache@v2
         with:
           key: ${{ matrix.target }}
+          workspaces: |
+            src-tauri -> target
 
       # 系统依赖、打包用二进制、Tauri CLI 统一在 composite action 里装
       - uses: ./.github/actions/setup-linux-build
@@ -43,23 +55,27 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
 
       - name: Install frontend dependencies
         run: npm ci
         working-directory: frontend
 
+      # 前端测试、fmt 和 Clippy 不依赖目标架构，单跑一次即可；两个架构仍会
+      # 分别执行测试和实际 deb 打包，覆盖各自的编译及链接路径。
       - name: Run frontend tests
+        if: matrix.arch == 'amd64'
         run: npm test
         working-directory: frontend
 
       - name: Check formatting
+        if: matrix.arch == 'amd64'
         run: cargo fmt --manifest-path=src-tauri/Cargo.toml --all -- --check
 
       - name: Clippy
+        if: matrix.arch == 'amd64'
         run: cargo clippy --manifest-path=src-tauri/Cargo.toml --all-targets -- -D warnings
-
-      - name: Build
-        run: cargo build --release --manifest-path=src-tauri/Cargo.toml
 
       - name: Run tests
         run: cargo test --manifest-path=src-tauri/Cargo.toml --lib

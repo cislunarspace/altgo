@@ -4,15 +4,33 @@ on:
   push:
     tags: ["v*"]
 
+# 除创建 GitHub Release 外，其余 job 均只读取仓库内容。
+permissions:
+  contents: read
+
 env:
   CARGO_TERM_COLOR: always
 
-permissions:
-  contents: write
-
 jobs:
+  validate:
+    name: 校验发布元数据
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: 校验 Tag 与版本
+        run: bash packaging/scripts/validate-release.sh
+
   test:
     name: Run tests (${{ matrix.arch }})
+    needs: validate
     strategy:
       fail-fast: false
       matrix:
@@ -32,18 +50,22 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
+      # Cargo workspace 在 src-tauri；保留默认 job 隔离，避免 debug 测试缓存抢占
+      # release 打包缓存。
       - uses: Swatinem/rust-cache@v2
         with:
-          key: ${{ matrix.target }}-release-test
+          key: ${{ matrix.target }}
+          workspaces: |
+            src-tauri -> target
 
       - uses: ./.github/actions/setup-linux-build
 
       - name: Run tests
         run: cargo test --manifest-path=src-tauri/Cargo.toml --lib
 
-  build-deb:
-    name: Build DEB (${{ matrix.arch }})
-    needs: [test]
+  build-linux:
+    name: 构建 Linux 软件包 (${{ matrix.arch }})
+    needs: test
     strategy:
       fail-fast: false
       matrix:
@@ -63,85 +85,45 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
+      # release 打包单独缓存同架构的 release 依赖编译产物。
       - uses: Swatinem/rust-cache@v2
         with:
-          key: ${{ matrix.target }}-release-deb
+          key: ${{ matrix.target }}
+          workspaces: |
+            src-tauri -> target
 
       - uses: ./.github/actions/setup-linux-build
+        with:
+          extra-packages: "rpm"
 
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
 
       - name: Install frontend dependencies
         run: npm ci
         working-directory: frontend
 
-      - name: Build deb
-        run: cargo tauri build --bundles deb
+      # 同一架构的 deb/rpm 共享一次前端和 Rust 构建，只在 bundle 阶段分别打包。
+      - name: 构建 deb 与 rpm
+        run: cargo tauri build --bundles deb,rpm
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Upload deb artifact
+      - name: 上传 Linux 软件包产物
         uses: actions/upload-artifact@v4
         with:
-          name: altgo-${{ matrix.arch }}-deb
-          path: src-tauri/target/release/bundle/deb/*.deb
-          if-no-files-found: error
-
-  build-rpm:
-    name: Build RPM (${{ matrix.arch }})
-    needs: [test]
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - arch: amd64
-            runs-on: ubuntu-22.04
-            target: x86_64-unknown-linux-gnu
-          - arch: arm64
-            runs-on: ubuntu-22.04-arm
-            target: aarch64-unknown-linux-gnu
-    runs-on: ${{ matrix.runs-on }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: ${{ matrix.target }}-release-rpm
-
-      - uses: ./.github/actions/setup-linux-build
-        with:
-          extra-packages: 'rpm'
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-
-      - name: Install frontend dependencies
-        run: npm ci
-        working-directory: frontend
-
-      - name: Build rpm
-        run: cargo tauri build --bundles rpm
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Upload rpm artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: altgo-${{ matrix.arch }}-rpm
-          path: src-tauri/target/release/bundle/rpm/*.rpm
+          name: altgo-${{ matrix.arch }}-packages
+          path: |
+            src-tauri/target/release/bundle/deb/*.deb
+            src-tauri/target/release/bundle/rpm/*.rpm
           if-no-files-found: error
 
   gen-aur:
     name: Generate AUR PKGBUILD
-    needs: [build-deb]
+    needs: build-linux
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
@@ -151,24 +133,26 @@ jobs:
       - name: Download deb artifacts
         uses: actions/download-artifact@v4
         with:
-          pattern: altgo-*-deb
-          path: deb-artifact
+          pattern: altgo-*-packages
+          path: package-artifact
           merge-multiple: true
 
       - name: Get version from tag
         id: version
-        run: echo "value=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
+        run: echo "value=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
       - name: Generate PKGBUILD
         run: |
-          echo "Contents of deb-artifact:"
-          find deb-artifact -type f || true
-          AMD64_DEB=$(find deb-artifact -name '*_amd64.deb' -type f | head -1)
-          ARM64_DEB=$(find deb-artifact -name '*_arm64.deb' -type f | head -1)
-          echo "Found amd64 deb: ${AMD64_DEB}"
-          echo "Found arm64 deb: ${ARM64_DEB}"
+          mapfile -t debs < <(find package-artifact -type f -name '*.deb' | sort)
+          if [[ "${#debs[@]}" -ne 2 ]]; then
+            echo "错误：预期恰好两份 deb 产物，实际找到 ${#debs[@]} 份" >&2
+            printf '%s\n' "${debs[@]}" >&2
+            exit 1
+          fi
+          AMD64_DEB="$(find package-artifact -name '*_amd64.deb' -type f -print -quit)"
+          ARM64_DEB="$(find package-artifact -name '*_arm64.deb' -type f -print -quit)"
           if [[ -z "${AMD64_DEB}" || -z "${ARM64_DEB}" ]]; then
-            echo "ERROR: both amd64 and arm64 deb artifacts are required"
+            echo "错误：必须同时包含 amd64 与 arm64 的 deb 产物" >&2
             exit 1
           fi
           mkdir -p aur-output
@@ -187,8 +171,10 @@ jobs:
 
   release:
     name: Create Release
-    needs: [build-deb, build-rpm, gen-aur]
+    needs: [build-linux, gen-aur]
     runs-on: ubuntu-24.04
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -207,13 +193,21 @@ jobs:
           path: release-assets
           merge-multiple: true
 
-      - name: List release assets
-        run: find release-assets -type f | sort
+      - name: 校验发布产物
+        run: |
+          mapfile -t debs < <(find release-assets -type f -name '*.deb' | sort)
+          mapfile -t rpms < <(find release-assets -type f -name '*.rpm' | sort)
+          if [[ "${#debs[@]}" -ne 2 || "${#rpms[@]}" -ne 2 ]]; then
+            echo "错误：预期两份 deb 和两份 rpm，实际为 ${#debs[@]} 份 deb、${#rpms[@]} 份 rpm" >&2
+            find release-assets -type f | sort >&2
+            exit 1
+          fi
+          printf '发布产物：\n%s\n' "$(find release-assets -type f | sort)"
 
       - name: Generate checksums
         run: |
           cd release-assets
-          find . -type f \( -name '*.deb' -o -name '*.rpm' \) -exec sha256sum {} \; > ../checksums.txt
+          find . -type f \( -name '*.deb' -o -name '*.rpm' \) -print0 | sort -z | xargs -0 sha256sum > ../checksums.txt
           cd ..
           cat checksums.txt
 
@@ -222,5 +216,8 @@ jobs:
         with:
           body_path: release_notes.md
           files: |
-            release-assets/*
+            release-assets/**/*.deb
+            release-assets/**/*.rpm
+            release-assets/PKGBUILD
+            release-assets/.SRCINFO
             checksums.txt
