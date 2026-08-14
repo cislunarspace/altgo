@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Fixes
+
+- **校验 SenseVoice 模型与输入完整性**：模型目录必须同时包含 `model.int8.onnx` 与 `tokens.txt` 才会显示为可用；录音采样率必须为 16kHz，避免把其他采样率的 WAV 错误送入 SenseVoice。
+- **恢复 Linux 按键捕获映射**：设置页捕获右 Alt 等常用 evdev 键码后，会保存为可供 X11 监听路径解析的 keysym。
+- **修正双架构 AUR 元数据**：生成的 PKGBUILD 同时支持 `x86_64` 与 `aarch64`，使用 SenseVoice 描述及各自的 deb 下载地址和校验和。
+
 ### Changed
 
 - **移除云端转写与 Windows/macOS 支持**：删除 `WhisperApi`、`MimoAsr`、转写引擎切换、转写 API 密钥/地址配置和全部 Windows 适配器；项目现在只支持 Linux（x86_64 / aarch64），本地 SenseVoice 是唯一转写方式。旧配置中的云端转写字段会被忽略，文本润色的云端 API 配置保留。
