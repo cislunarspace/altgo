@@ -2,13 +2,13 @@
 
 感谢你对 altgo 的关注！
 
-本项目支持 **Linux** 的 **x86_64** 与 **aarch64** 架构。维护者目前在 **Ubuntu 20.04** 上做过完整验证。合并前请尽量在相关平台自测。
+本项目支持 **Linux** 的 **x86_64** 与 **aarch64** 架构。CI 和 Release 在 **Ubuntu 22.04** 上完成 Linux 构建验证。合并前请尽量在相关架构上自测。
 
 ## 开发环境
 
 - Rust **1.80+**（推荐最新稳定版，需满足 [Tauri 2 前置条件](https://tauri.app/start/prerequisites/)）
 - **Node.js 18+**（建议 20+；前端使用 npm）
-- Linux（Ubuntu 20.04+）
+- Linux（Ubuntu 22.04+）
 
 ### 平台特定依赖
 

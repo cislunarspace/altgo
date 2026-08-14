@@ -21,7 +21,7 @@
 
 ## 项目概览
 
-**altgo** 是用 Rust 编写的 Linux 桌面语音转文字工具，支持 Ubuntu 20.04+ 的 **x86_64** 与 **aarch64** 架构。按住右 Alt 键录音，松开后使用 **本地 SenseVoice**（内嵌 sherpa-onnx）进行转写。随后可选通过 **OpenAI 兼容或 Anthropic Messages 协议**的 LLM 进行润色。结果写入系统剪贴板，并在悬浮浮窗中显示。成功的转写结果（原始文本 + 显示文本）以纯文本历史记录的形式持久化保存在本地 JSON 文件（`~/.config/altgo/history.json`）中；音频不会被保存。
+**altgo** 是用 Rust 编写的 Linux 桌面语音转文字工具，支持 Ubuntu 22.04+ 的 **x86_64** 与 **aarch64** 架构。按住右 Alt 键录音，松开后使用 **本地 SenseVoice**（内嵌 sherpa-onnx）进行转写。随后可选通过 **OpenAI 兼容或 Anthropic Messages 协议**的 LLM 进行润色。结果写入系统剪贴板，并在悬浮浮窗中显示。成功的转写结果（原始文本 + 显示文本）以纯文本历史记录的形式持久化保存在本地 JSON 文件（`~/.config/altgo/history.json`）中；音频不会被保存。
 
 ## 构建与测试命令
 

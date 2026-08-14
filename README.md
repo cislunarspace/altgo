@@ -7,7 +7,7 @@
 
 **altgo** 是一款 Linux 桌面语音转文字工具。按住触发键说话，松开后自动完成录音、转写和可选润色，结果写入系统剪贴板并显示在悬浮窗中。
 
-支持 **Linux**（Ubuntu 20.04+）的 **x86_64** 与 **aarch64** 架构。目前不支持 Windows 和 macOS。
+支持 **Linux**（Ubuntu 22.04+）的 **x86_64** 与 **aarch64** 架构。目前不支持 Windows 和 macOS。
 
 - [在线文档](https://cislunarspace.github.io/altgo/)
 - [下载 Releases](https://github.com/cislunarspace/altgo/releases)
@@ -136,7 +136,7 @@ RUST_LOG=altgo=debug altgo
 
 - 先确认录音结束后悬浮窗是否进入“处理中”。
 - 确认已在设置页下载模型（SenseVoice）。
-- 检查日志中的 `transcription failed`、模型路径和 API 返回错误。
+- 检查日志中的 `transcription failed`、模型路径和润色服务请求失败信息。
 
 ### 没有写入剪贴板
 
