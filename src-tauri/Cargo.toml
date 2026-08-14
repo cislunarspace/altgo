@@ -30,6 +30,7 @@ toml = "0.8"
 uuid = { version = "1", features = ["v4"] }
 regex = "1"
 thiserror = "1"
+sha2 = "0.10"
 sherpa-onnx = "1.13.5"
 
 [dev-dependencies]
