@@ -183,6 +183,7 @@ jobs:
             aur-output/PKGBUILD
             aur-output/.SRCINFO
           if-no-files-found: error
+          include-hidden-files: true
 
   release:
     name: Create Release
