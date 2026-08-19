@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { Children, isValidElement, useEffect, useState, type ReactNode } from "react";
 import { getVersion } from "@tauri-apps/api/app";
 import { invoke } from "@tauri-apps/api/core";
 import { useTranslation } from "../i18n";
@@ -20,6 +20,14 @@ import {
   Keyboard,
 } from "lucide-react";
 import { useTheme, type ThemePref } from "../ThemeContext";
+import {
+  getFontSizePref,
+  getWindowSizePref,
+  setFontSizePref,
+  setWindowSizePref,
+  type FontSizePref,
+  type WindowSizePref,
+} from "../ui-size";
 import { ProviderPresetSelector } from "../components/ProviderPresetSelector";
 import { polisherPresets, type ProviderPreset, type ModelCatalogEntry } from "../config/modelPresets";
 
@@ -44,10 +52,24 @@ function formatSize(bytes: number): string {
   return `${Math.round(mb)} MB`;
 }
 
+function SettingsSectionOrder({ children }: { children: ReactNode }) {
+  const sections = Children.toArray(children).sort((a, b) => {
+    const orderOf = (node: ReactNode) =>
+      isValidElement<{ "data-settings-order"?: number }>(node)
+        ? node.props["data-settings-order"] ?? 99
+        : 99;
+    return orderOf(a) - orderOf(b);
+  });
+
+  return <>{sections}</>;
+}
+
 export default function Settings() {
   const { t, lang, setLang } = useTranslation();
   const { themePref, setTheme } = useTheme();
-  const [polishOpen, setPolishOpen] = useState(false);
+  const [fontSize, setFontSize] = useState<FontSizePref>(() => getFontSizePref());
+  const [windowSize, setWindowSize] = useState<WindowSizePref>(() => getWindowSizePref());
+  const [polishOpen, setPolishOpen] = useState(true);
   const [advancedPath, setAdvancedPath] = useState(false);
   const [appVersion, setAppVersion] = useState<string>("");
   const [testing, setTesting] = useState(false);
@@ -169,7 +191,11 @@ export default function Settings() {
       </div>
 
       <div className="settings-form">
-        <section className="settings-section settings-section--primary">
+        <SettingsSectionOrder>
+        <section
+          data-settings-order={3}
+          className="settings-section settings-section--primary settings-section--transcription"
+        >
           <h3 className="settings-section-title">
             <Sparkles size={14} />
             {t("settings.transcription")}
@@ -282,7 +308,7 @@ export default function Settings() {
             </>
         </section>
 
-        <section className="settings-section">
+        <section data-settings-order={1} className="settings-section settings-section--recording">
           <h3 className="settings-section-title">
             <Mic size={14} />
             {t("settings.recording")}
@@ -362,7 +388,10 @@ export default function Settings() {
           <p className="settings-hint">{t("settings.capture_activation_lead")}</p>
         </section>
 
-        <section className="settings-section">
+        <section
+          data-settings-order={2}
+          className="settings-section settings-section--polishing settings-section--primary"
+        >
           <button
             type="button"
             className="settings-section-toggle"
@@ -488,7 +517,9 @@ export default function Settings() {
           )}
         </section>
 
-        <section className="settings-section">
+        </SettingsSectionOrder>
+
+        <section className="settings-section settings-section--appearance">
           <h3 className="settings-section-title">
             <Palette size={14} />
             {t("settings.appearance")}
@@ -509,6 +540,42 @@ export default function Settings() {
             </div>
           </div>
           <div className="settings-field">
+            <span className="settings-field-label-text">{t("settings.font_size")}</span>
+            <div className="settings-field-control">
+              <select
+                className="settings-select"
+                value={fontSize}
+                onChange={(e) => {
+                  const value = e.target.value as FontSizePref;
+                  setFontSize(value);
+                  setFontSizePref(value);
+                }}
+              >
+                <option value="small">{t("settings.font_size_small")}</option>
+                <option value="medium">{t("settings.font_size_medium")}</option>
+                <option value="large">{t("settings.font_size_large")}</option>
+              </select>
+            </div>
+          </div>
+          <div className="settings-field">
+            <span className="settings-field-label-text">{t("settings.window_size")}</span>
+            <div className="settings-field-control">
+              <select
+                className="settings-select"
+                value={windowSize}
+                onChange={(e) => {
+                  const value = e.target.value as WindowSizePref;
+                  setWindowSize(value);
+                  setWindowSizePref(value);
+                }}
+              >
+                <option value="compact">{t("settings.window_size_compact")}</option>
+                <option value="standard">{t("settings.window_size_standard")}</option>
+                <option value="large">{t("settings.window_size_large")}</option>
+              </select>
+            </div>
+          </div>
+          <div className="settings-field">
             <span className="settings-field-label-text">{t("settings.overlay_position")}</span>
             <div className="settings-field-control">
               <select
@@ -523,7 +590,7 @@ export default function Settings() {
           </div>
         </section>
 
-        <section className="settings-section">
+        <section className="settings-section settings-section--language">
           <h3 className="settings-section-title">
             <Globe size={14} />
             {t("settings.gui_language")}
@@ -543,7 +610,7 @@ export default function Settings() {
           </div>
         </section>
 
-        <section className="settings-section">
+        <section className="settings-section settings-section--about">
           <h3 className="settings-section-title">
             <Sparkles size={14} />
             {t("settings.about")}
