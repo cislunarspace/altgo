@@ -49,8 +49,12 @@ jobs:
           workspaces: |
             src-tauri -> target
 
-      # 系统依赖统一在 composite action 里装；Tauri CLI 用 npm 版（见下方构建步骤）
+      # 系统依赖统一在 composite action 里装；Tauri CLI 用 npm 版（见下方构建步骤）。
+      # 多装 rpm 使 apt 缓存 key 与 release 构建一致：master 每次 push 都在为
+      # release 预热缓存，避免发版时缓存未命中、走慢速镜像全量下载（实测卡 20+ 分钟）。
       - uses: ./.github/actions/setup-linux-build
+        with:
+          extra-packages: rpm
 
       - uses: actions/setup-node@v4
         with:
