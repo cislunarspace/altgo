@@ -1,20 +1,23 @@
 # 系统架构
 
-本文档是 altgo 的架构速览，面向维护者与贡献者，与 [`testing.md`](testing.md) 配套阅读。数据来自 2026-08-10 对 `src-tauri/src/` 的源码调研。
+本文档是 altgo 的架构速览，面向维护者与贡献者，与 [`testing.md`](testing.md) 配套阅读。数据来自 2026-08-19 对 `src-tauri/src/` 的源码调研。文中引用只用模块与符号名，不标行号——行号会漂移，符号名才是稳定的锚点。
 
 ## 一、系统概览
 
-altgo 是基于 Tauri 的桌面语音转文字工具：Rust 后端承载整条语音流水线，React 前端负责设置页、历史页与悬浮窗。
+altgo 是基于 Tauri 的桌面语音转文字工具：Rust 后端承载整条语音流水线，React 前端负责设置页、历史页与悬浮窗。两个收敛后的设计前提：
 
-核心设计只有一句话：**业务核心与框架彻底解耦，平台差异用 trait + `cfg` 隔离**。`voice_pipeline` 模块完全不 import Tauri，只通过 `PipelineSink`、`TranscriptionDispatch`、`OverlaySink` 等 trait seam 与外界交互；平台相关的按键监听、录音、剪贴板也都被收进各自 trait 后面。
+- **转写只有一条路径**：本地 SenseVoice（内嵌 sherpa-onnx），模型常驻内存。whisper.cpp、Whisper API、MiMo ASR 已随 #121 删除。
+- **平台只有 Linux**（Ubuntu 22.04+，x86_64/aarch64）。Windows 适配已随 #121 删除。
 
-整条流水线跑在独立的 OS 线程上，内部是一个独立的 `current_thread` tokio 运行时，与 Tauri 主运行时隔离（`lib.rs:56-60`）。
+核心设计只有一句话：**业务核心与框架彻底解耦，平台能力一律收进 trait seam**。`voice_pipeline` 模块完全不 import Tauri，只通过 `PipelineSink`、`TranscriptionDispatch`、`OverlaySink` 等 trait seam 与外界交互；按键监听、录音、剪贴板等系统能力也都被收进各自 trait 后面，当前实现按平台命名为 `linux.rs`。
+
+整条流水线跑在独立的 OS 线程上，内部是一个独立的 `current_thread` tokio 运行时，与 Tauri 主运行时隔离（见 `lib.rs` 的 `spawn_pipeline_thread`）。
 
 ```text
 +-----------------+
 |   React 前端     |  设置 / 历史 / 浮窗
 +-----------------+
-         | IPC (16 命令 + 9 事件)
+         | IPC (14 命令 + 9 事件)
          v
 +-----------------+
 |  装配层 lib.rs   |  spawn_pipeline_thread：管理状态、组合 seam
@@ -26,7 +29,7 @@ altgo 是基于 Tauri 的桌面语音转文字工具：Rust 后端承载整条�
 |  ┌───────────────────────┐  |
 |  |   PipelineContext     |  |  tokio::select! 三分支主循环
 |  |  ┌─────────────────┐  |  |
-|  |  |   state_machine  |  |  |  5 态同步状态机
+|  |  |   state_machine  |  |  |  5 态同步状态机（crate 根部模块）
 |  |  └─────────────────┘  |  |
 |  |  handlers.rs          |  |  录音→转写→润色→分发
 |  |  dispatcher.rs        |  |  TranscriptionDispatch seam
@@ -46,41 +49,69 @@ altgo 是基于 Tauri 的桌面语音转文字工具：Rust 后端承载整条�
          |
          v
 +----------------------+
-| config/error/resource |  公共叶子
+| config/error/resource/audio |  公共叶子
 +----------------------+
 ```
+
+### 职责一览
+
+以“按下触发键到结果展示”为主线，各关切的归属：
+
+| 关切 | 负责模块 | 边界说明 |
+|------|----------|----------|
+| 界面（设置 / 历史 / 悬浮窗内容） | `frontend/`（React） | 只经 IPC 与后端交互，只见 camelCase |
+| 按键状态机 | `state_machine.rs` | 纯同步叶子；只返回命令，不执行副作用 |
+| 录音 | `recorder`（`Recorder` trait） | Linux 实现为 `parecord` 子进程 |
+| 转写 | `transcriber`（`Transcriber` trait） | 唯一实现：`sherpa.rs` 的本地 SenseVoice |
+| 润色 | `polisher`（`LLMFormatter`） | 可选；失败降级为原文 |
+| 悬浮窗 | `overlay`（`OverlaySink` seam） | 生产实现是 Tauri 窗口 |
+| 剪贴板 + 历史 | `dispatcher`（`TranscriptionDispatch` seam）→ `output` + `history` | 失败只 warn，不中断结果返回 |
+| 事件发射 | `tauri_sink`（`PipelineEventEmitter` seam） | 流水线事件到前端的通道 |
+| 主循环编排 | `voice_pipeline::context` | 驱动状态机，就地执行命令 |
 
 ## 二、依赖方向
 
 依赖整体单向、清晰：
 
 - 装配层 `lib.rs` 唯一负责把 Tauri-managed state 注入流水线。
-- `voice_pipeline` 是组合根（composition root），内部再向下组合 `state_machine` / `handlers` / `dispatcher` / `sink`。
+- `voice_pipeline` 是组合根（composition root），内部再向下组合 `handlers` / `dispatcher` / `sink`。
+- `state_machine` 是 crate 根部的纯同步叶子，由 `voice_pipeline::context` 驱动。
 - `handlers` 调用 `transcriber` / `polisher` / `recorder`。
-- `transcriber` 调用 `resource`；`sherpa`（内嵌 sherpa-onnx）是本地引擎实现。
+- `dispatcher` 调用 `output`（剪贴板）与 `history`（历史记录）。
+- `transcriber` 调用 `resource`；`sherpa`（内嵌 sherpa-onnx 的 SenseVoice）是当前唯一的引擎实现。
 - `polisher` 调用 `prompt_store`。
-- `model` / `config` / `error` / `resource` 是底层叶子。
+- `model` / `config` / `error` / `resource` / `audio` 是底层叶子（`audio` 提供 PCM 缓冲与 WAV 编解码）。
 
 ```text
 lib.rs
   |
   +-- voice_pipeline
-        |
-        +-- state_machine  (纯同步叶子)
-        +-- handlers
-        |     +-- transcriber
-        |     |     +-- sherpa
-        |     |     +-- resource
-        |     +-- polisher
-        |     |     +-- prompt_store
-        |     +-- recorder
-        +-- dispatcher
-        +-- sink
-
+  |     |
+  |     +-- handlers
+  |     |     +-- transcriber
+  |     |     |     +-- sherpa
+  |     |     |     +-- resource
+  |     |     +-- polisher
+  |     |     |     +-- prompt_store
+  |     |     +-- recorder
+  |     +-- dispatcher
+  |     |     +-- output
+  |     |     +-- history
+  |     +-- sink
+  |
+  +-- state_machine        (纯同步叶子，由 voice_pipeline::context 驱动)
   +-- pipeline_controller  (生命周期 + PipelineStatus)
   +-- tauri_sink           (经 PipelineEventEmitter 发射事件)
   +-- cmd.rs               (IPC 命令)
 ```
+
+**Seam 规则。** 三类边界必须经 trait，业务核心只面向 trait：
+
+1. **框架**：`PipelineSink`（状态/错误/结果回调）、`PipelineEventEmitter`（事件发射）、`TranscriptionDispatch`（剪贴板 + 历史分发）、`OverlaySink`（悬浮窗）。
+2. **平台**：`Recorder`（录音）、`KeyListener`（按键）、`Output`（剪贴板），当前实现见第五节。
+3. **引擎**：`Transcriber`（转写后端），当前唯一实现是 `sherpa.rs` 的本地 SenseVoice。
+
+同 crate 内向下的模块依赖允许直接 import——`handlers` 调 `polisher` 的具体类型、各模块依赖 `config` / `error` 等底层叶子，都不需要 seam。seam 是测试注入 fake 的位置，也是未来加平台或后端时的扩展点。
 
 三个值得注意的依赖关系：
 
@@ -92,7 +123,7 @@ lib.rs
 
 ### 主循环
 
-`voice_pipeline/context.rs:71-90` 是 tokio::select! 三分支：
+`voice_pipeline/context.rs` 的主循环是 tokio::select! 三分支：
 
 1. **按键事件** → `machine.process(ev)`。
 2. **状态机超时** → `machine.poll_timeout()`（仅在 `deadline.is_some()` 时启用）。
@@ -102,7 +133,7 @@ lib.rs
 
 ### 状态机
 
-`state_machine.rs` 是纯同步叶子，5 个状态：
+`state_machine.rs` 是 crate 根部的纯同步叶子，5 个状态：
 
 | 状态 | 含义 |
 |------|------|
@@ -112,11 +143,11 @@ lib.rs
 | `WaitSecondClick` | 短按松开后等待双击 |
 | `ContinuousRecording` | 双击触发，再按一次停止 |
 
-状态机通过 `next_deadline()` 把下一个超时点暴露给外层（`state_machine.rs:191-198`），由 `tokio::time::sleep_until` 驱动。
+状态机通过 `next_deadline()` 把下一个超时点暴露给外层，由 `tokio::time::sleep_until` 驱动。
 
 ### 录音 → 转写 → 润色 → 分发
 
-`handlers.rs:34-117` 的调用链如下：
+`handlers.rs` 的 `handle_stop_record` 调用链如下：
 
 | 步骤 | 输入 | 输出/行为 | 出错处理 |
 |------|------|-----------|----------|
@@ -129,15 +160,15 @@ lib.rs
 关键点：
 
 - 转写失败、润色失败都是**可恢复降级**。
-- 剪贴板失败、历史追加失败只 `tracing::warn!`，不中断结果返回（`handlers.rs:184-199`）。
+- 剪贴板失败、历史追加失败只 `tracing::warn!`，不中断结果返回（见 `process_transcription_result`）。
 
 ### 本地引擎：内嵌常驻
 
-转写路径固定走 `SherpaTranscriber`（`sherpa.rs`）：sherpa-onnx 编译进主程序，模型在管道启动时加载一次并常驻内存，之后每句话直接推理（`accept_waveform` → `decode`），没有进程启动与冷载成本。推理是 CPU 密集同步操作，经 `spawn_blocking` 放入阻塞线程池。模型文件缺失或加载失败在构造期报错（`ModelLoadFailed`）。
+`SherpaTranscriber`（`sherpa.rs`）内嵌 sherpa-onnx 跑本地 SenseVoice int8 模型。sherpa-onnx 编译进主程序，模型在管道启动时加载一次并常驻内存，之后每句话直接推理（`accept_waveform` → `decode`），没有进程启动与冷载成本。推理是 CPU 密集同步操作，经 `spawn_blocking` 放入阻塞线程池。模型文件缺失或加载失败在构造期报错（`TranscriberError::ModelLoadFailed`）。
 
 ### 润色 prompt 三级回退
 
-`polisher.rs` 构造 `LLMFormatter` 时，`from_config_with_sources`（`polisher.rs:327`）统一驱动三级回退（`build_prompt_source_chain`，`polisher.rs:528-558`）：
+`polisher.rs` 构造 `LLMFormatter` 时，`from_config_with_sources` 统一驱动三级回退（`build_prompt_source_chain`）：
 
 1. `PromptStore` 加载的 `resources/prompts/` 模板（`base.txt` + 档级后缀）。
 2. 配置里的 `system_prompt`（非空时）。
@@ -155,25 +186,25 @@ lib.rs
 
 | 分类 | 用途 | 典型枚举 |
 |------|------|----------|
-| `FatalError` | 构建期，管道不启动 | `ModelNotFound` / `KeyListenerFailed` / `TranscriberInitFailed` / `PolisherInitFailed` / `RecorderInitFailed` |
+| `FatalError` | 构建期，管道不启动 | `ModelNotFound` / `ApiAuthFailed` / `KeyListenerFailed` / `TranscriberInitFailed` / `PolisherInitFailed` / `RecorderInitFailed` |
 | `RecoverableError` | 运行时，降级继续 | `TranscriptionFailed` / `PolishingFailed` / `RecordingFailed` / `EmptyTranscription` |
 
-trait 边界一律返回自定义 thiserror 枚举：`RecorderError` / `OutputError` / `KeyListenerError` / `ModelError` / `ConfigError` / `HistoryError`。`recorder/mod.rs:45-52` 专门测试防止回退到 `anyhow`。
+模块边界一律返回自定义 thiserror 枚举：`TranscriberError` / `PolisherError` / `RecorderError` / `OutputError` / `KeyListenerError` / `ModelError` / `ConfigError` / `HistoryError`。`recorder` 模块有专门测试防止 trait 边界回退到 `anyhow`。
 
 一个小不一致：运行时 handler 里的错误实际走 `to_string()` + `sink.on_error`，结构化 `PipelineError` 主要用于构建期——两套机制并行存在。
 
 ## 五、平台抽象
 
-平台服务通过 trait 隔离：
+支持范围：Linux（Ubuntu 22.04+）的 x86_64 与 aarch64，无其他平台。平台服务仍全部收在 trait 后面，各模块的实现文件按平台命名为 `linux.rs`——这是未来加平台时的扩展点，也是测试注入 fake 的接缝：
 
 | 模块 | Trait | Linux 实现 |
 |------|-------|------------|
 | `key_listener` | `KeyListener::start()` | `xinput test-xi2` / `evtest` |
-| `recorder` | `Recorder::start/stop/is_recording` | `parecord` 子进程 |
+| `recorder` | `Recorder::start_recording/stop_recording/is_recording` | `parecord` 子进程 |
 | `output` | `Output::write_clipboard` + `clone_box` | `xclip`/`xsel`/`wl-copy` 探测一次 |
 | `key_capture` | 无（自由函数） | `evtest` 枚举 `/dev/input` 等一次按键 |
 
-录音输出由 Linux `parecord` 直接提供 16kHz 单声道 WAV。
+`parecord` 输出 16kHz 单声道 16 位 PCM，`audio.rs` 在录音停止时编码为 WAV——这是 SenseVoice 唯一接受的输入格式。
 
 `Box<dyn Trait>` 用于 `PipelineContext` 字段与 builder 返回值；`Arc<dyn Trait>` 用于 Tauri 侧注入。
 
@@ -216,5 +247,5 @@ trait 边界一律返回自定义 thiserror 枚举：`RecorderError` / `OutputEr
 
 - `voice_pipeline` 完全不 import Tauri，全靠 trait seam。
 - 状态机、`overlay/manager` 都是干净的叶子/纯逻辑，测试覆盖好。
-- 回退链设计成熟：转写网、`prompt` 三级、模型下载官方→镜像。
+- 回退链设计成熟：`prompt` 三级、模型下载官方→镜像。
 - 错误分类致命/可恢复边界清晰。
