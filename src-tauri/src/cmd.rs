@@ -45,6 +45,7 @@ pub struct ConfigResponse {
     pub model: String,
     pub polish_level: String,
     pub polish_model: String,
+    pub polish_protocol: String,
     pub polish_api_base_url: String,
     pub gui_language: String,
     pub overlay_position: String,
@@ -59,6 +60,7 @@ fn build_config_response(cfg: &crate::config::Config) -> ConfigResponse {
         model: cfg.transcriber.model.clone(),
         polish_level: cfg.polisher.level.clone(),
         polish_model: cfg.polisher.model.clone(),
+        polish_protocol: cfg.polisher.protocol.clone(),
         polish_api_base_url: cfg.polisher.api_base_url.clone(),
         gui_language: cfg.gui.language.clone(),
         overlay_position: cfg.gui.overlay_position.clone(),
@@ -310,6 +312,43 @@ pub async fn polish_history_entry(
         let _ = app.emit(event, ());
     })
     .await
+}
+
+/// 测试润色 API 连接：基于表单当前值发一次最小请求，不落盘、不重启流水线。
+///
+/// 密钥为空时回落到已保存的密钥，方便「填好后未保存」与「已保存」两种状态都能测。
+#[tauri::command]
+pub async fn test_polisher_connection(
+    config_store: State<'_, ConfigStore>,
+    protocol: String,
+    api_base_url: String,
+    api_key: String,
+    model: String,
+) -> Result<(), String> {
+    let stored = config_store.snapshot().await;
+    let api_key = if api_key.trim().is_empty() {
+        stored.polisher.api_key.clone()
+    } else {
+        api_key
+    };
+
+    if api_base_url.trim().is_empty() {
+        return Err("API 地址为空，请先填写。".to_string());
+    }
+    if model.trim().is_empty() {
+        return Err("模型名称为空，请先填写。".to_string());
+    }
+    if api_key.trim().is_empty() {
+        return Err("API 密钥为空，请先填写（或此前已保存过密钥）。".to_string());
+    }
+
+    let proto = protocol
+        .parse::<polisher::protocol::ApiProtocol>()
+        .map_err(|e| polisher::describe_test_error(&e))?;
+
+    polisher::test_connection(api_key.trim(), api_base_url.trim(), model.trim(), proto)
+        .await
+        .map_err(|e| polisher::describe_test_error(&e))
 }
 
 #[cfg(test)]

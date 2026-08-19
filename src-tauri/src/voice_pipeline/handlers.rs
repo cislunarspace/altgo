@@ -78,6 +78,7 @@ pub async fn handle_stop_record(
             text: String::new(),
             raw_text: String::new(),
             polish_failed: false,
+            polish_error: None,
         });
         return;
     }
@@ -85,12 +86,14 @@ pub async fn handle_stop_record(
     sink.on_progress("polish", None);
 
     let mut polish_failed = false;
+    let mut polish_error: Option<String> = None;
     let raw_text = result.text.clone();
     let polished = match formatter.polish(&raw_text, polish_level).await {
         Ok(p) => p,
         Err(e) => {
             tracing::warn!(error = %e, "polish failed, using raw text");
             polish_failed = true;
+            polish_error = Some(e.to_string());
             raw_text.clone()
         }
     };
@@ -103,6 +106,7 @@ pub async fn handle_stop_record(
         text: polished,
         raw_text,
         polish_failed,
+        polish_error,
     };
     sink.on_transcription_result(&output);
 }
@@ -212,6 +216,11 @@ mod tests {
 
     fn test_output(raw: &str, polished: &str, polish_failed: bool) -> TranscriptionResult {
         TranscriptionResult {
+            polish_error: if polish_failed {
+                Some("test error".to_string())
+            } else {
+                None
+            },
             raw_text: raw.to_string(),
             text: polished.to_string(),
             polish_failed,

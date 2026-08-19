@@ -34,6 +34,9 @@ pub struct ChatRequest {
     pub messages: Vec<ChatMessage>,
     pub temperature: f32,
     pub max_tokens: u32,
+    /// 按服务商附加的顶层字段（如关闭思考的参数），序列化时平铺进请求体。
+    #[serde(flatten, skip_serializing_if = "Option::is_none")]
+    pub extra: Option<serde_json::Map<String, serde_json::Value>>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

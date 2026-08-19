@@ -302,6 +302,16 @@
   animation: overlay-fade-slide 0.35s var(--ease-out) 0.1s both;
 }
 
+.result-polish-error {
+  flex-shrink: 0;
+  align-self: center;
+  font-size: var(--text-xs);
+  color: var(--color-red, #e5484d);
+  opacity: 0.9;
+  cursor: help;
+  white-space: nowrap;
+}
+
 /* ============================================
    Action Buttons
    ============================================ */

@@ -17,7 +17,7 @@ altgo 是基于 Tauri 的桌面语音转文字工具：Rust 后端承载整条�
 +-----------------+
 |   React 前端     |  设置 / 历史 / 浮窗
 +-----------------+
-         | IPC (14 命令 + 9 事件)
+         | IPC (15 命令 + 10 事件)
          v
 +-----------------+
 |  装配层 lib.rs   |  spawn_pipeline_thread：管理状态、组合 seam
@@ -212,9 +212,9 @@ lib.rs
 
 ### 命令
 
-`cmd.rs` 暴露 14 个命令：
+`cmd.rs` 暴露 15 个命令：
 
-- 配置 3：`get_config`、`save_config`、`capture_activation_key`
+- 配置 4：`get_config`、`save_config`、`capture_activation_key`、`test_polisher_connection`
 - 流水线 1：`start_pipeline`
 - 浮窗 2：`copy_text`、`hide_overlay`
 - 模型 4：`list_models`、`download_model`、`delete_model`、`resolve_model`
@@ -222,9 +222,11 @@ lib.rs
 
 ### 事件
 
-共 9 个 Tauri 事件：
+共 10 个 Tauri 事件：
 
-`pipeline-status`、`pipeline-error`、`transcription-result`、`transcription-progress`、`key-listener-backend`、`history-updated`、`overlay-state`、`model-download-progress`、`model-download-finished`。
+`pipeline-status`、`pipeline-error`、`transcription-result`、`polish-failed`、`transcription-progress`、`key-listener-backend`、`history-updated`、`overlay-state`、`model-download-progress`、`model-download-finished`。
+
+`polish-failed` 携带润色失败原因字符串，在 `transcription-result` 之前发出；悬浮窗 done 阶段据此显示「润色失败，已使用原文」。
 
 ### 序列化契约
 

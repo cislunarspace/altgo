@@ -173,8 +173,10 @@ mod tests {
     async fn apply_patch_invalid_config_rolls_back_memory() {
         let (store, _dir) = temp_store();
         // Set up a valid config with polishing enabled.
-        let patch: ConfigPatch =
-            serde_json::from_str(r#"{"polishLevel":"light","polishApiKey":"polish-key"}"#).unwrap();
+        let patch: ConfigPatch = serde_json::from_str(
+            r#"{"polishLevel":"light","polishApiKey":"polish-key","polishApiBaseUrl":"https://api.deepseek.com","polishModel":"deepseek-chat"}"#,
+        )
+        .unwrap();
         store.apply_patch(patch).await.unwrap();
         let original = store.snapshot().await;
         assert_eq!(original.transcriber.model, "");
@@ -197,8 +199,10 @@ mod tests {
     #[tokio::test]
     async fn apply_patch_rollback_then_valid_patch_still_works() {
         let (store, _dir) = temp_store();
-        let patch: ConfigPatch =
-            serde_json::from_str(r#"{"polishLevel":"light","polishApiKey":"polish-key"}"#).unwrap();
+        let patch: ConfigPatch = serde_json::from_str(
+            r#"{"polishLevel":"light","polishApiKey":"polish-key","polishApiBaseUrl":"https://api.deepseek.com","polishModel":"deepseek-chat"}"#,
+        )
+        .unwrap();
         store.apply_patch(patch).await.unwrap();
 
         let invalid_patch: ConfigPatch =

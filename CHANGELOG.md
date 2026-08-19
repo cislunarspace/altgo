@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+### Fixes
+
+- **修复润色 API 地址拼接错误**：此前无条件在 base URL 后拼 `/v1/chat/completions`，而设置页大部分供应商预设（Kimi、智谱、通义、OpenAI、SiliconFlow）的地址自带 `/v1` 或 `/v4`，实际请求打到 `/v1/v1/...` 必然 404。现在按协议推导请求地址：地址不带路径时自动补 `/v1/...`，带版本路径（`/v1`、`/api/paas/v4` 等）时只接 `/chat/completions` 或 `/messages`，填写完整 endpoint 亦原样可用。
+- **修复 Anthropic 协议无法从设置页生效**：`protocol` 此前不在设置保存链路里，选 Anthropic 预设后仍按 OpenAI 协议请求。现在协议随预设自动带出，也可在设置页手动选择。
+- **润色失败不再静默**：实时链路润色失败只写日志并回退原文，用户无从知晓。现在失败时悬浮窗会显示「润色失败，已使用原文」（悬停可看原因）；历史页再润色在级别为「关闭」时给出明确提示。
+- **配置校验补全**：润色开启时除密钥外，同时校验 API 地址与模型名非空，错误信息逐项列出缺失字段。
+
+### Added
+
+- **供应商预设清单迁移自 cc-switch**：设置页预设从 13 家扩至 99 家（新增「第三方中转」分组），涵盖国产官方、聚合服务与中转站的 Anthropic / OpenAI 双协议端点，全部端点与默认模型取自 cc-switch 内置清单（过滤了 OAuth、Bedrock 等不适用条目，剥离了推广参数）。
+- **Anthropic 协议双鉴权头**：请求同时携带 `x-api-key` 与 `Authorization: Bearer`，官方端点与多数中转端点（用 Bearer token 鉴权）均可直接使用。
+- **新增 6 家润色供应商预设**：火山方舟（豆包）、百度千帆、MiniMax、OpenRouter、Google Gemini（OpenAI 兼容端点）与本地 Ollama，预设含各自的推荐模型目录。
+- **润色默认关闭「思考」**：语音润色是轻量任务，推理模型先思考再回答会多出数秒延迟与花费。现在对通义、SiliconFlow、智谱、火山方舟、MiniMax、OpenRouter 的请求自动附带各家对应的关闭思考参数（`enable_thinking: false` / `thinking: {"type": "disabled"}` / `reasoning: {"enabled": false}`）；其他服务商的推荐模型默认不思考，不发送任何额外字段。
+- **设置页「测试连接」**：润色分区新增按钮，基于表单当前值（密钥留空则用已存密钥）发一次最小请求，立即反馈密钥无效、地址不对、超时等原因，无需先保存或录音验证。
+- **清除已存密钥**：设置页可清除已保存的 API 密钥。
+
+### Changed
+
+- **刷新过期的预设模型目录**：Kimi 的 moonshot-v1 系列（2026-08-31 停服）与 kimi-k2 系列已下线，预设默认改为 `kimi-k2.6`（目录含 `kimi-k3`）；智谱 `glm-4-flash` 系列迁移为免费的 `glm-4.7-flash`；通义默认改为 `qwen-flash`；SiliconFlow 默认改为 `Qwen/Qwen3-8B`。
+
 ## v2.5.10 (2026-08-19)
 
 ### Fixes

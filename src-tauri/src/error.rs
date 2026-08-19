@@ -152,6 +152,9 @@ pub enum PolisherError {
     #[error("Unknown protocol: {protocol}")]
     UnknownProtocol { protocol: String },
 
+    #[error("invalid API base URL: {0}")]
+    InvalidBaseUrl(String),
+
     #[error("API key not configured")]
     MissingApiKey,
 
@@ -181,6 +184,11 @@ impl PolisherError {
                 format!(
                     "未知的润色协议: '{}'。请使用 'openai' 或 'anthropic'。",
                     protocol
+                )
+            }
+            Self::InvalidBaseUrl(url) => {
+                format!(
+                    "润色 API 地址无效：'{url}'。请填写完整的 URL（如 https://api.deepseek.com）。"
                 )
             }
             Self::MissingApiKey => "润色 API 密钥未配置。请在设置中添加 API 密钥。".to_string(),

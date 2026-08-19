@@ -47,6 +47,17 @@ api_base_url = "https://..."
 model = "your-model"
 ```
 
+### `api_base_url` 写法
+
+两种写法都支持，应用会自动拼出正确的请求地址：
+
+- **不带版本路径**（origin）：如 `https://api.deepseek.com`、`https://api.anthropic.com`，自动补 `/v1/chat/completions` 或 `/v1/messages`；
+- **带版本路径**：如 `https://api.moonshot.cn/v1`、`https://open.bigmodel.cn/api/paas/v4`、`https://dashscope.aliyuncs.com/compatible-mode/v1`，只在后面接 `/chat/completions` 或 `/messages`。
+
+也可以直接填完整 endpoint（以 `/chat/completions` 或 `/messages` 结尾），此时原样使用。
+
+设置页的「润色」分区有**测试连接**按钮：选好供应商预设、填入密钥后点击，会立即发一次最小请求并给出可读的结果（密钥无效、地址不对、超时等），无需先保存或实际录音验证。
+
 ### 支持的 Provider
 
 #### OpenAI
@@ -79,6 +90,56 @@ api_base_url = "https://api.anthropic.com"
 model = "claude-sonnet-4-20250514"
 ```
 
+#### 火山方舟（豆包）
+
+```toml
+[polisher]
+protocol = "openai"
+api_key = "your-ark-key"
+api_base_url = "https://ark.cn-beijing.volces.com/api/v3"
+model = "doubao-seed-1.6-flash-250828"
+```
+
+#### 百度千帆
+
+```toml
+[polisher]
+protocol = "openai"
+api_key = "your-qianfan-key"
+api_base_url = "https://qianfan.baidubce.com/v2"
+model = "ernie-4.5-turbo-128k"
+```
+
+#### MiniMax
+
+```toml
+[polisher]
+protocol = "openai"
+api_key = "your-minimax-key"
+api_base_url = "https://api.minimaxi.com/v1"
+model = "MiniMax-M3"
+```
+
+#### OpenRouter
+
+```toml
+[polisher]
+protocol = "openai"
+api_key = "your-openrouter-key"
+api_base_url = "https://openrouter.ai/api/v1"
+model = "deepseek/deepseek-chat"
+```
+
+#### Google Gemini（OpenAI 兼容端点）
+
+```toml
+[polisher]
+protocol = "openai"
+api_key = "your-google-key"
+api_base_url = "https://generativelanguage.googleapis.com/v1beta/openai"
+model = "gemini-2.5-flash-lite"
+```
+
 #### 本地 Ollama
 
 ```toml
@@ -88,6 +149,20 @@ api_key = "ollama"
 api_base_url = "http://localhost:11434"
 model = "qwen2.5:7b"
 ```
+
+设置页内置约百家供应商预设（原生 13 家 + 迁移自 [cc-switch](https://github.com/farion1231/cc-switch) 的 86 家，涵盖国产官方、聚合服务与第三方中转的 Anthropic / OpenAI 双协议端点），选择后自动填入地址与协议，只需补上密钥。带有 `(Anthropic)` / `(OpenAI)` 后缀的是同一供应商的不同协议端点。
+
+### 默认关闭「思考」
+
+语音润色是轻量文本任务，推理模型先「思考」再回答会凭空多出数秒延迟和 token 花费。对支持关闭思考的服务商，应用会自动在请求中附带关闭参数，无需配置：
+
+| 服务商 | 自动附带的参数 |
+|---|---|
+| 通义（dashscope）、SiliconFlow | `enable_thinking: false` |
+| 智谱、火山方舟、MiniMax | `thinking: {"type": "disabled"}` |
+| OpenRouter | `reasoning: {"enabled": false}` |
+
+其他服务商（OpenAI、DeepSeek、Anthropic、千帆、Gemini、Ollama）的推荐模型默认不思考，无需处理。注意个别强制思考的模型（如智谱 GLM-5.3）不接受关闭参数，选择预设推荐的模型即可避开。
 
 环境变量覆盖密钥：
 
