@@ -427,6 +427,19 @@ export default function Settings() {
               </select>
             </div>
           </div>
+          <div className="settings-field">
+            <span className="settings-field-label-text">{t("settings.overlay_position")}</span>
+            <div className="settings-field-control">
+              <select
+                className="settings-select"
+                value={config.overlayPosition}
+                onChange={(e) => update("overlayPosition", e.target.value)}
+              >
+                <option value="bottom_center">{t("settings.overlay_position_bottom")}</option>
+                <option value="top_center">{t("settings.overlay_position_top")}</option>
+              </select>
+            </div>
+          </div>
         </section>
 
         <section className="settings-section">

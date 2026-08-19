@@ -12,7 +12,7 @@ use crate::{
     history::HistoryStore,
     key_capture::KeyCapture,
     output,
-    overlay::manager::{OverlayManager, OverlayState},
+    overlay::manager::{OverlayManager, OverlayPosition, OverlayState},
     overlay::tauri::TauriOverlayWindow,
     pipeline_controller::PipelineController,
     polisher, voice_pipeline,
@@ -47,6 +47,7 @@ pub struct ConfigResponse {
     pub polish_model: String,
     pub polish_api_base_url: String,
     pub gui_language: String,
+    pub overlay_position: String,
     pub has_polisher_api_key: bool,
 }
 
@@ -60,6 +61,7 @@ fn build_config_response(cfg: &crate::config::Config) -> ConfigResponse {
         polish_model: cfg.polisher.model.clone(),
         polish_api_base_url: cfg.polisher.api_base_url.clone(),
         gui_language: cfg.gui.language.clone(),
+        overlay_position: cfg.gui.overlay_position.clone(),
         has_polisher_api_key: !cfg.polisher.api_key.trim().is_empty(),
     }
 }
@@ -135,7 +137,8 @@ pub async fn copy_text(
 
 #[tauri::command]
 pub async fn hide_overlay(app: tauri::AppHandle) -> Result<(), String> {
-    OverlayManager::new(TauriOverlayWindow::new(app)).set_state(OverlayState::hidden());
+    OverlayManager::new(TauriOverlayWindow::new(app), OverlayPosition::BottomCenter)
+        .set_state(OverlayState::hidden());
     Ok(())
 }
 
@@ -501,6 +504,7 @@ mod tests {
         assert_eq!(resp.model, "sense-voice");
         assert!(resp.has_polisher_api_key);
         assert_eq!(resp.polish_level, "light");
+        assert_eq!(resp.overlay_position, "bottom_center");
     }
 
     struct FakeOutput {

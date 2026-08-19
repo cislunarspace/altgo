@@ -11,6 +11,7 @@ export interface AppConfig {
   polishModel: string;
   polishApiBaseUrl: string;
   guiLanguage: string;
+  overlayPosition: string;
   polisherApiKey: string;
   hasPolisherApiKey: boolean;
 }
@@ -26,6 +27,7 @@ export function saveRequestBody(c: AppConfig) {
     ...(c.polisherApiKey ? { polishApiKey: c.polisherApiKey } : {}),
     polishApiBaseUrl: c.polishApiBaseUrl,
     guiLanguage: c.guiLanguage,
+    overlayPosition: c.overlayPosition,
   };
 }
 

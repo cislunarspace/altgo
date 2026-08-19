@@ -7,6 +7,7 @@ pub mod audio;
 pub mod cmd;
 pub mod config;
 pub mod config_store;
+pub mod display_backend;
 pub mod error;
 pub mod history;
 pub mod key_capture;
@@ -51,6 +52,7 @@ pub(crate) fn spawn_pipeline_thread(
     let overlay: Arc<dyn overlay::seam::OverlaySink> =
         Arc::new(overlay::manager::OverlayManager::new(
             overlay::tauri::TauriOverlayWindow::new(app_handle.clone()),
+            overlay::seam::OverlayPosition::effective(&cfg.gui.overlay_position),
         ));
 
     let thread_handle = std::thread::spawn(move || {
@@ -87,6 +89,16 @@ pub(crate) fn spawn_pipeline_thread(
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Wayland 下客户端窗口定位不可用（set_position 是 no-op），悬浮窗会被
+    // 合成器摆到屏幕中央。GUI 初始化之前切到 X11 后端（XWayland）使定位生效；
+    // 用户显式设置的 GDK_BACKEND 优先。
+    if let Some(backend) = display_backend::resolve_display_backend(
+        std::env::var_os("WAYLAND_DISPLAY").is_some(),
+        std::env::var("GDK_BACKEND").ok().as_deref(),
+    ) {
+        std::env::set_var("GDK_BACKEND", backend);
+    }
+
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {

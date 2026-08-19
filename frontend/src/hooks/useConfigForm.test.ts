@@ -11,9 +11,15 @@ describe("saveRequestBody", () => {
     polishModel: "",
     polishApiBaseUrl: "",
     guiLanguage: "zh",
+    overlayPosition: "bottom_center",
     polisherApiKey: "",
     hasPolisherApiKey: false,
   };
+
+  it("includes overlayPosition in the request body", () => {
+    const result = saveRequestBody({ ...base, overlayPosition: "top_center" });
+    expect(result).toHaveProperty("overlayPosition", "top_center");
+  });
 
   it("includes polishApiKey when polisherApiKey is non-empty", () => {
     const result = saveRequestBody({ ...base, polisherApiKey: "sk-def" });
@@ -54,6 +60,7 @@ describe("normalizeConfig", () => {
       polishModel: "",
       polishApiBaseUrl: "",
       guiLanguage: "zh",
+      overlayPosition: "bottom_center",
       polisherApiKey: "secret",
       hasPolisherApiKey: true,
     };
