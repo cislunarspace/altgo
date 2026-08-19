@@ -17,7 +17,7 @@ use tauri::{LogicalSize, PhysicalPosition};
 
 use crate::overlay::seam::{OverlayError, OverlaySink, OverlayWindow};
 
-pub use crate::overlay::seam::{OverlayPhase, OverlayState};
+pub use crate::overlay::seam::{OverlayPhase, OverlayPosition, OverlayState};
 
 /// 悬浮窗的固定逻辑尺寸（CSS pixels）。
 ///
@@ -26,8 +26,8 @@ pub use crate::overlay::seam::{OverlayPhase, OverlayState};
 /// 在部分 Linux WM 上会合成出黑边，且窗口变形与前端 crossfade 错位会造成跳变。
 const OVERLAY_SIZE: (f64, f64) = (520.0, 180.0);
 
-/// 距屏幕底部的偏移（CSS pixels）。
-const BOTTOM_OFFSET: f64 = 80.0;
+/// 距屏幕边缘的偏移（CSS pixels），底部居中与顶部居中共用。
+const EDGE_OFFSET: f64 = 80.0;
 
 /// hidden 事件发出后、真正 hide 之前的延迟，给前端 exit 动画留出播放时间
 /// （前端 --duration-normal 为 180ms，再加少量余量）。
@@ -37,15 +37,18 @@ const HIDE_DELAY: Duration = Duration::from_millis(220);
 #[derive(Clone)]
 pub struct OverlayManager<W: OverlayWindow> {
     window: W,
+    /// 悬浮窗的屏幕位置，构造时注入；配置变更经流水线重启后生效。
+    position: OverlayPosition,
     /// 代际计数：每次 set_state 递增。延迟 hide 执行前比对代际，
     /// 防止「hide 延迟期间用户重新开始录音」时旧 hide 关掉新内容。
     generation: Arc<AtomicU64>,
 }
 
 impl<W: OverlayWindow + 'static> OverlayManager<W> {
-    pub fn new(window: W) -> Self {
+    pub fn new(window: W, position: OverlayPosition) -> Self {
         Self {
             window,
+            position,
             generation: Arc::new(AtomicU64::new(0)),
         }
     }
@@ -81,7 +84,7 @@ impl<W: OverlayWindow + 'static> OverlayManager<W> {
             tracing::warn!(%error, "overlay set_size failed");
         }
 
-        match position_overlay(&self.window, width, height) {
+        match position_overlay(&self.window, width, height, self.position) {
             Ok(position) => {
                 if let Err(error) = self.window.set_position(position) {
                     tracing::warn!(%error, "overlay set_position failed");
@@ -116,16 +119,22 @@ fn position_overlay<W: OverlayWindow>(
     window: &W,
     width: f64,
     height: f64,
+    position: OverlayPosition,
 ) -> Result<PhysicalPosition<i32>, OverlayError> {
     let (monitor_x, monitor_y, monitor_width, monitor_height) =
         window.primary_monitor_geometry()?;
     let scale = window.scale_factor()?;
     let physical_width = (width * scale).round() as i32;
     let physical_height = (height * scale).round() as i32;
-    let offset_physical = (BOTTOM_OFFSET * scale).round() as i32;
+    let offset_physical = (EDGE_OFFSET * scale).round() as i32;
 
     let x = monitor_x + (monitor_width - physical_width) / 2;
-    let y = monitor_y + monitor_height - physical_height - offset_physical;
+    let y = match position {
+        OverlayPosition::BottomCenter => {
+            monitor_y + monitor_height - physical_height - offset_physical
+        }
+        OverlayPosition::TopCenter => monitor_y + offset_physical,
+    };
 
     tracing::debug!(
         "overlay pos: primary=({},{},{},{}) pos=({},{}) scale={}",
@@ -302,7 +311,7 @@ mod tests {
     #[test]
     fn test_visible_state_calls_window_in_order() {
         let window = RecordingOverlayWindow::new((0, 0, 1920, 1080), 1.0);
-        let manager = OverlayManager::new(window.clone());
+        let manager = OverlayManager::new(window.clone(), OverlayPosition::BottomCenter);
 
         manager.set_state(OverlayState::recording());
 
@@ -323,7 +332,7 @@ mod tests {
     #[test]
     fn test_hidden_state_emits_then_hides_after_delay() {
         let window = RecordingOverlayWindow::new((0, 0, 1920, 1080), 1.0);
-        let manager = OverlayManager::new(window.clone());
+        let manager = OverlayManager::new(window.clone(), OverlayPosition::BottomCenter);
 
         manager.set_state(OverlayState::hidden());
 
@@ -337,7 +346,7 @@ mod tests {
     #[test]
     fn test_pending_hide_is_cancelled_by_newer_state() {
         let window = RecordingOverlayWindow::new((0, 0, 1920, 1080), 1.0);
-        let manager = OverlayManager::new(window.clone());
+        let manager = OverlayManager::new(window.clone(), OverlayPosition::BottomCenter);
 
         // hidden 的延迟 hide 还没执行，用户又开始录音：
         // 旧 hide 不得把新内容关掉。
@@ -351,7 +360,7 @@ mod tests {
     #[test]
     fn test_visible_state_shows_even_when_positioning_fails() {
         let window = RecordingOverlayWindow::with_monitor_error(1.0);
-        let manager = OverlayManager::new(window.clone());
+        let manager = OverlayManager::new(window.clone(), OverlayPosition::BottomCenter);
 
         manager.set_state(OverlayState::recording());
 
@@ -370,7 +379,7 @@ mod tests {
     #[test]
     fn test_visible_state_shows_and_emits_when_prepare_fails() {
         let window = RecordingOverlayWindow::with_prepare_error((0, 0, 1920, 1080), 1.0);
-        let manager = OverlayManager::new(window.clone());
+        let manager = OverlayManager::new(window.clone(), OverlayPosition::BottomCenter);
 
         manager.set_state(OverlayState::recording());
 
@@ -386,7 +395,8 @@ mod tests {
     #[test]
     fn test_position_overlay_applies_scale_factor() {
         let window = RecordingOverlayWindow::new((100, 50, 3840, 2160), 2.0);
-        let position = position_overlay(&window, 200.0, 48.0).unwrap();
+        let position =
+            position_overlay(&window, 200.0, 48.0, OverlayPosition::BottomCenter).unwrap();
 
         assert_eq!(position, PhysicalPosition::new(1820, 1954));
     }
@@ -401,7 +411,7 @@ mod tests {
             false,
             false,
         );
-        let manager = OverlayManager::new(window.clone());
+        let manager = OverlayManager::new(window.clone(), OverlayPosition::BottomCenter);
 
         manager.set_state(OverlayState::hidden());
         std::thread::sleep(HIDE_DELAY + Duration::from_millis(100));
@@ -420,7 +430,7 @@ mod tests {
             false,
             false,
         );
-        let manager = OverlayManager::new(window.clone());
+        let manager = OverlayManager::new(window.clone(), OverlayPosition::BottomCenter);
 
         manager.set_state(OverlayState::recording());
 
@@ -438,7 +448,7 @@ mod tests {
             true,
             false,
         );
-        let manager = OverlayManager::new(window.clone());
+        let manager = OverlayManager::new(window.clone(), OverlayPosition::BottomCenter);
 
         manager.set_state(OverlayState::recording());
 
@@ -456,7 +466,7 @@ mod tests {
             false,
             true,
         );
-        let manager = OverlayManager::new(window.clone());
+        let manager = OverlayManager::new(window.clone(), OverlayPosition::BottomCenter);
 
         manager.set_state(OverlayState::recording());
 
@@ -465,9 +475,18 @@ mod tests {
     }
 
     #[test]
+    fn test_position_overlay_top_center() {
+        let window = RecordingOverlayWindow::new((0, 0, 1920, 1080), 1.0);
+        let position = position_overlay(&window, 520.0, 180.0, OverlayPosition::TopCenter).unwrap();
+
+        // 顶部居中：x 与底部居中相同，y 为屏幕上沿加同样的偏移。
+        assert_eq!(position, PhysicalPosition::new(700, 80));
+    }
+
+    #[test]
     fn test_scale_factor_failure_returns_err() {
         let window = RecordingOverlayWindow::with_scale_error();
-        let result = position_overlay(&window, 520.0, 180.0);
+        let result = position_overlay(&window, 520.0, 180.0, OverlayPosition::BottomCenter);
 
         assert!(result.is_err());
     }
@@ -476,7 +495,8 @@ mod tests {
     fn test_negative_x_coordinate_clamped() {
         // Monitor narrower than the overlay width (scale 1.0).
         let window = RecordingOverlayWindow::new((0, 0, 500, 1080), 1.0);
-        let position = position_overlay(&window, 520.0, 180.0).unwrap();
+        let position =
+            position_overlay(&window, 520.0, 180.0, OverlayPosition::BottomCenter).unwrap();
 
         // x is negative because physical_width > monitor_width; integer division yields -10.
         assert_eq!(position.x, -10);
@@ -485,7 +505,7 @@ mod tests {
     #[test]
     fn test_hidden_hidden_cancels_first_hide() {
         let window = RecordingOverlayWindow::new((0, 0, 1920, 1080), 1.0);
-        let manager = OverlayManager::new(window.clone());
+        let manager = OverlayManager::new(window.clone(), OverlayPosition::BottomCenter);
 
         manager.set_state(OverlayState::hidden());
         std::thread::sleep(Duration::from_millis(50));
@@ -504,7 +524,8 @@ mod tests {
     #[test]
     fn test_position_overlay_non_integer_rounds() {
         let window = RecordingOverlayWindow::new((0, 0, 1920, 1080), 1.5);
-        let position = position_overlay(&window, 520.0, 180.0).unwrap();
+        let position =
+            position_overlay(&window, 520.0, 180.0, OverlayPosition::BottomCenter).unwrap();
 
         let physical_width = (520.0f64 * 1.5).round() as i32; // 780
         let physical_height = (180.0f64 * 1.5).round() as i32; // 270

@@ -135,3 +135,52 @@ pub trait OverlayWindow: Send + Sync + Clone {
     /// Return the primary monitor geometry as `(x, y, width, height)` physical pixels.
     fn primary_monitor_geometry(&self) -> Result<(i32, i32, i32, i32), OverlayError>;
 }
+
+/// 悬浮窗在屏幕上的预设位置。
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum OverlayPosition {
+    /// 底部居中（默认）。
+    #[default]
+    BottomCenter,
+    /// 顶部居中。
+    TopCenter,
+}
+
+impl OverlayPosition {
+    /// 从配置字符串解析；未知值回退到底部居中，保证旧配置与手误值可用。
+    pub fn effective(value: &str) -> Self {
+        match value {
+            "top_center" => Self::TopCenter,
+            _ => Self::BottomCenter,
+        }
+    }
+}
+
+#[cfg(test)]
+mod position_tests {
+    use super::OverlayPosition;
+
+    #[test]
+    fn effective_parses_known_values() {
+        assert_eq!(
+            OverlayPosition::effective("bottom_center"),
+            OverlayPosition::BottomCenter
+        );
+        assert_eq!(
+            OverlayPosition::effective("top_center"),
+            OverlayPosition::TopCenter
+        );
+    }
+
+    #[test]
+    fn effective_falls_back_to_bottom_center_for_unknown_values() {
+        assert_eq!(
+            OverlayPosition::effective(""),
+            OverlayPosition::BottomCenter
+        );
+        assert_eq!(
+            OverlayPosition::effective("left"),
+            OverlayPosition::BottomCenter
+        );
+    }
+}

@@ -197,12 +197,15 @@ impl Default for OutputConfig {
 pub struct GuiConfig {
     /// 界面语言：`"zh"` 或 `"en"`
     pub language: String,
+    /// 悬浮窗位置：`"bottom_center"`（默认）或 `"top_center"`
+    pub overlay_position: String,
 }
 
 impl Default for GuiConfig {
     fn default() -> Self {
         Self {
             language: "zh".to_string(),
+            overlay_position: "bottom_center".to_string(),
         }
     }
 }
@@ -369,6 +372,7 @@ pub struct ConfigPatch {
     pub polish_api_key: Option<String>,
     pub polish_api_base_url: Option<String>,
     pub gui_language: Option<String>,
+    pub overlay_position: Option<String>,
 }
 
 impl ConfigPatch {
@@ -401,6 +405,9 @@ impl ConfigPatch {
         }
         if let Some(ref v) = self.gui_language {
             cfg.gui.language = v.clone();
+        }
+        if let Some(ref v) = self.overlay_position {
+            cfg.gui.overlay_position = v.clone();
         }
     }
 }
