@@ -2,6 +2,10 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
 import { ThemeProvider } from "./ThemeContext";
+import { applyFontSize, applyWindowSize } from "./ui-size";
+
+applyFontSize();
+void applyWindowSize();
 import "./styles/global.css";
 import "./styles/layout.css";
 import "./styles/components/ui-primitives.css";
