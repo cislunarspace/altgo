@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v2.5.11 (2026-08-19)
+
 ### Fixes
 
 - **修复润色 API 地址拼接错误**：此前无条件在 base URL 后拼 `/v1/chat/completions`，而设置页大部分供应商预设（Kimi、智谱、通义、OpenAI、SiliconFlow）的地址自带 `/v1` 或 `/v4`，实际请求打到 `/v1/v1/...` 必然 404。现在按协议推导请求地址：地址不带路径时自动补 `/v1/...`，带版本路径（`/v1`、`/api/paas/v4` 等）时只接 `/chat/completions` 或 `/messages`，填写完整 endpoint 亦原样可用。
@@ -21,6 +23,10 @@
 ### Changed
 
 - **刷新过期的预设模型目录**：Kimi 的 moonshot-v1 系列（2026-08-31 停服）与 kimi-k2 系列已下线，预设默认改为 `kimi-k2.6`（目录含 `kimi-k3`）；智谱 `glm-4-flash` 系列迁移为免费的 `glm-4.7-flash`；通义默认改为 `qwen-flash`；SiliconFlow 默认改为 `Qwen/Qwen3-8B`。
+
+### CI
+
+- apt 系统依赖换用官方主站镜像，修复 amd64 下载过慢；CI 与 Release 统一 apt 缓存 key（check job 补装 rpm）；新增每日定时预热 apt 缓存的工作流，把冷启动下载挪出 CI 与 Release。
 
 ## v2.5.10 (2026-08-19)
 
