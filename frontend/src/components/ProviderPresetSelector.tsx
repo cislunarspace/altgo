@@ -1,12 +1,10 @@
-import { useState, useMemo } from "react";
-import { ChevronDown, ChevronRight, ExternalLink, Search, Star, Heart } from "lucide-react";
+import { useMemo, useState } from "react";
+import { ExternalLink, Plus, Search, X, Star, Heart } from "lucide-react";
 import type {
   ProviderPreset,
-  ProviderCategory,
   ModelType,
   ModelCatalogEntry,
 } from "../config/modelPresets";
-import { categoryOrder, categoryLabels, categoryLabelsEn } from "../config/modelPresets";
 
 interface Props {
   presets: ProviderPreset[];
@@ -23,187 +21,224 @@ export function ProviderPresetSelector({
   modelType: _modelType,
   currentApiBaseUrl,
   currentModel,
-  lang,
+  lang: _lang,
   t,
   onSelect,
 }: Props) {
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [search, setSearch] = useState("");
-  const [expandedCategory, setExpandedCategory] = useState<ProviderCategory | null>(null);
   const [expandedProvider, setExpandedProvider] = useState<string | null>(null);
 
-  // 按分类分组
-  const grouped = useMemo(() => {
-    const filtered = presets.filter(
-      (p) =>
-        p.name.toLowerCase().includes(search.toLowerCase()) ||
-        p.models.some((m) =>
-          m.displayName.toLowerCase().includes(search.toLowerCase())
-        )
+  const currentPreset = useMemo(
+    () =>
+      presets.find(
+        (preset) =>
+          preset.apiBaseUrl === currentApiBaseUrl ||
+          currentApiBaseUrl.includes(preset.apiBaseUrl.replace("https://", "").split("/")[0]),
+      ),
+    [presets, currentApiBaseUrl],
+  );
+
+  const filteredPresets = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    const result = presets.filter(
+      (preset) =>
+        query.length === 0 ||
+        preset.name.toLowerCase().includes(query) ||
+        preset.models.some(
+          (model) =>
+            model.displayName.toLowerCase().includes(query) ||
+            model.model.toLowerCase().includes(query),
+        ),
     );
 
-    const groups = new Map<ProviderCategory, ProviderPreset[]>();
-    for (const cat of categoryOrder) {
-      const items = filtered.filter((p) => p.category === cat);
-      if (items.length > 0) {
-        groups.set(cat, items);
-      }
+    if (currentPreset && !query) {
+      return [currentPreset, ...result.filter((preset) => preset.name !== currentPreset.name)];
     }
-    return groups;
-  }, [presets, search]);
+    return result;
+  }, [presets, search, currentPreset]);
 
-  // 检查是否为当前选中的预设
-  const isActive = (preset: ProviderPreset) =>
-    preset.apiBaseUrl === currentApiBaseUrl ||
-    currentApiBaseUrl.includes(preset.apiBaseUrl.replace("https://", "").split("/")[0]);
-
-  const labels = lang === "zh" ? categoryLabels : categoryLabelsEn;
+  const selectPreset = (preset: ProviderPreset, model?: ModelCatalogEntry) => {
+    onSelect(preset, model);
+    setPickerOpen(false);
+    setExpandedProvider(null);
+    setSearch("");
+  };
 
   return (
     <div className="provider-preset-selector">
-      <div className="provider-preset-search">
-        <Search size={14} />
-        <input
-          type="text"
-          placeholder={t("settings.search_providers")}
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
+      <div className="provider-preset-summary">
+        <div className="provider-preset-summary-main">
+          <span
+            className="provider-preset-icon"
+            style={{ backgroundColor: currentPreset?.iconColor || "#6B7280" }}
+          >
+            {currentPreset?.name.charAt(0) || "?"}
+          </span>
+          <div className="provider-preset-summary-info">
+            <span className="provider-preset-summary-label">{t("settings.provider_selected")}</span>
+            <strong className="provider-preset-summary-name">
+              {currentPreset?.name || t("settings.custom_provider")}
+            </strong>
+            <span className="provider-preset-summary-model">
+              {currentModel || currentApiBaseUrl || t("settings.provider_not_configured")}
+            </span>
+          </div>
+        </div>
+        <button
+          type="button"
+          className="settings-btn settings-btn-sm settings-btn-secondary provider-preset-add"
+          onClick={() => setPickerOpen(true)}
+        >
+          <Plus size={13} />
+          {currentPreset ? t("settings.change_provider") : t("settings.add_provider")}
+        </button>
       </div>
 
-      <div className="provider-preset-list">
-        {Array.from(grouped.entries()).map(([category, providers]) => (
-          <div key={category} className="provider-preset-category">
-            <button
-              type="button"
-              className="provider-preset-category-header"
-              onClick={() =>
-                setExpandedCategory(expandedCategory === category ? null : category)
-              }
-            >
-              {expandedCategory === category ? (
-                <ChevronDown size={12} />
+      {pickerOpen && (
+        <div
+          className="provider-preset-dialog-backdrop"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setPickerOpen(false);
+          }}
+        >
+          <div className="provider-preset-dialog" role="dialog" aria-modal="true">
+            <div className="provider-preset-dialog-head">
+              <div>
+                <h4>{t("settings.provider_picker_title")}</h4>
+                <p>{t("settings.provider_picker_lead")}</p>
+              </div>
+              <button
+                type="button"
+                className="provider-preset-dialog-close"
+                onClick={() => setPickerOpen(false)}
+                aria-label={t("settings.close_provider_picker")}
+                title={t("settings.close_provider_picker")}
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="provider-preset-search">
+              <Search size={14} />
+              <input
+                autoFocus
+                type="search"
+                placeholder={t("settings.search_providers")}
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+            </div>
+
+            <div className="provider-preset-list">
+              {filteredPresets.length === 0 ? (
+                <p className="provider-preset-empty">{t("settings.no_matching_providers")}</p>
               ) : (
-                <ChevronRight size={12} />
-              )}
-              <span className="provider-preset-category-label">
-                {labels[category]}
-              </span>
-              <span className="provider-preset-category-count">
-                {providers.length}
-              </span>
-            </button>
-
-            {(expandedCategory === category || search.length > 0) && (
-              <div className="provider-preset-items">
-                {providers.map((preset) => (
-                  <div
-                    key={preset.name}
-                    className={`provider-preset-item ${isActive(preset) ? "is-active" : ""}`}
-                  >
-                    <button
-                      type="button"
-                      className="provider-preset-header"
-                      onClick={() =>
-                        setExpandedProvider(
-                          expandedProvider === preset.name ? null : preset.name
-                        )
-                      }
-                    >
-                      <div className="provider-preset-info">
-                        <span
-                          className="provider-preset-icon"
-                          style={{
-                            backgroundColor: preset.iconColor || "#6B7280",
-                          }}
-                        >
-                          {preset.name.charAt(0)}
-                        </span>
-                        <span className="provider-preset-name">
-                          {preset.name}
-                        </span>
-                        {preset.primePartner && (
-                          <Heart size={12} className="provider-preset-badge provider-preset-badge--prime" />
-                        )}
-                        {preset.isPartner && !preset.primePartner && (
-                          <Star size={12} className="provider-preset-badge provider-preset-badge--partner" />
-                        )}
-                      </div>
-                      {preset.websiteUrl && (
-                        <a
-                          href={preset.websiteUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="provider-preset-link"
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          <ExternalLink size={11} />
-                        </a>
-                      )}
-                    </button>
-
-                    {expandedProvider === preset.name && (
-                      <div className="provider-preset-detail">
-                        {preset.descriptionKey && (
-                          <p className="provider-preset-desc">
-                            {t(preset.descriptionKey)}
-                          </p>
-                        )}
-
-                        {preset.apiKeyUrl && (
-                          <a
-                            href={preset.apiKeyUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="provider-preset-apikey-link"
-                          >
-                            {t("settings.get_api_key")} →
-                          </a>
-                        )}
-
-                        <div className="provider-preset-models">
-                          <span className="provider-preset-models-label">
-                            {t("settings.recommended_models")}
-                          </span>
-                          {preset.models.map((model) => (
-                            <button
-                              key={model.model}
-                              type="button"
-                              className={`provider-preset-model ${model.recommended ? "is-recommended" : ""} ${currentModel === model.model ? "is-active" : ""}`}
-                              onClick={() => onSelect(preset, model)}
-                            >
-                              <span className="provider-preset-model-name">
-                                {model.displayName}
-                              </span>
-                              {model.description && (
-                                <span className="provider-preset-model-desc">
-                                  {model.description}
-                                </span>
-                              )}
-                              {model.recommended && (
-                                <span className="provider-preset-model-badge">
-                                  推荐
-                                </span>
-                              )}
-                            </button>
-                          ))}
-                        </div>
-
+                filteredPresets.map((preset) => {
+                  const expanded = expandedProvider === preset.name;
+                  return (
+                    <div key={preset.name} className="provider-preset-item">
+                      <div className="provider-preset-header-row">
                         <button
                           type="button"
-                          className="settings-btn settings-btn-sm settings-btn-primary provider-preset-use"
-                          onClick={() => onSelect(preset)}
+                          className="provider-preset-header"
+                          onClick={() => setExpandedProvider(expanded ? null : preset.name)}
+                          aria-expanded={expanded}
                         >
-                          使用此供应商
+                          <span
+                            className="provider-preset-icon"
+                            style={{ backgroundColor: preset.iconColor || "#6B7280" }}
+                          >
+                            {preset.name.charAt(0)}
+                          </span>
+                          <span className="provider-preset-name">{preset.name}</span>
+                          {preset.primePartner && (
+                            <Heart size={12} className="provider-preset-badge provider-preset-badge--prime" />
+                          )}
+                          {preset.isPartner && !preset.primePartner && (
+                            <Star size={12} className="provider-preset-badge provider-preset-badge--partner" />
+                          )}
+                          {currentPreset?.name === preset.name && (
+                            <span className="provider-preset-active-label">{t("settings.current")}</span>
+                          )}
                         </button>
+                        {preset.websiteUrl && (
+                          <a
+                            href={preset.websiteUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="provider-preset-link"
+                            aria-label={preset.name}
+                          >
+                            <ExternalLink size={13} />
+                          </a>
+                        )}
                       </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
+
+                      {expanded && (
+                        <div className="provider-preset-detail">
+                          {preset.descriptionKey && (
+                            <p className="provider-preset-desc">{t(preset.descriptionKey)}</p>
+                          )}
+                          {preset.apiKeyUrl && (
+                            <a
+                              href={preset.apiKeyUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="provider-preset-apikey-link"
+                            >
+                              {t("settings.get_api_key")} <ExternalLink size={11} />
+                            </a>
+                          )}
+                          <div className="provider-preset-models">
+                            <span className="provider-preset-models-label">
+                              {t("settings.recommended_models")}
+                            </span>
+                            {preset.models.length === 0 ? (
+                              <p className="provider-preset-empty">{t("settings.no_models")}</p>
+                            ) : (
+                              preset.models.map((model) => (
+                                <button
+                                  key={model.model}
+                                  type="button"
+                                  className={`provider-preset-model ${
+                                    model.recommended ? "is-recommended" : ""
+                                  } ${currentModel === model.model ? "is-active" : ""}`}
+                                  onClick={() => selectPreset(preset, model)}
+                                >
+                                  <span className="provider-preset-model-name">
+                                    {model.displayName}
+                                  </span>
+                                  {model.description && (
+                                    <span className="provider-preset-model-desc">{model.description}</span>
+                                  )}
+                                  {model.recommended && (
+                                    <span className="provider-preset-model-badge">
+                                      {t("settings.recommended")}
+                                    </span>
+                                  )}
+                                </button>
+                              ))
+                            )}
+                          </div>
+                          <button
+                            type="button"
+                            className="settings-btn settings-btn-sm settings-btn-primary provider-preset-use"
+                            onClick={() => selectPreset(preset)}
+                          >
+                            {t("settings.use_provider")}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+            </div>
           </div>
-        ))}
-      </div>
+        </div>
+      )}
     </div>
   );
 }
