@@ -35,7 +35,7 @@ const HF_MIRROR_BASE_URL: &str =
 const MAIN_MODEL_FILENAME: &str = "model.int8.onnx";
 const TOKENS_FILENAME: &str = "tokens.txt";
 const MAIN_MODEL_SHA256: &str = "c71f0ce00bec95b07744e116345e33d8cbbe08cef896382cf907bf4b51a2cd51";
-const TOKENS_SHA256: &str = "4d14b174af75c64af4b9879a7f2d60c774b4dcea74fddee64510d7e4d7347590";
+const TOKENS_SHA256: &str = "f449eb28dc567533d7fa59be34e2abca8784f771850c78a47fb731a31429a1dc";
 
 fn model_download_bases() -> Vec<String> {
     if let Ok(s) = std::env::var(ENV_MODEL_BASE_URL) {
