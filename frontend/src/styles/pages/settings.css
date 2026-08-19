@@ -875,14 +875,6 @@
 
 /* ── Settings order and provider workflow ───────────────── */
 
-.settings-section--recording { order: 1; }
-.settings-section--polishing { order: 2; }
-.settings-section--transcription { order: 3; }
-.settings-section--appearance { order: 4; }
-.settings-section--language { order: 5; }
-.settings-section--about { order: 6; }
-.settings-save-row { order: 99; }
-
 .provider-preset-active-label {
   margin-left: auto;
   color: var(--color-green);

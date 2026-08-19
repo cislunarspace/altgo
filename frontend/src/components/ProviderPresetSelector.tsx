@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useRef, useMemo, useState } from "react";
 import { ExternalLink, Plus, Search, X, Star, Heart } from "lucide-react";
 import type {
   ProviderPreset,
@@ -28,6 +28,9 @@ export function ProviderPresetSelector({
   const [pickerOpen, setPickerOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [expandedProvider, setExpandedProvider] = useState<string | null>(null);
+  const addProviderButtonRef = useRef<HTMLButtonElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
 
   const currentPreset = useMemo(
     () =>
@@ -58,11 +61,47 @@ export function ProviderPresetSelector({
     return result;
   }, [presets, search, currentPreset]);
 
-  const selectPreset = (preset: ProviderPreset, model?: ModelCatalogEntry) => {
-    onSelect(preset, model);
+  const closePicker = () => {
     setPickerOpen(false);
     setExpandedProvider(null);
     setSearch("");
+    addProviderButtonRef.current?.focus();
+  };
+
+  useEffect(() => {
+    if (!pickerOpen) return;
+
+    searchInputRef.current?.focus();
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closePicker();
+        return;
+      }
+      if (event.key !== "Tab" || !dialogRef.current) return;
+
+      const focusable = dialogRef.current.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), input:not([disabled]), a[href]',
+      );
+      if (focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [pickerOpen]);
+
+  const selectPreset = (preset: ProviderPreset, model?: ModelCatalogEntry) => {
+    onSelect(preset, model);
+    closePicker();
   };
 
   return (
@@ -87,6 +126,7 @@ export function ProviderPresetSelector({
         </div>
         <button
           type="button"
+          ref={addProviderButtonRef}
           className="settings-btn settings-btn-sm settings-btn-secondary provider-preset-add"
           onClick={() => setPickerOpen(true)}
         >
@@ -100,19 +140,26 @@ export function ProviderPresetSelector({
           className="provider-preset-dialog-backdrop"
           role="presentation"
           onMouseDown={(event) => {
-            if (event.target === event.currentTarget) setPickerOpen(false);
+            if (event.target === event.currentTarget) closePicker();
           }}
         >
-          <div className="provider-preset-dialog" role="dialog" aria-modal="true">
+          <div
+            ref={dialogRef}
+            className="provider-preset-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="provider-preset-dialog-title"
+            tabIndex={-1}
+          >
             <div className="provider-preset-dialog-head">
               <div>
-                <h4>{t("settings.provider_picker_title")}</h4>
+                <h4 id="provider-preset-dialog-title">{t("settings.provider_picker_title")}</h4>
                 <p>{t("settings.provider_picker_lead")}</p>
               </div>
               <button
                 type="button"
                 className="provider-preset-dialog-close"
-                onClick={() => setPickerOpen(false)}
+                onClick={closePicker}
                 aria-label={t("settings.close_provider_picker")}
                 title={t("settings.close_provider_picker")}
               >
