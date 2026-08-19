@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 
 interface PolishConfig {
+  polishLevel: string;
   polishModel: string;
   polishApiBaseUrl: string;
   hasPolisherApiKey: boolean;
@@ -171,6 +172,10 @@ export default function HistoryPage() {
   };
 
   const handlePolish = async (id: string) => {
+    if (polishConfig?.polishLevel === "none") {
+      setError(t("history.polish_disabled"));
+      return;
+    }
     if (
       !polishConfig?.polishApiBaseUrl?.trim() ||
       !polishConfig?.polishModel?.trim() ||

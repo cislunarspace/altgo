@@ -10,6 +10,7 @@ describe("saveRequestBody", () => {
     polishLevel: "none",
     polishModel: "",
     polishApiBaseUrl: "",
+    polishProtocol: "openai",
     guiLanguage: "zh",
     overlayPosition: "bottom_center",
     polisherApiKey: "",
@@ -19,6 +20,11 @@ describe("saveRequestBody", () => {
   it("includes overlayPosition in the request body", () => {
     const result = saveRequestBody({ ...base, overlayPosition: "top_center" });
     expect(result).toHaveProperty("overlayPosition", "top_center");
+  });
+
+  it("includes polishProtocol in the request body", () => {
+    const result = saveRequestBody({ ...base, polishProtocol: "anthropic" });
+    expect(result).toHaveProperty("polishProtocol", "anthropic");
   });
 
   it("includes polishApiKey when polisherApiKey is non-empty", () => {
@@ -59,6 +65,7 @@ describe("normalizeConfig", () => {
       polishLevel: "none",
       polishModel: "",
       polishApiBaseUrl: "",
+      polishProtocol: "openai",
       guiLanguage: "zh",
       overlayPosition: "bottom_center",
       polisherApiKey: "secret",

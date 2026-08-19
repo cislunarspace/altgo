@@ -240,6 +240,183 @@ impl SystemPromptSource for CustomSource {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Endpoint 推导
+// ---------------------------------------------------------------------------
+
+/// 由 base URL 与协议推导请求 endpoint。
+///
+/// 兼容两种写法：带版本路径的 base（如 `https://api.moonshot.cn/v1`、
+/// `https://open.bigmodel.cn/api/paas/v4`）与不带路径的 origin
+/// （如 `https://api.deepseek.com`）。
+///
+/// 规则：
+/// 1. 剥首尾空白与尾部 `/`；
+/// 2. 路径已以该协议的请求路径（openai `/chat/completions`、anthropic
+///    `/messages`）结尾时，视为完整 endpoint，直接使用；
+/// 3. 路径为空：openai 补 `/v1/chat/completions`，anthropic 补 `/v1/messages`
+///    （两家官方 SDK 的默认约定）；
+/// 4. 路径非空：仅补请求路径，版本段（`/v1`、`/api/paas/v4` 等）由 base 自带。
+pub fn build_endpoint(
+    base_url: &str,
+    protocol: protocol::ApiProtocol,
+) -> Result<String, PolisherError> {
+    let trimmed = base_url.trim().trim_end_matches('/');
+    if trimmed.is_empty() {
+        return Err(PolisherError::InvalidBaseUrl(base_url.to_string()));
+    }
+
+    // 定位 origin 之后的首个 '/'，其起即为路径；无 scheme 时按首个 '/' 兜底。
+    let path_start = match trimmed.find("://") {
+        Some(scheme_end) => trimmed[scheme_end + 3..]
+            .find('/')
+            .map(|p| scheme_end + 3 + p),
+        None => trimmed.find('/'),
+    };
+    let path = path_start.map(|i| &trimmed[i..]).unwrap_or("");
+
+    match protocol {
+        protocol::ApiProtocol::OpenAi => {
+            if path.ends_with("/chat/completions") {
+                Ok(trimmed.to_string())
+            } else if path.is_empty() {
+                Ok(format!("{trimmed}/v1/chat/completions"))
+            } else {
+                Ok(format!("{trimmed}/chat/completions"))
+            }
+        }
+        protocol::ApiProtocol::Anthropic => {
+            if path.ends_with("/messages") {
+                Ok(trimmed.to_string())
+            } else if path.is_empty() {
+                Ok(format!("{trimmed}/v1/messages"))
+            } else {
+                Ok(format!("{trimmed}/messages"))
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 思考模式抑制
+// ---------------------------------------------------------------------------
+
+/// 从 base URL 提取 host（小写比较由调用方处理，这里保留原文、不含端口）。
+fn host_of(url: &str) -> &str {
+    let trimmed = url.trim();
+    let after_scheme = match trimmed.find("://") {
+        Some(i) => &trimmed[i + 3..],
+        None => trimmed,
+    };
+    let authority = after_scheme.split('/').next().unwrap_or("");
+    authority.split(':').next().unwrap_or("")
+}
+
+/// 按 host 返回「关闭思考」的请求字段。
+///
+/// 语音润色是轻量文本任务，思考（深度推理）只会增加数秒延迟与 token 花费。
+/// 各家关闭参数不同，且严格校验未知字段的服务商（OpenAI 等）会直接拒绝请求，
+/// 因此只对已确认接受对应参数的服务商返回字段，其余返回空：
+///
+/// - 通义（dashscope）/ SiliconFlow：`enable_thinking: false`
+/// - 智谱 / 火山方舟 / MiniMax：`thinking: {"type": "disabled"}`
+/// - OpenRouter：`reasoning: {"enabled": false}`
+fn thinking_suppression_fields(host: &str) -> Vec<(&'static str, serde_json::Value)> {
+    let h = host.to_lowercase();
+    if h.ends_with("dashscope.aliyuncs.com") || h.ends_with("siliconflow.cn") {
+        vec![("enable_thinking", serde_json::json!(false))]
+    } else if h.ends_with("bigmodel.cn")
+        || h.ends_with("volces.com")
+        || h.ends_with("minimaxi.com")
+        || h.ends_with("minimax.io")
+    {
+        vec![("thinking", serde_json::json!({ "type": "disabled" }))]
+    } else if h.ends_with("openrouter.ai") {
+        vec![("reasoning", serde_json::json!({ "enabled": false }))]
+    } else {
+        Vec::new()
+    }
+}
+
+/// 用给定参数构造临时润色器并发一次最小请求，验证地址、密钥与模型可用。
+///
+/// 供设置页「测试连接」使用：不落盘、不影响流水线，
+/// 请求超时 20 秒、max_tokens 限制在 16 以控制花费。
+pub async fn test_connection(
+    api_key: &str,
+    api_base_url: &str,
+    model: &str,
+    protocol: protocol::ApiProtocol,
+) -> Result<(), PolisherError> {
+    let formatter = LLMFormatter::with_config(
+        api_key.to_string(),
+        api_base_url.to_string(),
+        model.to_string(),
+        Duration::from_secs(20),
+        16,
+        protocol,
+        0.0,
+        "zh".to_string(),
+    )?;
+    formatter
+        .polish("你好", PolishLevel::Light)
+        .await
+        .map(|_| ())
+}
+
+/// 把润色错误转成「测试连接」结果的可读提示，指明最可能的原因。
+pub fn describe_test_error(e: &PolisherError) -> String {
+    match e {
+        PolisherError::ApiError { status: 401, .. }
+        | PolisherError::ApiError { status: 403, .. } => {
+            "密钥无效或没有权限（HTTP 401/403）。请检查 API Key 是否正确、账户是否有余额。"
+                .to_string()
+        }
+        PolisherError::ApiError { status: 404, .. } => {
+            "接口地址不对（HTTP 404）。请检查 API URL 是否与供应商文档一致。".to_string()
+        }
+        PolisherError::ApiError { status: 400, body } => {
+            let body = truncate_body(body);
+            format!("请求被拒绝（HTTP 400），模型名可能不对。服务商返回：{body}")
+        }
+        PolisherError::ApiError { status: 429, .. } => {
+            "请求频率或额度受限（HTTP 429）。请稍后重试。".to_string()
+        }
+        PolisherError::HttpError(msg) => {
+            if msg.contains("timed out") {
+                "连接超时。请检查网络，以及 API 地址是否可达。".to_string()
+            } else if msg.contains("relative URL without a base")
+                || msg.contains("builder error")
+                || msg.contains("invalid URL")
+            {
+                format!("API 地址无效：{msg}")
+            } else {
+                format!("网络请求失败：{msg}")
+            }
+        }
+        PolisherError::InvalidBaseUrl(url) => {
+            format!("API 地址无效：'{url}'。请填写完整 URL（如 https://api.deepseek.com）。")
+        }
+        PolisherError::UnknownProtocol { protocol } => {
+            format!("协议无效：'{protocol}'，应为 \"openai\" 或 \"anthropic\"。")
+        }
+        other => other.message(),
+    }
+}
+
+fn truncate_body(body: &str) -> String {
+    const MAX_LEN: usize = 200;
+    if body.len() <= MAX_LEN {
+        body.to_string()
+    } else {
+        let mut end = MAX_LEN;
+        while !body.is_char_boundary(end) {
+            end -= 1;
+        }
+        format!("{}…", &body[..end])
+    }
+}
+
 /// LLM 文本润色器。
 ///
 /// 支持 OpenAI 和 Anthropic 两种 API 协议，
@@ -416,8 +593,9 @@ impl LLMFormatter {
                         ],
                         temperature: self.temperature,
                         max_tokens: self.max_tokens,
+                        extra: None,
                     };
-                    self.do_openai_request(&body).await
+                    self.do_openai_request(body).await
                 }
                 protocol::ApiProtocol::Anthropic => {
                     let body = protocol::AnthropicRequest {
@@ -439,14 +617,27 @@ impl LLMFormatter {
 
     async fn do_openai_request(
         &self,
-        body: &protocol::ChatRequest,
+        mut body: protocol::ChatRequest,
     ) -> Result<String, PolisherError> {
-        let url = format!("{}/v1/chat/completions", self.api_base_url);
+        let url = build_endpoint(&self.api_base_url, protocol::ApiProtocol::OpenAi)?;
+
+        // 按服务商附加「关闭思考」字段；不命中的服务商保持原始 body，
+        // 避免严格校验未知字段的服务商（OpenAI 等）拒绝请求。
+        // 经 `extra` 平铺序列化而非 to_value 中转，保持 f32 字段的紧凑表示。
+        let fields = thinking_suppression_fields(host_of(&self.api_base_url));
+        if !fields.is_empty() {
+            let mut extra = serde_json::Map::new();
+            for (key, value) in fields {
+                extra.insert(key.to_string(), value);
+            }
+            body.extra = Some(extra);
+        }
+
         let resp = self
             .client
             .post(&url)
             .header("Authorization", format!("Bearer {}", self.api_key))
-            .json(body)
+            .json(&body)
             .send()
             .await
             .map_err(|e| PolisherError::HttpError(e.to_string()))?;
@@ -482,11 +673,14 @@ impl LLMFormatter {
         &self,
         body: &protocol::AnthropicRequest,
     ) -> Result<String, PolisherError> {
-        let url = format!("{}/v1/messages", self.api_base_url);
+        let url = build_endpoint(&self.api_base_url, protocol::ApiProtocol::Anthropic)?;
         let resp = self
             .client
             .post(&url)
+            // 双鉴权头：官方 Anthropic 用 x-api-key，多数兼容端点/中转用
+            // Bearer token——各取所需，多余的头双方都会忽略。
             .header("x-api-key", &self.api_key)
+            .header("Authorization", format!("Bearer {}", self.api_key))
             .header("anthropic-version", "2023-06-01")
             .json(body)
             .send()
@@ -592,6 +786,240 @@ mod tests {
         assert_eq!(PolishLevel::Heavy.as_str(), "heavy");
     }
 
+    #[test]
+    fn test_build_endpoint_openai_preset_matrix() {
+        use protocol::ApiProtocol;
+        let p = ApiProtocol::OpenAi;
+        // 各预设 base（与 frontend/src/config/modelPresets.ts 对齐）
+        assert_eq!(
+            build_endpoint("https://api.deepseek.com", p).unwrap(),
+            "https://api.deepseek.com/v1/chat/completions"
+        );
+        assert_eq!(
+            build_endpoint("https://api.moonshot.cn/v1", p).unwrap(),
+            "https://api.moonshot.cn/v1/chat/completions"
+        );
+        assert_eq!(
+            build_endpoint("https://open.bigmodel.cn/api/paas/v4", p).unwrap(),
+            "https://open.bigmodel.cn/api/paas/v4/chat/completions"
+        );
+        assert_eq!(
+            build_endpoint("https://dashscope.aliyuncs.com/compatible-mode/v1", p).unwrap(),
+            "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
+        );
+        assert_eq!(
+            build_endpoint("https://api.openai.com/v1", p).unwrap(),
+            "https://api.openai.com/v1/chat/completions"
+        );
+        assert_eq!(
+            build_endpoint("https://api.siliconflow.cn/v1", p).unwrap(),
+            "https://api.siliconflow.cn/v1/chat/completions"
+        );
+    }
+
+    #[test]
+    fn test_build_endpoint_anthropic_preset_matrix() {
+        use protocol::ApiProtocol;
+        let p = ApiProtocol::Anthropic;
+        assert_eq!(
+            build_endpoint("https://api.anthropic.com", p).unwrap(),
+            "https://api.anthropic.com/v1/messages"
+        );
+        assert_eq!(
+            build_endpoint("https://api.anthropic.com/v1", p).unwrap(),
+            "https://api.anthropic.com/v1/messages"
+        );
+    }
+
+    #[test]
+    fn test_host_of_extracts_host() {
+        assert_eq!(host_of("https://api.deepseek.com"), "api.deepseek.com");
+        assert_eq!(host_of("http://localhost:11434/v1"), "localhost");
+        assert_eq!(
+            host_of("https://open.bigmodel.cn/api/paas/v4"),
+            "open.bigmodel.cn"
+        );
+        // 大小写与空白容错
+        assert_eq!(host_of("  HTTPS://API.OPENAI.com/"), "API.OPENAI.com");
+        // 无 scheme 时按整体 authority 处理
+        assert_eq!(host_of("api.deepseek.com"), "api.deepseek.com");
+        assert_eq!(host_of(""), "");
+    }
+
+    #[test]
+    fn test_thinking_suppression_fields_by_host() {
+        // enable_thinking 系
+        for host in [
+            "dashscope.aliyuncs.com",
+            "api.siliconflow.cn",
+            "api.dashscope.aliyuncs.com",
+        ] {
+            let fields = thinking_suppression_fields(host);
+            assert_eq!(
+                fields,
+                vec![("enable_thinking", serde_json::json!(false))],
+                "host: {host}"
+            );
+        }
+        // thinking 系
+        for host in [
+            "open.bigmodel.cn",
+            "ark.cn-beijing.volces.com",
+            "api.minimaxi.com",
+            "api.minimax.io",
+        ] {
+            let fields = thinking_suppression_fields(host);
+            assert_eq!(
+                fields,
+                vec![("thinking", serde_json::json!({ "type": "disabled" }))],
+                "host: {host}"
+            );
+        }
+        // reasoning 系
+        assert_eq!(
+            thinking_suppression_fields("openrouter.ai"),
+            vec![("reasoning", serde_json::json!({ "enabled": false }))]
+        );
+        // 不命中的服务商：一个字段都不能发
+        for host in [
+            "api.openai.com",
+            "api.deepseek.com",
+            "api.moonshot.cn",
+            "api.anthropic.com",
+            "qianfan.baidubce.com",
+            "generativelanguage.googleapis.com",
+            "localhost",
+            "",
+        ] {
+            assert!(
+                thinking_suppression_fields(host).is_empty(),
+                "host 不应命中：{host}"
+            );
+        }
+        // host 大小写不敏感
+        assert_eq!(
+            thinking_suppression_fields("API.SILICONFLOW.CN"),
+            vec![("enable_thinking", serde_json::json!(false))]
+        );
+    }
+
+    #[test]
+    fn test_build_endpoint_tolerates_common_variants() {
+        use protocol::ApiProtocol;
+        // 本地 Ollama（origin 无路径）
+        assert_eq!(
+            build_endpoint("http://localhost:11434", ApiProtocol::OpenAi).unwrap(),
+            "http://localhost:11434/v1/chat/completions"
+        );
+        // 尾部斜杠与空白
+        assert_eq!(
+            build_endpoint("  http://localhost:11434/ ", ApiProtocol::OpenAi).unwrap(),
+            "http://localhost:11434/v1/chat/completions"
+        );
+        assert_eq!(
+            build_endpoint("https://api.moonshot.cn/v1/", ApiProtocol::OpenAi).unwrap(),
+            "https://api.moonshot.cn/v1/chat/completions"
+        );
+        // 已是完整 endpoint 时直接使用
+        assert_eq!(
+            build_endpoint("https://x.example/v1/chat/completions", ApiProtocol::OpenAi).unwrap(),
+            "https://x.example/v1/chat/completions"
+        );
+        assert_eq!(
+            build_endpoint("https://x.example/v1/messages", ApiProtocol::Anthropic).unwrap(),
+            "https://x.example/v1/messages"
+        );
+        // 空值报错
+        assert!(matches!(
+            build_endpoint("", ApiProtocol::OpenAi),
+            Err(PolisherError::InvalidBaseUrl(_))
+        ));
+        assert!(build_endpoint("   ", ApiProtocol::Anthropic).is_err());
+    }
+
+    #[tokio::test]
+    async fn test_polish_success_with_versioned_base_url() {
+        // 预设式 base 自带 /v1：endpoint 应为 /v1/chat/completions 而非 /v1/v1/...
+        let mut server = mockito::Server::new_async().await;
+        let mock = server
+            .mock("POST", "/v1/chat/completions")
+            .with_status(200)
+            .with_body(mock_success_response("ok"))
+            .create_async()
+            .await;
+
+        let formatter = LLMFormatter::new(
+            "test-key".to_string(),
+            format!("{}/v1", server.url()),
+            "moonshot-v1-8k".to_string(),
+            Duration::from_secs(5),
+        )
+        .unwrap();
+        let result = formatter
+            .polish("原始文本", PolishLevel::Medium)
+            .await
+            .unwrap();
+        assert_eq!(result, "ok");
+        mock.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn test_connection_success() {
+        let mut server = mockito::Server::new_async().await;
+        let _mock = server
+            .mock("POST", "/v1/chat/completions")
+            .with_status(200)
+            .with_body(mock_success_response("你好"))
+            .create_async()
+            .await;
+
+        let result = test_connection(
+            "key",
+            &server.url(),
+            "deepseek-chat",
+            protocol::ApiProtocol::OpenAi,
+        )
+        .await;
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_connection_auth_error_is_described() {
+        let mut server = mockito::Server::new_async().await;
+        let _mock = server
+            .mock("POST", "/v1/chat/completions")
+            .with_status(401)
+            .create_async()
+            .await;
+
+        let err = test_connection(
+            "bad-key",
+            &server.url(),
+            "deepseek-chat",
+            protocol::ApiProtocol::OpenAi,
+        )
+        .await
+        .unwrap_err();
+        let msg = describe_test_error(&err);
+        assert!(msg.contains("密钥"), "unexpected: {msg}");
+    }
+
+    #[tokio::test]
+    async fn test_connection_404_is_described() {
+        let mut server = mockito::Server::new_async().await;
+        let _mock = server
+            .mock("POST", mockito::Matcher::Any)
+            .with_status(404)
+            .create_async()
+            .await;
+
+        let err = test_connection("key", &server.url(), "m", protocol::ApiProtocol::OpenAi)
+            .await
+            .unwrap_err();
+        let msg = describe_test_error(&err);
+        assert!(msg.contains("地址"), "unexpected: {msg}");
+    }
+
     #[tokio::test]
     async fn test_polish_none_skips_api() {
         let formatter = LLMFormatter::new(
@@ -691,6 +1119,39 @@ mod tests {
         mock.assert_async().await;
     }
 
+    #[tokio::test]
+    async fn test_polish_unknown_host_body_has_no_thinking_fields() {
+        // mockito 的 host（127.0.0.1）不命中思考抑制表：请求体必须与
+        // ChatRequest 完全一致，不携带任何额外字段（OpenAI 等会拒绝未知参数）。
+        let mut server = mockito::Server::new_async().await;
+        let expected_body = serde_json::json!({
+            "model": "m",
+            "messages": [
+                {"role": "system", "content": get_system_prompt(PolishLevel::Light, "zh")},
+                {"role": "user", "content": "test"}
+            ],
+            "temperature": 0.3,
+            "max_tokens": 1024,
+        });
+        let mock = server
+            .mock("POST", "/v1/chat/completions")
+            .match_body(mockito::Matcher::Json(expected_body))
+            .with_status(200)
+            .with_body(mock_success_response("ok"))
+            .create_async()
+            .await;
+
+        let formatter = LLMFormatter::new(
+            "key".to_string(),
+            server.url(),
+            "m".to_string(),
+            Duration::from_secs(5),
+        )
+        .unwrap();
+        let _ = formatter.polish("test", PolishLevel::Light).await;
+        mock.assert_async().await;
+    }
+
     fn mock_anthropic_response(content: &str) -> String {
         serde_json::json!({
             "content": [{"text": content}]
@@ -704,6 +1165,7 @@ mod tests {
         let mock = server
             .mock("POST", "/v1/messages")
             .match_header("x-api-key", "anthropic-key")
+            .match_header("Authorization", "Bearer anthropic-key")
             .match_header("anthropic-version", "2023-06-01")
             .with_status(200)
             .with_body(mock_anthropic_response("润色后的文本"))

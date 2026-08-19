@@ -581,6 +581,15 @@
   line-height: var(--leading-relaxed);
 }
 
+.settings-polish-actions {
+  display: flex;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+.settings-test-ok { color: var(--color-green); }
+.settings-test-err { color: var(--color-red); }
+
 .settings-section-toggle {
   display: flex;
   align-items: center;

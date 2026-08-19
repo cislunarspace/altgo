@@ -246,26 +246,34 @@ impl Config {
             )));
         }
 
-        // Only require polisher API key when polishing is actually enabled.
-        if self.polisher.level != "none" && self.polisher.api_key.trim().is_empty() {
-            let config_path = Self::default_config_path();
-            return Err(ConfigError::ValidationFailed(format!(
-                "润色功能已开启（level = \"{}\"），但未配置 API 密钥。\n\
-                 \n\
-                 请在配置文件中填写 [polisher] 段：\n\
-                   api_key = \"your-key\"\n\
-                   api_base_url = \"https://your-provider.com\"\n\
-                   model = \"your-model-name\"\n\
-                   protocol = \"openai\"  # 或 \"anthropic\"\n\
-                 \n\
-                 或通过环境变量设置密钥：\n\
-                   export ALTGO_POLISHER_API_KEY=\"your-key\"\n\
-                 \n\
-                 如果不需要润色，将 level 改为 \"none\" 即可跳过此检查。\n\
-                 配置文件路径：{}",
-                self.polisher.level,
-                config_path.display()
-            )));
+        // 润色开启时逐项校验 [polisher] 必填字段，错误信息指明缺失项。
+        if self.polisher.level != "none" {
+            let protocol = self.polisher.protocol.trim().to_lowercase();
+            if protocol != "openai" && protocol != "anthropic" {
+                return Err(ConfigError::ValidationFailed(format!(
+                    "润色协议（protocol）无效：'{}'，应为 \"openai\" 或 \"anthropic\"。",
+                    self.polisher.protocol
+                )));
+            }
+
+            let mut missing: Vec<&str> = Vec::new();
+            if self.polisher.api_key.trim().is_empty() {
+                missing.push("API 密钥（api_key）");
+            }
+            if self.polisher.api_base_url.trim().is_empty() {
+                missing.push("API 地址（api_base_url）");
+            }
+            if self.polisher.model.trim().is_empty() {
+                missing.push("模型名称（model）");
+            }
+            if !missing.is_empty() {
+                return Err(ConfigError::ValidationFailed(format!(
+                    "润色功能已开启（level = \"{}\"），但缺少：{}。请在设置的「润色」分区补全，或编辑配置文件 {} 的 [polisher] 段；不需要润色时把级别设为「关闭」。密钥也可通过环境变量 ALTGO_POLISHER_API_KEY 设置。",
+                    self.polisher.level,
+                    missing.join("、"),
+                    Self::default_config_path().display()
+                )));
+            }
         }
         Ok(())
     }
@@ -369,6 +377,7 @@ pub struct ConfigPatch {
     pub model: Option<String>,
     pub polish_level: Option<String>,
     pub polish_model: Option<String>,
+    pub polish_protocol: Option<String>,
     pub polish_api_key: Option<String>,
     pub polish_api_base_url: Option<String>,
     pub gui_language: Option<String>,
@@ -396,6 +405,9 @@ impl ConfigPatch {
         }
         if let Some(ref v) = self.polish_model {
             cfg.polisher.model = v.clone();
+        }
+        if let Some(ref v) = self.polish_protocol {
+            cfg.polisher.protocol = v.clone();
         }
         if let Some(ref v) = self.polish_api_key {
             cfg.polisher.api_key = v.clone();
@@ -574,6 +586,35 @@ language = "zh"
         assert!(cfg.validate().is_err());
     }
 
+    #[test]
+    fn test_validate_polisher_lists_missing_fields() {
+        let mut cfg = Config::default();
+        cfg.polisher.level = "light".to_string();
+        cfg.polisher.api_key = "k".to_string();
+        let err = cfg.validate().unwrap_err().to_string();
+        assert!(err.contains("API 地址"));
+        assert!(err.contains("模型名称"));
+        assert!(!err.contains("API 密钥"));
+
+        cfg.polisher.api_base_url = "https://api.deepseek.com".to_string();
+        cfg.polisher.model = "deepseek-chat".to_string();
+        assert!(cfg.validate().is_ok());
+    }
+
+    #[test]
+    fn test_validate_polisher_rejects_unknown_protocol() {
+        let mut cfg = Config::default();
+        cfg.polisher.level = "light".to_string();
+        cfg.polisher.api_key = "k".to_string();
+        cfg.polisher.api_base_url = "https://x.example".to_string();
+        cfg.polisher.model = "m".to_string();
+        cfg.polisher.protocol = "graphql".to_string();
+        let err = cfg.validate().unwrap_err().to_string();
+        assert!(err.contains("protocol"));
+        cfg.polisher.protocol = "Anthropic".to_string();
+        assert!(cfg.validate().is_ok());
+    }
+
     // -- ConfigPatch tests ---------------------------------------------------
 
     #[test]
@@ -609,6 +650,14 @@ language = "zh"
         assert_eq!(cfg.polisher.level, "heavy");
         // Unchanged fields keep defaults
         assert_eq!(cfg.transcriber.model, "");
+    }
+
+    #[test]
+    fn patch_apply_polish_protocol_updates_field() {
+        let mut cfg = Config::default();
+        let patch: ConfigPatch = serde_json::from_str(r#"{"polishProtocol":"anthropic"}"#).unwrap();
+        patch.apply_to_config(&mut cfg);
+        assert_eq!(cfg.polisher.protocol, "anthropic");
     }
 
     #[test]

@@ -153,6 +153,7 @@ pub fn run() {
             cmd::delete_model,
             cmd::resolve_model,
             cmd::capture_activation_key,
+            cmd::test_polisher_connection,
             cmd::list_history,
             cmd::delete_history_entries,
             cmd::clear_history,

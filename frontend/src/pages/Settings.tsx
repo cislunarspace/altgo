@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { getVersion } from "@tauri-apps/api/app";
+import { invoke } from "@tauri-apps/api/core";
 import { useTranslation } from "../i18n";
-import { useConfigForm } from "../hooks/useConfigForm";
+import { useConfigForm, normalizeConfig, type AppConfig } from "../hooks/useConfigForm";
 import { useModelManager } from "../hooks/useModelManager";
 import {
   Save,
@@ -49,6 +50,9 @@ export default function Settings() {
   const [polishOpen, setPolishOpen] = useState(false);
   const [advancedPath, setAdvancedPath] = useState(false);
   const [appVersion, setAppVersion] = useState<string>("");
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<{ ok: boolean; error?: string } | null>(null);
+  const [clearingKey, setClearingKey] = useState(false);
 
   const modelMgr = useModelManager({ t });
   const form = useConfigForm({
@@ -96,6 +100,40 @@ export default function Settings() {
         update("model", "");
       }
     });
+  };
+
+  // 用表单当前值直接测试（密钥留空时后端回落到已存密钥），不必先保存。
+  const runTestConnection = async () => {
+    if (!config) return;
+    setTesting(true);
+    setTestResult(null);
+    try {
+      await invoke("test_polisher_connection", {
+        protocol: config.polishProtocol,
+        apiBaseUrl: config.polishApiBaseUrl,
+        apiKey: config.polisherApiKey,
+        model: config.polishModel,
+      });
+      setTestResult({ ok: true });
+    } catch (e) {
+      setTestResult({ ok: false, error: String(e) });
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  const clearApiKey = async () => {
+    setClearingKey(true);
+    setTestResult(null);
+    try {
+      await invoke("save_config", { patch: { polishApiKey: "" } });
+      const c = await invoke<AppConfig>("get_config");
+      setConfig(normalizeConfig(c));
+    } catch (e) {
+      setTestResult({ ok: false, error: String(e) });
+    } finally {
+      setClearingKey(false);
+    }
   };
 
   if (!config) {
@@ -346,9 +384,7 @@ export default function Settings() {
                 onSelect={(preset: ProviderPreset, model?: ModelCatalogEntry) => {
                   update("polishApiBaseUrl", preset.apiBaseUrl);
                   update("polishModel", model?.model || preset.defaultModel);
-                  if (!config.polisherApiKey && preset.apiKeyUrl) {
-                    // 提示用户需要填写 API Key
-                  }
+                  update("polishProtocol", preset.apiFormat);
                 }}
               />
               <div className="settings-field">
@@ -367,6 +403,24 @@ export default function Settings() {
                 </div>
               </div>
               <p className="settings-hint settings-hint--polish">{t("settings.polish_level_hint")}</p>
+              {(config.hasPolisherApiKey || config.polisherApiKey) && config.polishLevel === "none" && (
+                <p className="settings-hint settings-hint--polish">
+                  {t("settings.polish_disabled_hint")}
+                </p>
+              )}
+              <div className="settings-field">
+                <span className="settings-field-label-text">{t("settings.api_protocol")}</span>
+                <div className="settings-field-control">
+                  <select
+                    className="settings-select"
+                    value={config.polishProtocol === "anthropic" ? "anthropic" : "openai"}
+                    onChange={(e) => update("polishProtocol", e.target.value)}
+                  >
+                    <option value="openai">{t("settings.api_protocol_openai")}</option>
+                    <option value="anthropic">{t("settings.api_protocol_anthropic")}</option>
+                  </select>
+                </div>
+              </div>
               <div className="settings-field">
                 <span className="settings-field-label-text">{t("settings.api_url")}</span>
                 <div className="settings-field-control">
@@ -403,6 +457,33 @@ export default function Settings() {
                   />
                 </div>
               </div>
+              <div className="settings-polish-actions">
+                <button
+                  type="button"
+                  className="settings-btn settings-btn-sm settings-btn-secondary"
+                  onClick={runTestConnection}
+                  disabled={testing}
+                >
+                  {testing ? t("settings.testing") : t("settings.test_connection")}
+                </button>
+                {config.hasPolisherApiKey && (
+                  <button
+                    type="button"
+                    className="settings-btn settings-btn-sm settings-btn-secondary"
+                    onClick={clearApiKey}
+                    disabled={clearingKey}
+                  >
+                    {t("settings.clear_api_key")}
+                  </button>
+                )}
+              </div>
+              {testResult && (
+                <p className={`settings-hint ${testResult.ok ? "settings-test-ok" : "settings-test-err"}`}>
+                  {testResult.ok
+                    ? t("settings.test_ok")
+                    : testResult.error}
+                </p>
+              )}
             </div>
           )}
         </section>

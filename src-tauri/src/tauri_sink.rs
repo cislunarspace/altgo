@@ -28,6 +28,7 @@ pub trait PipelineEventEmitter: Send + Sync + 'static {
     fn emit_pipeline_status(&self, status: &str);
     fn emit_pipeline_error(&self, message: &str);
     fn emit_transcription_result(&self, text: &str);
+    fn emit_polish_failed(&self, message: &str);
     fn emit_transcription_progress(&self, phase: &str, fraction: Option<f32>);
     fn emit_key_listener_backend(&self, backend: &str);
     fn emit_history_updated(&self);
@@ -55,6 +56,10 @@ impl PipelineEventEmitter for TauriEventEmitter {
 
     fn emit_transcription_result(&self, text: &str) {
         let _ = self.app.emit("transcription-result", text);
+    }
+
+    fn emit_polish_failed(&self, message: &str) {
+        let _ = self.app.emit("polish-failed", message);
     }
 
     fn emit_transcription_progress(&self, phase: &str, fraction: Option<f32>) {
@@ -158,6 +163,17 @@ impl PipelineSink for TauriPipelineSink {
 
                     emit_pipeline_status(&*emitter, &status, PipelineStatus::Done);
 
+                    // 润色失败先于结果文本告知前端，让悬浮窗在 done 阶段能同时
+                    // 展示「已回退原文」提示。
+                    if output_clone.polish_failed {
+                        emitter.emit_polish_failed(
+                            output_clone
+                                .polish_error
+                                .as_deref()
+                                .unwrap_or("润色失败，已使用原文"),
+                        );
+                    }
+
                     // 先送结果文本再切 done：前端收到 done 时若还没有结果，
                     // 会渲染出空 island（闪烁）。
                     emitter.emit_transcription_result(&res.text);
@@ -240,6 +256,7 @@ mod tests {
         PipelineStatus(String),
         PipelineError(String),
         TranscriptionResult(String),
+        PolishFailed(String),
         TranscriptionProgress {
             phase: String,
             fraction: Option<f32>,
@@ -285,6 +302,13 @@ mod tests {
                 .lock()
                 .unwrap()
                 .push(EmittedEvent::TranscriptionResult(text.into()));
+        }
+
+        fn emit_polish_failed(&self, message: &str) {
+            self.events
+                .lock()
+                .unwrap()
+                .push(EmittedEvent::PolishFailed(message.into()));
         }
 
         fn emit_transcription_progress(&self, phase: &str, fraction: Option<f32>) {
@@ -465,6 +489,7 @@ mod tests {
             text: String::new(),
             raw_text: String::new(),
             polish_failed: false,
+            polish_error: None,
         });
 
         // Synchronous early-return: status must be reset to Idle.
@@ -489,6 +514,7 @@ mod tests {
             text: "polished".into(),
             raw_text: "raw text".into(),
             polish_failed: false,
+            polish_error: None,
         });
 
         // spawned 任务跑在 tauri::async_runtime 的全局 runtime 上，
@@ -514,6 +540,42 @@ mod tests {
                 EmittedEvent::HistoryUpdated,
                 EmittedEvent::PipelineStatus("done".into()),
                 EmittedEvent::TranscriptionResult("polished text".into()),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn on_transcription_result_polish_failed_emits_event_before_text() {
+        let fx = make_fixture(
+            true,
+            Some(DispatchOutcome {
+                text: "raw text".into(),
+                history_appended: true,
+            }),
+        );
+
+        fx.sink.on_transcription_result(&TranscriptionResult {
+            text: "raw text".into(),
+            raw_text: "raw text".into(),
+            polish_failed: true,
+            polish_error: Some("LLM API 错误（HTTP 401）".into()),
+        });
+
+        for _ in 0..100 {
+            if fx.emitter.recorded_events().len() >= 4 {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+
+        // 失败事件先于结果文本，悬浮窗 done 阶段可同时展示回退提示。
+        assert_eq!(
+            fx.emitter.recorded_events(),
+            vec![
+                EmittedEvent::HistoryUpdated,
+                EmittedEvent::PipelineStatus("done".into()),
+                EmittedEvent::PolishFailed("LLM API 错误（HTTP 401）".into()),
+                EmittedEvent::TranscriptionResult("raw text".into()),
             ]
         );
     }

@@ -11,6 +11,9 @@ pub struct TranscriptionResult {
     pub raw_text: String,
     /// 润色是否失败
     pub polish_failed: bool,
+    /// 润色失败时的错误信息（用于前端提示）
+    #[serde(default)]
+    pub polish_error: Option<String>,
 }
 
 /// 管道事件接收器。

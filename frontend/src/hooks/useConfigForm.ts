@@ -10,6 +10,7 @@ export interface AppConfig {
   polishLevel: string;
   polishModel: string;
   polishApiBaseUrl: string;
+  polishProtocol: string;
   guiLanguage: string;
   overlayPosition: string;
   polisherApiKey: string;
@@ -26,6 +27,7 @@ export function saveRequestBody(c: AppConfig) {
     polishModel: c.polishModel,
     ...(c.polisherApiKey ? { polishApiKey: c.polisherApiKey } : {}),
     polishApiBaseUrl: c.polishApiBaseUrl,
+    polishProtocol: c.polishProtocol,
     guiLanguage: c.guiLanguage,
     overlayPosition: c.overlayPosition,
   };

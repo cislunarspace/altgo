@@ -80,6 +80,9 @@ export function Overlay() {
   const [result, setResult] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
+  // 润色失败原因（done 阶段在文本下方提示已回退原文）。
+  const [polishError, setPolishError] = useState<string | null>(null);
+
   // Progress info during processing.
   const [txProgress, setTxProgress] = useState<{
     phase: string;
@@ -133,6 +136,7 @@ export function Overlay() {
           if (newPhase !== "done") {
             setResult(null);
             setCopied(false);
+            setPolishError(null);
           }
           setIsCrossfading(true);
           setIsExiting(true);
@@ -156,6 +160,7 @@ export function Overlay() {
         setTxProgress(null);
         setResult(null);
         setCopied(false);
+        setPolishError(null);
       } else if (newPhase === "done") {
         setTxProgress(null);
       }
@@ -166,6 +171,11 @@ export function Overlay() {
       if (!active) return;
       setResult(event.payload);
       setCopied(false);
+    });
+
+    const unlistenPolishFailed = listen<string>("polish-failed", (event) => {
+      if (!active) return;
+      setPolishError(event.payload);
     });
 
     const unlistenTxProgress = listen<{
@@ -181,6 +191,7 @@ export function Overlay() {
       clearCrossfadeTimer();
       unlistenState.then((fn) => fn());
       unlistenResult.then((fn) => fn());
+      unlistenPolishFailed.then((fn) => fn());
       unlistenTxProgress.then((fn) => fn());
     };
   }, []);
@@ -235,6 +246,11 @@ export function Overlay() {
           </div>
           <div className="result-content">
             <span className="result-text">{result}</span>
+            {polishError && (
+              <span className="result-polish-error" title={polishError}>
+                {t("overlay.polish_failed")}
+              </span>
+            )}
           </div>
           <div className="result-actions">
             <button
