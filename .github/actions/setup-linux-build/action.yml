@@ -1,5 +1,5 @@
 name: 'Setup Linux Build Environment'
-description: 'Install system deps and Tauri CLI'
+description: 'Install system deps'
 inputs:
   extra-packages:
     description: 'Extra apt packages to install (e.g. rpm)'
@@ -12,15 +12,4 @@ runs:
       shell: bash
       run: |
         sudo apt-get update
-        sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev patchelf libasound2-dev build-essential cmake gcc-aarch64-linux-gnu ${{ inputs.extra-packages }}
-    - name: Install Tauri CLI
-      shell: bash
-      run: |
-        # rust-cache 会恢复 ~/.cargo/bin；版本匹配时避免每个 job 重跑 cargo install。
-        if command -v cargo-tauri >/dev/null 2>&1; then
-          installed_version="$(cargo tauri --version | awk 'NR == 1 { print $2; exit }')"
-          if [[ "${installed_version}" == "2.10.1" ]]; then
-            exit 0
-          fi
-        fi
-        cargo install tauri-cli --version "2.10.1" --locked
+        sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev patchelf libasound2-dev build-essential cmake ${{ inputs.extra-packages }}
