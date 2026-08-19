@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+## v2.5.10 (2026-08-19)
+
+### Fixes
+
+- **修复 Wayland 下悬浮窗定位失效**：Wayland 协议不允许客户端定位窗口，悬浮窗被合成器摆到屏幕中央。启动时检测会话，Wayland 且未显式设置 `GDK_BACKEND` 时切到 X11 后端（XWayland），定位恢复生效（#120、#126）。
+
+### Added
+
+- **悬浮窗位置可选**：新增 `gui.overlay_position` 设置（`bottom_center` 默认 / `top_center`），设置页外观区可选择，保存后随流水线重启对全部阶段生效（#126）。
+
+### Docs
+
+- 文档同步与精简：架构文档对齐 SenseVoice 与 Linux-only 收敛后的现状（#125）；测试文档重构为五层策略与派生数字（#124）；README 精简首次使用路径（#123）。
+
+### CI
+
+- 缓存 apt 系统依赖，规避 Azure 镜像慢速下载；Release 的 Tauri CLI 改用 npm 预编译版，免去逐 job 源码编译。
+
 ## v2.5.9 (2026-08-19)
 
 ### Fixes
