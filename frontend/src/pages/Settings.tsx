@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { Children, isValidElement, useEffect, useState, type ReactNode } from "react";
 import { getVersion } from "@tauri-apps/api/app";
 import { invoke } from "@tauri-apps/api/core";
 import { useTranslation } from "../i18n";
@@ -50,6 +50,18 @@ function formatSize(bytes: number): string {
   const mb = bytes / (1024 * 1024);
   if (mb >= 1024) return `${(mb / 1024).toFixed(1)} GB`;
   return `${Math.round(mb)} MB`;
+}
+
+function SettingsSectionOrder({ children }: { children: ReactNode }) {
+  const sections = Children.toArray(children).sort((a, b) => {
+    const orderOf = (node: ReactNode) =>
+      isValidElement<{ "data-settings-order"?: number }>(node)
+        ? node.props["data-settings-order"] ?? 99
+        : 99;
+    return orderOf(a) - orderOf(b);
+  });
+
+  return <>{sections}</>;
 }
 
 export default function Settings() {
@@ -179,7 +191,11 @@ export default function Settings() {
       </div>
 
       <div className="settings-form">
-        <section className="settings-section settings-section--primary settings-section--transcription">
+        <SettingsSectionOrder>
+        <section
+          data-settings-order={3}
+          className="settings-section settings-section--primary settings-section--transcription"
+        >
           <h3 className="settings-section-title">
             <Sparkles size={14} />
             {t("settings.transcription")}
@@ -292,7 +308,7 @@ export default function Settings() {
             </>
         </section>
 
-        <section className="settings-section settings-section--recording">
+        <section data-settings-order={1} className="settings-section settings-section--recording">
           <h3 className="settings-section-title">
             <Mic size={14} />
             {t("settings.recording")}
@@ -372,7 +388,10 @@ export default function Settings() {
           <p className="settings-hint">{t("settings.capture_activation_lead")}</p>
         </section>
 
-        <section className="settings-section settings-section--polishing settings-section--primary">
+        <section
+          data-settings-order={2}
+          className="settings-section settings-section--polishing settings-section--primary"
+        >
           <button
             type="button"
             className="settings-section-toggle"
@@ -497,6 +516,8 @@ export default function Settings() {
             </div>
           )}
         </section>
+
+        </SettingsSectionOrder>
 
         <section className="settings-section settings-section--appearance">
           <h3 className="settings-section-title">
