@@ -8,9 +8,15 @@ inputs:
 runs:
   using: 'composite'
   steps:
-    # apt 镜像（azure.archive.ubuntu.com）在 amd64 runner 上多次慢至 ~85KB/s，
-    # 62.7MB 的 webkit dev 包要下载 12 分钟；缓存 .deb 后命中时安装缩到秒级。
-    # 缓存 key 含包列表与 version；镜像内包版本升级时 bump version 刷新。
+    # azure 镜像在 amd64 runner 上反复慢至 ~85KB/s，62.7MB 的 webkit dev 包
+    # 要下载 12 分钟（v2.5.10 release 实测该步骤卡 24 分钟）；换官方 GeoDNS
+    # 主站后恢复常速。sed 对 arm64 源（不含该域名）无操作，幂等。
+    - name: Use faster apt mirror
+      shell: bash
+      run: sudo sed -i 's|azure.archive.ubuntu.com|archive.ubuntu.com|g' /etc/apt/sources.list
+    # 缓存 .deb 命中时安装缩到秒级；缓存 key 含包列表与 version，
+    # 镜像内包版本升级时 bump version 刷新。7 天未访问缓存会被逐出，
+    # 故换源步骤须保留，覆盖缓存失效后的全量下载。
     - name: Install system dependencies
       uses: awalsh128/cache-apt-pkgs-action@v1
       with:
