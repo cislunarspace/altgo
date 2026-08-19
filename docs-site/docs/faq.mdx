@@ -40,6 +40,12 @@ min_press_duration_ms = 200
 
 ## 转写相关
 
+### 能录音但没有转写结果
+
+1. 确认录音结束后**悬浮窗**是否进入「处理中」。
+2. 确认已在设置页下载本地模型（SenseVoice）。
+3. 查看日志：`RUST_LOG=altgo=debug altgo`，检查 `transcription failed`、模型路径与润色服务请求失败信息。
+
 ### 中文识别效果不好
 
 1. 确认 `language = "zh"` 设置正确
