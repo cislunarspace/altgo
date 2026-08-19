@@ -49,7 +49,7 @@ jobs:
           workspaces: |
             src-tauri -> target
 
-      # 系统依赖、打包用二进制、Tauri CLI 统一在 composite action 里装
+      # 系统依赖统一在 composite action 里装；Tauri CLI 用 npm 版（见下方构建步骤）
       - uses: ./.github/actions/setup-linux-build
 
       - uses: actions/setup-node@v4
@@ -81,6 +81,6 @@ jobs:
         run: cargo test --manifest-path=src-tauri/Cargo.toml --lib
 
       - name: Build Tauri GUI
-        run: cargo tauri build --bundles deb
+        run: npm --prefix frontend exec -- tauri build --bundles deb
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

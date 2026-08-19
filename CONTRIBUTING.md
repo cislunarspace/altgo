@@ -8,11 +8,12 @@
 
 - Rust **1.80+**（推荐最新稳定版，需满足 [Tauri 2 前置条件](https://tauri.app/start/prerequisites/)）
 - **Node.js 18+**（建议 20+；前端使用 npm）
+- Tauri CLI：`cargo install tauri-cli --version "^2" --locked`
 - Linux（Ubuntu 22.04+）
 
 ### 平台特定依赖
 
-- **Linux**：`xinput`、`xmodmap`、`parecord`、`xclip` 或 `wl-copy`、`notify-send`；Wayland 下按键监听还需 `evtest`，且需能读取 `/dev/input/event*`（常见：`sudo usermod -aG input $USER` 后重新登录）。完整 GUI 构建需 GTK/WebKit 等开发库，见 [README.md](README.md)「开发」。
+- **Linux**：`xinput`、`xmodmap`、`parecord`、`xclip` 或 `wl-copy`、`notify-send`；Wayland 下按键监听还需 `evtest`，且需能读取 `/dev/input/event*`（常见：`sudo usermod -aG input $USER` 后重新登录）。完整 GUI 构建需 GTK/WebKit 等开发库，见 [Tauri 2 前置条件](https://tauri.app/start/prerequisites/)。
 
 ## 开发流程
 
@@ -24,8 +25,11 @@
    cargo fmt --manifest-path=src-tauri/Cargo.toml -- --check
    cargo clippy --manifest-path=src-tauri/Cargo.toml -- -D warnings
    cargo test --manifest-path=src-tauri/Cargo.toml
+   cd frontend && npm test
    cd frontend && npm run build
    ```
+
+   其中 Rust 的 fmt / clippy / test 也有 Makefile 便捷目标：`make fmt`、`make lint`、`make test`。
 5. 提交变更 (`git commit`)
 6. 推送分支 (`git push origin feat/my-feature`)
 7. 创建 Pull Request

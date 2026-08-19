@@ -107,8 +107,9 @@ jobs:
         working-directory: frontend
 
       # 同一架构的 deb/rpm 共享一次前端和 Rust 构建，只在 bundle 阶段分别打包。
+      # Tauri CLI 用 npm 版（预编译二进制），免去每个 job 源码编译 tauri-cli。
       - name: 构建 deb 与 rpm
-        run: cargo tauri build --bundles deb,rpm
+        run: npm --prefix frontend exec -- tauri build --bundles deb,rpm
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
