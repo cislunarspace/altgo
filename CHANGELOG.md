@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## v2.6.0 (2026-08-23)
+
+### Added
+
+- **Windows 支持**：Windows 10+（x86_64）原生实现，随版本发布 NSIS 安装包（`altgo_<版本>_x64-setup.exe`）。按键监听用 WH_KEYBOARD_LL 低级键盘钩子，录音用 cpal/WASAPI（16kHz 单声道，设备不支持时自动回退默认格式并重采样），激活键捕获与 Linux「按下以设置」体验一致（配置新增 `windows_vk_code`，与 `linux_evdev_code` 对等）。CI 增加 Windows 测试与打包 job，Release 自动产出安装包。
+- **转写文本自动输入**（Windows）：转写完成后除写入剪贴板外，通过 SendInput 把文本直接输入到当前焦点位置（支持中文）；Linux 行为不变（仅剪贴板）。
+
+### Changed
+
+- **Windows 输出全部原生实现**：旧版基于 PowerShell 子进程的剪贴板与悬浮窗方案不再恢复，剪贴板改用 arboard，悬浮窗定位改用系统显示器 API。
+
 ## v2.5.12 (2026-08-20)
 
 ### Added

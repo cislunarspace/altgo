@@ -5,9 +5,9 @@
 [![Release](https://img.shields.io/github/v/release/cislunarspace/altgo)](https://github.com/cislunarspace/altgo/releases)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-**altgo** 是一款 Linux 桌面语音转文字工具。按住触发键说话，松开后自动完成录音、转写和可选润色，结果写入系统剪贴板并显示在悬浮窗中。
+**altgo** 是一款桌面语音转文字工具。按住触发键说话，松开后自动完成录音、转写和可选润色，结果写入系统剪贴板并显示在悬浮窗中。
 
-支持 **Linux**（Ubuntu 22.04+）的 **x86_64** 与 **aarch64** 架构。目前不支持 Windows 和 macOS。
+支持 **Linux**（Ubuntu 22.04+）的 **x86_64** 与 **aarch64** 架构，以及 **Windows 10+**（x86_64）。目前不支持 macOS。
 
 - [在线文档](https://cislunarspace.github.io/altgo/)
 - [下载 Releases](https://github.com/cislunarspace/altgo/releases)
