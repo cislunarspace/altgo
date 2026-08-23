@@ -106,12 +106,14 @@ jobs:
         run: npm ci
         working-directory: frontend
 
-      # 同一架构的 deb/rpm 共享一次前端和 Rust 构建，只在 bundle 阶段分别打包。
+      # 同一架构的 deb/rpm/AppImage 共享一次前端和 Rust 构建，只在 bundle 阶段分别打包。
       # Tauri CLI 用 npm 版（预编译二进制），免去每个 job 源码编译 tauri-cli。
-      - name: 构建 deb 与 rpm
-        run: npm --prefix frontend exec -- tauri build --bundles deb,rpm
+      # APPIMAGE_EXTRACT_AND_RUN：runner 容器无 FUSE，让 linuxdeploy 以解压模式运行。
+      - name: 构建 deb、rpm 与 AppImage
+        run: npm --prefix frontend exec -- tauri build --bundles deb,rpm,appimage
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APPIMAGE_EXTRACT_AND_RUN: "1"
 
       - name: 上传 Linux 软件包产物
         uses: actions/upload-artifact@v4
@@ -120,6 +122,7 @@ jobs:
           path: |
             src-tauri/target/release/bundle/deb/*.deb
             src-tauri/target/release/bundle/rpm/*.rpm
+            src-tauri/target/release/bundle/appimage/*.AppImage
           if-no-files-found: error
 
   build-windows:
@@ -150,8 +153,8 @@ jobs:
       - name: Run tests
         run: cargo test --manifest-path=src-tauri/Cargo.toml --lib
 
-      - name: 构建 NSIS 安装包
-        run: npm --prefix frontend exec -- tauri build --bundles nsis
+      - name: 构建 NSIS 安装包与 MSI
+        run: npm --prefix frontend exec -- tauri build --bundles nsis,msi
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -161,6 +164,7 @@ jobs:
           name: altgo-windows-packages
           path: |
             src-tauri/target/release/bundle/nsis/*-setup.exe
+            src-tauri/target/release/bundle/msi/*.msi
           if-no-files-found: error
 
   gen-aur:
@@ -239,9 +243,11 @@ jobs:
         run: |
           mapfile -t debs < <(find release-assets -type f -name '*.deb' | sort)
           mapfile -t rpms < <(find release-assets -type f -name '*.rpm' | sort)
+          mapfile -t appimages < <(find release-assets -type f -name '*.AppImage' | sort)
           mapfile -t exes < <(find release-assets -type f -name '*-setup.exe' | sort)
-          if [[ "${#debs[@]}" -ne 2 || "${#rpms[@]}" -ne 2 || "${#exes[@]}" -ne 1 ]]; then
-            echo "错误：预期两份 deb、两份 rpm 和一份 exe，实际为 ${#debs[@]} 份 deb、${#rpms[@]} 份 rpm、${#exes[@]} 份 exe" >&2
+          mapfile -t msis < <(find release-assets -type f -name '*.msi' | sort)
+          if [[ "${#debs[@]}" -ne 2 || "${#rpms[@]}" -ne 2 || "${#appimages[@]}" -ne 2 || "${#exes[@]}" -ne 1 || "${#msis[@]}" -ne 1 ]]; then
+            echo "错误：预期两份 deb、两份 rpm、两份 AppImage、一份 exe 和一份 msi，实际为 ${#debs[@]} 份 deb、${#rpms[@]} 份 rpm、${#appimages[@]} 份 AppImage、${#exes[@]} 份 exe、${#msis[@]} 份 msi" >&2
             find release-assets -type f | sort >&2
             exit 1
           fi
@@ -250,7 +256,7 @@ jobs:
       - name: Generate checksums
         run: |
           cd release-assets
-          find . -type f \( -name '*.deb' -o -name '*.rpm' -o -name '*-setup.exe' \) -print0 | sort -z | xargs -0 sha256sum > ../checksums.txt
+          find . -type f \( -name '*.deb' -o -name '*.rpm' -o -name '*.AppImage' -o -name '*-setup.exe' -o -name '*.msi' \) -print0 | sort -z | xargs -0 sha256sum > ../checksums.txt
           cd ..
           cat checksums.txt
 
@@ -261,7 +267,9 @@ jobs:
           files: |
             release-assets/**/*.deb
             release-assets/**/*.rpm
+            release-assets/**/*.AppImage
             release-assets/**/*-setup.exe
+            release-assets/**/*.msi
             release-assets/PKGBUILD
             release-assets/.SRCINFO
             checksums.txt

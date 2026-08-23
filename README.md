@@ -38,7 +38,7 @@ sudo usermod -aG input "$USER"
 
 然后：
 
-1. 从 [Releases](https://github.com/cislunarspace/altgo/releases) 下载对应安装包：`.deb` 或 `.rpm`。
+1. 从 [Releases](https://github.com/cislunarspace/altgo/releases) 下载对应安装包：`.deb`、`.rpm` 或 `.AppImage`。
 2. 安装下载的包，例如：
 
    ```bash
@@ -47,9 +47,26 @@ sudo usermod -aG input "$USER"
    sudo dnf install ./altgo-*.rpm
    ```
 
+   `.AppImage` 免安装，下载后赋予执行权限直接运行：
+
+   ```bash
+   chmod +x altgo_*.AppImage && ./altgo_*.AppImage
+   ```
+
+   AppImage 不像 deb/rpm 那样自动装依赖，缺库时参考下一段依赖清单自行安装。
+
 3. 重新登录后启动 altgo，在设置页完成转写配置。
 
 `.deb` 和 `.rpm` 会声明桌面、音频、剪贴板、通知和 `evtest` 等依赖；若使用 Wayland，请确认系统已安装 `evtest` 且当前用户能读取 `/dev/input/event*`。
+
+### Windows
+
+从 [Releases](https://github.com/cislunarspace/altgo/releases) 下载安装包：
+
+- `*-setup.exe`（NSIS 安装器）：双击安装，适合大多数用户。
+- `*.msi`：适合需要 MSI 部署方式的企业环境。
+
+仅支持 Windows x64（内嵌的 sherpa-onnx 预编译库暂无 Windows arm64 版本）。安装后在开始菜单启动 altgo，在设置页完成转写配置。
 
 ## 快速开始
 
