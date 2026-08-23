@@ -84,7 +84,7 @@ sudo usermod -aG input "$USER"
 - [配置指南](https://cislunarspace.github.io/altgo/docs/configuration)：配置文件字段、环境变量与日志级别
 - [常见问题](https://cislunarspace.github.io/altgo/docs/faq)：按键、录音、转写、润色与剪贴板排障
 - [`CONTRIBUTING.md`](CONTRIBUTING.md)：开发环境、构建、测试、CI、Release 与文档站部署
-- [`docs/architecture.md`](docs/architecture.md) 与 [`CLAUDE.md`](CLAUDE.md)：系统架构与核心模块说明
+- [`docs/architecture.md`](docs/architecture.md) 与 [`AGENTS.md`](AGENTS.md)：系统架构与核心模块说明
 - [`docs/README.md`](docs/README.md)：设计与计划类文档索引
 - [`CHANGELOG.md`](CHANGELOG.md)：版本变更记录
 
