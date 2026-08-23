@@ -84,7 +84,11 @@ impl OverlayWindow for TauriOverlayWindow {
     }
 
     fn primary_monitor_geometry(&self) -> Result<(i32, i32, i32, i32), OverlayError> {
-        platform_primary_monitor_geometry(&self.app).ok_or_else(|| {
+        #[cfg(target_os = "windows")]
+        let geometry = platform_primary_monitor_geometry(&self.app);
+        #[cfg(target_os = "linux")]
+        let geometry = platform_primary_monitor_geometry();
+        geometry.ok_or_else(|| {
             OverlayError::PrimaryMonitorFailed("no primary monitor available".into())
         })
     }
@@ -104,7 +108,7 @@ fn platform_primary_monitor_geometry(app: &tauri::AppHandle) -> Option<(i32, i32
 }
 
 #[cfg(target_os = "linux")]
-fn platform_primary_monitor_geometry(_app: &tauri::AppHandle) -> Option<(i32, i32, i32, i32)> {
+fn platform_primary_monitor_geometry() -> Option<(i32, i32, i32, i32)> {
     xrandr_primary_monitor()
 }
 
@@ -211,8 +215,7 @@ DP-2 connected 1920x1080+3840+0 (normal left inverted right x axis y axis) 527mm
     #[cfg(target_os = "linux")]
     #[test]
     fn test_platform_primary_monitor_geometry_runs_without_panicking() {
-        let app = tauri::test::mock_app();
-        let _ = platform_primary_monitor_geometry(&app.handle());
+        let _ = platform_primary_monitor_geometry();
     }
 
     #[test]
