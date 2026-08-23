@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## v2.6.1 (2026-08-23)
+
+### Added
+
+- **Linux AppImage**：发布产物新增 `altgo_<版本>_<arch>.AppImage`（amd64 / arm64），免安装、覆盖 deb/rpm 之外的发行版；AppImage 不自动装依赖，缺库时请参照 README 依赖清单安装。
+- **Windows MSI**：发布产物新增 `altgo_<版本>_x64_en-US.msi`，适合需要 MSI 部署方式的企业环境。
+
+### Notes
+
+- Windows arm64 暂不支持：内嵌的 sherpa-onnx 预编译库无 Windows arm64 版本（#131）；Flatpak / Snap / winget / Scoop 分发渠道另行跟踪（#130）。
+
 ## v2.6.0 (2026-08-23)
 
 ### Added
