@@ -122,6 +122,47 @@ jobs:
             src-tauri/target/release/bundle/rpm/*.rpm
           if-no-files-found: error
 
+  build-windows:
+    name: 构建 Windows 安装包 (x64)
+    needs: validate
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            src-tauri -> target
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci
+        working-directory: frontend
+
+      - name: Run tests
+        run: cargo test --manifest-path=src-tauri/Cargo.toml --lib
+
+      - name: 构建 NSIS 安装包
+        run: npm --prefix frontend exec -- tauri build --bundles nsis
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 上传 Windows 安装包产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: altgo-windows-packages
+          path: |
+            src-tauri/target/release/bundle/nsis/*-setup.exe
+          if-no-files-found: error
+
   gen-aur:
     name: Generate AUR PKGBUILD
     needs: build-linux
@@ -172,7 +213,7 @@ jobs:
 
   release:
     name: Create Release
-    needs: [build-linux, gen-aur]
+    needs: [build-linux, build-windows, gen-aur]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -198,8 +239,9 @@ jobs:
         run: |
           mapfile -t debs < <(find release-assets -type f -name '*.deb' | sort)
           mapfile -t rpms < <(find release-assets -type f -name '*.rpm' | sort)
-          if [[ "${#debs[@]}" -ne 2 || "${#rpms[@]}" -ne 2 ]]; then
-            echo "错误：预期两份 deb 和两份 rpm，实际为 ${#debs[@]} 份 deb、${#rpms[@]} 份 rpm" >&2
+          mapfile -t exes < <(find release-assets -type f -name '*-setup.exe' | sort)
+          if [[ "${#debs[@]}" -ne 2 || "${#rpms[@]}" -ne 2 || "${#exes[@]}" -ne 1 ]]; then
+            echo "错误：预期两份 deb、两份 rpm 和一份 exe，实际为 ${#debs[@]} 份 deb、${#rpms[@]} 份 rpm、${#exes[@]} 份 exe" >&2
             find release-assets -type f | sort >&2
             exit 1
           fi
@@ -208,7 +250,7 @@ jobs:
       - name: Generate checksums
         run: |
           cd release-assets
-          find . -type f \( -name '*.deb' -o -name '*.rpm' \) -print0 | sort -z | xargs -0 sha256sum > ../checksums.txt
+          find . -type f \( -name '*.deb' -o -name '*.rpm' -o -name '*-setup.exe' \) -print0 | sort -z | xargs -0 sha256sum > ../checksums.txt
           cd ..
           cat checksums.txt
 
@@ -219,6 +261,7 @@ jobs:
           files: |
             release-assets/**/*.deb
             release-assets/**/*.rpm
+            release-assets/**/*-setup.exe
             release-assets/PKGBUILD
             release-assets/.SRCINFO
             checksums.txt
