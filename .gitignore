@@ -35,3 +35,6 @@ whisper.cpp/
 .claude/
 .mimocode/
 .worktrees/
+
+# Local tooling
+.zcode/

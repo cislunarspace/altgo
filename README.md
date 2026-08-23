@@ -1,5 +1,7 @@
 # altgo
 
+![altgo](assets/banner.png)
+
 [![CI](https://github.com/cislunarspace/altgo/actions/workflows/ci.yml/badge.svg)](https://github.com/cislunarspace/altgo/actions/workflows/ci.yml)
 [![文档](https://img.shields.io/badge/docs-online-2f6feb)](https://cislunarspace.github.io/altgo/)
 [![Release](https://img.shields.io/github/v/release/cislunarspace/altgo)](https://github.com/cislunarspace/altgo/releases)
