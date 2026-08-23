@@ -5,6 +5,7 @@ describe("saveRequestBody", () => {
   const base: AppConfig = {
     keyName: "AltRight",
     linuxEvdevCode: 100,
+    windowsVkCode: null,
     language: "zh",
     model: "sense-voice",
     polishLevel: "none",
@@ -43,6 +44,7 @@ describe("normalizeConfig", () => {
     const input = {
       keyName: "AltRight",
       linuxEvdevCode: undefined,
+      windowsVkCode: undefined,
       language: "zh",
       model: "sense-voice",
       polishLevel: "none",
@@ -60,6 +62,7 @@ describe("normalizeConfig", () => {
     const input: AppConfig = {
       keyName: "AltRight",
       linuxEvdevCode: 100,
+      windowsVkCode: 0xa5,
       language: "zh",
       model: "sense-voice",
       polishLevel: "none",

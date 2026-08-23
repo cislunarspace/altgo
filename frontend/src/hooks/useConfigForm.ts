@@ -5,6 +5,7 @@ import { message as showMessageDialog } from "@tauri-apps/plugin-dialog";
 export interface AppConfig {
   keyName: string;
   linuxEvdevCode: number | null;
+  windowsVkCode: number | null;
   language: string;
   model: string;
   polishLevel: string;
@@ -21,6 +22,7 @@ export function saveRequestBody(c: AppConfig) {
   return {
     keyName: c.keyName,
     linuxEvdevCode: c.linuxEvdevCode,
+    windowsVkCode: c.windowsVkCode,
     language: c.language,
     model: c.model,
     polishLevel: c.polishLevel,
@@ -37,6 +39,7 @@ export function normalizeConfig(c: AppConfig): AppConfig {
   return {
     ...c,
     linuxEvdevCode: c.linuxEvdevCode ?? null,
+    windowsVkCode: c.windowsVkCode ?? null,
     polisherApiKey: "",
     hasPolisherApiKey: c.hasPolisherApiKey ?? false,
   };
@@ -119,11 +122,13 @@ export function useConfigForm({
       const r = await invoke<{
         keyName: string;
         linuxEvdevCode?: number | null;
+        windowsVkCode?: number | null;
       }>("capture_activation_key");
       const next: AppConfig = {
         ...config,
         keyName: r.keyName,
         linuxEvdevCode: r.linuxEvdevCode ?? null,
+        windowsVkCode: r.windowsVkCode ?? null,
       };
       await saveWith(next);
     } catch (e) {

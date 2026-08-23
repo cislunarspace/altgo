@@ -1,12 +1,22 @@
-//! 按键监听器模块（Linux）。
+//! 按键监听器模块。
 //!
-//! 使用 `xinput test-xi2`（XInput2 扩展）监听按键事件。
+//! Linux：`xinput test-xi2`（XInput2 扩展）或 `evtest` 回退。
+//! Windows：`WH_KEYBOARD_LL` 低级键盘钩子（`windows.rs`）。
 
+#[cfg(target_os = "linux")]
 mod linux;
+#[cfg(target_os = "windows")]
+pub(crate) mod windows;
 
+#[cfg(target_os = "linux")]
 pub use linux::{list_keyboard_devices, X11Listener};
+#[cfg(target_os = "windows")]
+pub use windows::WindowsKeyListener;
 
+#[cfg(target_os = "linux")]
 pub type PlatformListener = X11Listener;
+#[cfg(target_os = "windows")]
+pub type PlatformListener = WindowsKeyListener;
 
 /// 按键事件。
 #[derive(Debug)]
@@ -19,7 +29,7 @@ use crate::error::KeyListenerError;
 
 /// 持续监听激活键的 trait seam。
 ///
-/// 由 Linux adapter 实现；pipeline 以 `Box<dyn KeyListener>` 消费，便于注入测试 fake。
+/// 由平台 adapter 实现；pipeline 以 `Box<dyn KeyListener>` 消费，便于注入测试 fake。
 pub trait KeyListener: Send {
     /// 开始监听，返回事件通道与后端标识（如 `"xinput"`）。
     fn start(

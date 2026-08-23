@@ -84,17 +84,32 @@ impl OverlayWindow for TauriOverlayWindow {
     }
 
     fn primary_monitor_geometry(&self) -> Result<(i32, i32, i32, i32), OverlayError> {
-        platform_primary_monitor_geometry().ok_or_else(|| {
+        platform_primary_monitor_geometry(&self.app).ok_or_else(|| {
             OverlayError::PrimaryMonitorFailed("no primary monitor available".into())
         })
     }
 }
 
-fn platform_primary_monitor_geometry() -> Option<(i32, i32, i32, i32)> {
+#[cfg(target_os = "windows")]
+fn platform_primary_monitor_geometry(app: &tauri::AppHandle) -> Option<(i32, i32, i32, i32)> {
+    let monitor = app.primary_monitor().ok()??;
+    let position = monitor.position();
+    let size = monitor.size();
+    Some((
+        position.x,
+        position.y,
+        size.width as i32,
+        size.height as i32,
+    ))
+}
+
+#[cfg(target_os = "linux")]
+fn platform_primary_monitor_geometry(_app: &tauri::AppHandle) -> Option<(i32, i32, i32, i32)> {
     xrandr_primary_monitor()
 }
 
 /// Uses `xrandr` to get primary monitor geometry in physical pixels.
+#[cfg(target_os = "linux")]
 fn xrandr_primary_monitor() -> Option<(i32, i32, i32, i32)> {
     let output = std::process::Command::new("xrandr").output().ok()?;
     if !output.status.success() {
@@ -114,6 +129,7 @@ fn xrandr_primary_monitor() -> Option<(i32, i32, i32, i32)> {
         })
 }
 
+#[cfg(target_os = "linux")]
 fn parse_xrandr_geometry(output: &str) -> Vec<(i32, i32, i32, i32, bool)> {
     let mut monitors = Vec::new();
     for line in output.lines() {
@@ -170,6 +186,7 @@ fn geometry_from_work_rect(left: i32, top: i32, right: i32, bottom: i32) -> (i32
 mod tests {
     use super::*;
 
+    #[cfg(target_os = "linux")]
     #[test]
     fn test_parse_xrandr_geometry() {
         let sample = r#"
@@ -182,17 +199,20 @@ DP-2 connected 1920x1080+3840+0 (normal left inverted right x axis y axis) 527mm
         assert_eq!(parsed[1], (3840, 0, 1920, 1080, false));
     }
 
+    #[cfg(target_os = "linux")]
     #[test]
     fn test_parse_xrandr_skips_disconnected() {
         let sample = "DP-1 disconnected (normal left inverted right x axis y axis)";
         assert!(parse_xrandr_geometry(sample).is_empty());
     }
 
+    // Windows 路径需要 AppHandle，只能在真实运行时验证；
+    // 此处仅覆盖 Linux/xrandr 路径（无显示环境下返回 None 也不得 panic）。
+    #[cfg(target_os = "linux")]
     #[test]
     fn test_platform_primary_monitor_geometry_runs_without_panicking() {
-        // The function may return None on stripped-down CI without a display,
-        // but it must not panic.
-        let _ = platform_primary_monitor_geometry();
+        let app = tauri::test::mock_app();
+        let _ = platform_primary_monitor_geometry(&app.handle());
     }
 
     #[test]

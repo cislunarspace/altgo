@@ -41,6 +41,7 @@ where
 pub struct ConfigResponse {
     pub key_name: String,
     pub linux_evdev_code: Option<u16>,
+    pub windows_vk_code: Option<u16>,
     pub language: String,
     pub model: String,
     pub polish_level: String,
@@ -56,6 +57,7 @@ fn build_config_response(cfg: &crate::config::Config) -> ConfigResponse {
     ConfigResponse {
         key_name: cfg.key_listener.key_name.clone(),
         linux_evdev_code: cfg.key_listener.linux_evdev_code,
+        windows_vk_code: cfg.key_listener.windows_vk_code,
         language: cfg.transcriber.language.clone(),
         model: cfg.transcriber.model.clone(),
         polish_level: cfg.polisher.level.clone(),

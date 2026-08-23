@@ -1,12 +1,21 @@
-//! 录音模块（Linux）。
+//! 录音模块。
 //!
-//! `PulseRecorder` 使用 `parecord`（PulseAudio）采集 16kHz 单声道 PCM。
+//! Linux：`PulseRecorder`（`parecord`）。Windows：`WindowsRecorder`（cpal / WASAPI）。
 
+#[cfg(target_os = "linux")]
 mod linux;
+#[cfg(target_os = "windows")]
+mod windows;
 
+#[cfg(target_os = "linux")]
 pub use linux::PulseRecorder;
+#[cfg(target_os = "windows")]
+pub use windows::WindowsRecorder;
 
+#[cfg(target_os = "linux")]
 pub type PlatformRecorder = PulseRecorder;
+#[cfg(target_os = "windows")]
+pub type PlatformRecorder = WindowsRecorder;
 
 pub use crate::error::RecorderError;
 
@@ -19,7 +28,7 @@ pub trait Recorder: Send {
     fn is_recording(&self) -> bool;
 }
 
-#[cfg(test)]
+#[cfg(all(test, target_os = "linux"))]
 mod tests {
     use super::{PulseRecorder, SAMPLE_RATE};
     use crate::error::RecorderError;

@@ -70,6 +70,8 @@ pub struct KeyListenerConfig {
     pub key_name: String,
     /// Linux evtest 回退路径使用的 evdev 键码（由「按下以设置」捕获）；`None` 时沿用 Alt 预设的启发式映射
     pub linux_evdev_code: Option<u16>,
+    /// Windows 使用的虚拟键码（由「按下以设置」捕获）；`None` 时由 `key_name` 解析
+    pub windows_vk_code: Option<u16>,
     /// 长按阈值（毫秒），超过此时间视为长按录音
     #[serde(with = "duration_ms", alias = "long_press_threshold_ms")]
     pub long_press_threshold: Duration,
@@ -86,6 +88,7 @@ impl Default for KeyListenerConfig {
         Self {
             key_name: "Alt_R".to_string(),
             linux_evdev_code: None,
+            windows_vk_code: None,
             long_press_threshold: Duration::from_millis(200),
             double_click_interval: Duration::from_millis(300),
             min_press_duration: Duration::from_millis(100),
@@ -373,6 +376,10 @@ pub struct ConfigPatch {
     pub linux_evdev_code: Option<Option<u16>>,
     /// `None` = field absent (no change); `Some(None)` = JSON `null` (clear);
     /// `Some(Some(v))` = set to v.
+    #[serde(default, deserialize_with = "opt_patch_u16::deserialize")]
+    pub windows_vk_code: Option<Option<u16>>,
+    /// `None` = field absent (no change); `Some(None)` = JSON `null` (clear);
+    /// `Some(Some(v))` = set to v.
     pub language: Option<String>,
     pub model: Option<String>,
     pub polish_level: Option<String>,
@@ -394,6 +401,7 @@ impl ConfigPatch {
             &mut cfg.key_listener.linux_evdev_code,
             self.linux_evdev_code,
         );
+        apply_nested_opt(&mut cfg.key_listener.windows_vk_code, self.windows_vk_code);
         if let Some(ref v) = self.language {
             cfg.transcriber.language = v.clone();
         }

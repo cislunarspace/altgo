@@ -180,6 +180,18 @@ pub async fn process_transcription_result(
         tracing::warn!("failed to write clipboard");
     }
 
+    // Windows: 注入到当前焦点窗口；其他平台为 no-op
+    let text_clone = text_to_use.clone();
+    let output_handle = output_adapter.clone_box();
+    let injected = tokio::task::spawn_blocking(move || output_handle.inject_text(&text_clone))
+        .await
+        .ok()
+        .and_then(|r| r.ok())
+        .is_some();
+    if !injected {
+        tracing::warn!("failed to inject text");
+    }
+
     // Append to history
     let raw = output.raw_text.clone();
     let display = text_to_use.clone();
