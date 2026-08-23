@@ -101,6 +101,15 @@ pub fn run() {
     }
 
     tauri::Builder::default()
+        // 单实例保护：第二个实例启动时唤起已有实例的窗口并自行退出。
+        // 避免两个进程各装一个键盘钩子，导致同一次录音被转写、注入两次。
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            if let Some(win) = app.get_webview_window("main") {
+                let _ = win.show();
+                let _ = win.unminimize();
+                let _ = win.set_focus();
+            }
+        }))
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let config_path = config::Config::default_config_path();
