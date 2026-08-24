@@ -30,6 +30,7 @@ pub trait PipelineEventEmitter: Send + Sync + 'static {
     fn emit_transcription_result(&self, text: &str);
     fn emit_polish_failed(&self, message: &str);
     fn emit_transcription_progress(&self, phase: &str, fraction: Option<f32>);
+    fn emit_audio_level(&self, level: f32);
     fn emit_key_listener_backend(&self, backend: &str);
     fn emit_history_updated(&self);
 }
@@ -67,6 +68,10 @@ impl PipelineEventEmitter for TauriEventEmitter {
             "transcription-progress",
             serde_json::json!({ "phase": phase, "fraction": fraction }),
         );
+    }
+
+    fn emit_audio_level(&self, level: f32) {
+        let _ = self.app.emit("audio-level", level);
     }
 
     fn emit_key_listener_backend(&self, backend: &str) {
@@ -192,6 +197,10 @@ impl PipelineSink for TauriPipelineSink {
         self.emitter.emit_transcription_progress(phase, fraction);
     }
 
+    fn on_audio_level(&self, level: f32) {
+        self.emitter.emit_audio_level(level);
+    }
+
     fn on_key_listener_backend(&self, backend: &str) {
         self.emitter.emit_key_listener_backend(backend);
     }
@@ -261,6 +270,7 @@ mod tests {
             phase: String,
             fraction: Option<f32>,
         },
+        AudioLevel(f32),
         KeyListenerBackend(String),
         HistoryUpdated,
     }
@@ -319,6 +329,13 @@ mod tests {
                     phase: phase.into(),
                     fraction,
                 });
+        }
+
+        fn emit_audio_level(&self, level: f32) {
+            self.events
+                .lock()
+                .unwrap()
+                .push(EmittedEvent::AudioLevel(level));
         }
 
         fn emit_key_listener_backend(&self, backend: &str) {
@@ -583,6 +600,21 @@ mod tests {
     // -----------------------------------------------------------------------
     // on_progress 测试
     // -----------------------------------------------------------------------
+
+    #[test]
+    fn on_audio_level_emits_audio_level() {
+        let fx = make_fixture(true, None);
+        fx.sink.on_audio_level(0.42);
+        fx.sink.on_audio_level(0.0);
+
+        assert_eq!(
+            fx.emitter.recorded_events(),
+            vec![
+                EmittedEvent::AudioLevel(0.42),
+                EmittedEvent::AudioLevel(0.0),
+            ]
+        );
+    }
 
     #[test]
     fn on_progress_emits_progress() {

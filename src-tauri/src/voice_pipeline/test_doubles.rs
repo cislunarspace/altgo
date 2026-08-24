@@ -81,6 +81,7 @@ pub(super) struct FakeRecorder {
     pub(super) start_count: std::sync::atomic::AtomicUsize,
     pub(super) stop_count: std::sync::atomic::AtomicUsize,
     stop_error: Mutex<Option<crate::error::RecorderError>>,
+    audio_level_cb: Mutex<Option<Arc<dyn Fn(f32) + Send + Sync>>>,
 }
 
 impl FakeRecorder {
@@ -91,6 +92,7 @@ impl FakeRecorder {
             start_count: std::sync::atomic::AtomicUsize::new(0),
             stop_count: std::sync::atomic::AtomicUsize::new(0),
             stop_error: Mutex::new(None),
+            audio_level_cb: Mutex::new(None),
         }
     }
 
@@ -101,6 +103,7 @@ impl FakeRecorder {
             start_count: std::sync::atomic::AtomicUsize::new(0),
             stop_count: std::sync::atomic::AtomicUsize::new(0),
             stop_error: Mutex::new(Some(error)),
+            audio_level_cb: Mutex::new(None),
         }
     }
 
@@ -134,6 +137,10 @@ impl Recorder for FakeRecorder {
     fn is_recording(&self) -> bool {
         self.recording.load(std::sync::atomic::Ordering::SeqCst)
     }
+
+    fn set_audio_level_callback(&mut self, callback: Option<Arc<dyn Fn(f32) + Send + Sync>>) {
+        *self.audio_level_cb.lock().unwrap() = callback;
+    }
 }
 
 impl Recorder for std::sync::Arc<FakeRecorder> {
@@ -146,6 +153,10 @@ impl Recorder for std::sync::Arc<FakeRecorder> {
     }
     fn is_recording(&self) -> bool {
         (**self).is_recording()
+    }
+    fn set_audio_level_callback(&mut self, callback: Option<Arc<dyn Fn(f32) + Send + Sync>>) {
+        let ptr: *mut FakeRecorder = Arc::as_ptr(self) as *mut _;
+        unsafe { (*ptr).set_audio_level_callback(callback) }
     }
 }
 

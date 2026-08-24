@@ -5,10 +5,10 @@
 
 use crate::audio::{self, Buffer};
 use crate::error::RecorderError;
-use crate::recorder::Recorder;
+use crate::recorder::{AudioLevelCallback, Recorder};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 
 /// cpal 的 `Stream` 在 Windows 上不是 `Send`（内部持有原生指针），
 /// 但 `Recorder` 要求跨线程。这里显式声明发送安全性：WASAPI 流的
@@ -23,6 +23,7 @@ pub struct WindowsRecorder {
     recording: Arc<AtomicBool>,
     // Stream 必须保持存活才有数据；stop 时 drop。
     stream: Mutex<Option<SendStream>>,
+    audio_level_cb: Arc<RwLock<Option<AudioLevelCallback>>>,
 }
 
 impl WindowsRecorder {
@@ -32,6 +33,7 @@ impl WindowsRecorder {
             shared_buffer: Arc::new(Buffer::new()),
             recording: Arc::new(AtomicBool::new(false)),
             stream: Mutex::new(None),
+            audio_level_cb: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -57,6 +59,7 @@ impl WindowsRecorder {
 
         let buffer = Arc::clone(&self.shared_buffer);
         let recording = Arc::clone(&self.recording);
+        let audio_level_cb = Arc::clone(&self.audio_level_cb);
         let sample_rate = self.sample_rate;
 
         type PcmCallback = Box<dyn FnMut(&[f32], &cpal::InputCallbackInfo) + Send>;
@@ -64,21 +67,29 @@ impl WindowsRecorder {
         fn make_callback(
             buffer: Arc<Buffer>,
             recording: Arc<AtomicBool>,
+            audio_level_cb: Arc<RwLock<Option<AudioLevelCallback>>>,
             dst_rate: u32,
         ) -> impl Fn(u32, u16) -> PcmCallback {
             move |src_rate: u32, channels: u16| {
                 let buffer = Arc::clone(&buffer);
                 let recording = Arc::clone(&recording);
+                let audio_level_cb = Arc::clone(&audio_level_cb);
                 Box::new(move |data: &[f32], _info: &cpal::InputCallbackInfo| {
                     if !recording.load(Ordering::SeqCst) {
                         return;
                     }
-                    append_pcm(&buffer, data, src_rate, channels, dst_rate);
+                    let pcm = append_pcm(&buffer, data, src_rate, channels, dst_rate);
+                    if let Some(cb) = audio_level_cb.read().ok().and_then(|guard| guard.clone()) {
+                        if !pcm.is_empty() {
+                            let level = audio::calculate_audio_level(&pcm);
+                            cb(level);
+                        }
+                    }
                 })
             }
         }
 
-        let make_callback = make_callback(buffer, recording, sample_rate);
+        let make_callback = make_callback(buffer, recording, audio_level_cb, sample_rate);
         let stream = build_stream(&device, &target_config, make_callback(self.sample_rate, 1))
             .or_else(|target_err| {
                 tracing::warn!(error = %target_err, "设备拒绝 16kHz 单声道，回退默认格式");
@@ -133,10 +144,16 @@ fn build_stream(
 }
 
 /// 把 f32 帧转换为 s16le PCM 追加到 `buffer`：先按声道平均混成单声道，
-/// 源/目标采样率不同时做线性插值重采样（语音识别够用）。
-fn append_pcm(buffer: &Buffer, data: &[f32], src_rate: u32, channels: u16, dst_rate: u32) {
+/// 源/目标采样率不同时做线性插值重采样（语音识别够用），返回追加的 PCM 数据。
+fn append_pcm(
+    buffer: &Buffer,
+    data: &[f32],
+    src_rate: u32,
+    channels: u16,
+    dst_rate: u32,
+) -> Vec<u8> {
     if channels == 0 || data.len() < channels as usize {
-        return;
+        return Vec::new();
     }
     let frames: Vec<f32> = data
         .chunks(channels as usize)
@@ -155,6 +172,7 @@ fn append_pcm(buffer: &Buffer, data: &[f32], src_rate: u32, channels: u16, dst_r
         pos += step;
     }
     buffer.write(&pcm);
+    pcm
 }
 
 impl Recorder for WindowsRecorder {
@@ -168,6 +186,12 @@ impl Recorder for WindowsRecorder {
 
     fn is_recording(&self) -> bool {
         self.recording.load(Ordering::SeqCst)
+    }
+
+    fn set_audio_level_callback(&mut self, callback: Option<AudioLevelCallback>) {
+        if let Ok(mut guard) = self.audio_level_cb.write() {
+            *guard = callback;
+        }
     }
 }
 

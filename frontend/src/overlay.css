@@ -95,8 +95,26 @@
 }
 
 /* ============================================
-   Recording Indicator
+   Recording Indicator & Waveform Bars
    ============================================ */
+
+.recording-bars {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  height: 16px;
+  padding: 0 1px;
+}
+
+.recording-bar {
+  width: 3px;
+  height: 14px;
+  background: var(--color-red);
+  border-radius: var(--radius-full);
+  transform-origin: center center;
+  transition: transform 60ms ease-out;
+  will-change: transform;
+}
 
 .recording-indicator {
   position: relative;

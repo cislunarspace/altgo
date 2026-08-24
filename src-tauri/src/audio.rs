@@ -110,7 +110,29 @@ pub fn encode_wav(
     Ok(wav)
 }
 
-/// 将 16 位 PCM WAV 数据解码为 `f32` 采样（范围 [-1.0, 1.0]）。
+/// 从 16 位 PCM 字节数据中计算感知音频电平（范围 [0.0, 1.0]）。
+///
+/// 计算 PCM 采样点的均方根（RMS），并通过非线性增益映射到人耳感知的音量电平。
+pub fn calculate_audio_level(pcm_data: &[u8]) -> f32 {
+    let n_samples = pcm_data.len() / 2;
+    if n_samples == 0 {
+        return 0.0;
+    }
+
+    let mut sum_sq = 0.0f64;
+    for i in 0..n_samples {
+        let sample = i16::from_le_bytes([pcm_data[i * 2], pcm_data[i * 2 + 1]]) as f64;
+        sum_sq += sample * sample;
+    }
+
+    let rms = (sum_sq / n_samples as f64).sqrt();
+    let ratio = (rms / 32768.0) as f32;
+
+    // 感知增益曲线：放大日常语音幅度，上限截断为 1.0
+    const PERCEPTUAL_GAIN: f32 = 3.0;
+    (ratio * PERCEPTUAL_GAIN).sqrt().min(1.0)
+}
+
 pub fn decode_wav_to_f32(wav_data: &[u8]) -> Result<Vec<f32>, &'static str> {
     if wav_data.len() < 44 {
         return Err("WAV data too short");
@@ -403,5 +425,40 @@ mod tests {
 
         let decoded = decode_wav_to_f32(&wav).unwrap();
         assert_eq!(decoded.len(), 2);
+    }
+
+    #[test]
+    fn test_calculate_audio_level_silence() {
+        let pcm = vec![0u8; 1024];
+        let level = calculate_audio_level(&pcm);
+        assert_eq!(level, 0.0);
+    }
+
+    #[test]
+    fn test_calculate_audio_level_empty() {
+        assert_eq!(calculate_audio_level(&[]), 0.0);
+    }
+
+    #[test]
+    fn test_calculate_audio_level_max_amplitude() {
+        // Max positive i16 is 32767
+        let mut pcm = Vec::new();
+        for _ in 0..512 {
+            pcm.extend_from_slice(&32767i16.to_le_bytes());
+        }
+        let level = calculate_audio_level(&pcm);
+        assert!((level - 1.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn test_calculate_audio_level_normal_speech_gain() {
+        // Normal speech amplitude around 2000-4000 (~0.06 - 0.12 raw ratio)
+        let mut pcm = Vec::new();
+        for _ in 0..512 {
+            pcm.extend_from_slice(&3000i16.to_le_bytes());
+        }
+        let level = calculate_audio_level(&pcm);
+        // With perceptual gain, this should produce a comfortable visible level in [0.2, 0.9]
+        assert!(level > 0.2 && level <= 1.0, "level was {}", level);
     }
 }

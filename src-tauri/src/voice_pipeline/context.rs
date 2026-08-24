@@ -36,6 +36,12 @@ impl PipelineContext {
         // async task lifecycle (and so progress forwarders can hold it).
         let sink: Arc<dyn PipelineSink> = Arc::new(sink);
 
+        // 为录音器配置音频电平回调，把实时计算的 RMS 电平推入 sink
+        let level_sink = sink.clone();
+        recorder.set_audio_level_callback(Some(Arc::new(move |level: f32| {
+            level_sink.on_audio_level(level);
+        })));
+
         let mut listener: Box<dyn KeyListener> = match self.listener.lock().unwrap().take() {
             Some(l) => l,
             None => {
