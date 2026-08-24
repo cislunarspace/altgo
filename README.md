@@ -9,7 +9,7 @@
 
 **altgo** 是一款桌面语音转文字工具。按住触发键说话，松开后自动完成录音、转写和可选润色，结果写入系统剪贴板并显示在悬浮窗中。
 
-支持 **Linux**（Ubuntu 22.04+）的 **x86_64** 与 **aarch64** 架构，以及 **Windows 10+**（x86_64）。目前不支持 macOS。
+支持 **Linux**（Ubuntu 22.04+）的 **x86_64** 与 **aarch64** 架构，以及 **Windows 10+**（x86_64 与 arm64）。目前不支持 macOS。
 
 - [在线文档](https://cislunarspace.github.io/altgo/)
 - [下载 Releases](https://github.com/cislunarspace/altgo/releases)
@@ -66,7 +66,7 @@ sudo usermod -aG input "$USER"
 - `*-setup.exe`（NSIS 安装器）：双击安装，适合大多数用户。
 - `*.msi`：适合需要 MSI 部署方式的企业环境。
 
-仅支持 Windows x64（内嵌的 sherpa-onnx 预编译库暂无 Windows arm64 版本）。安装后在开始菜单启动 altgo，在设置页完成转写配置。
+x64 与 arm64 请按设备架构选择对应的安装包。安装后在开始菜单启动 altgo，在设置页完成转写配置。
 
 ## 快速开始
 
