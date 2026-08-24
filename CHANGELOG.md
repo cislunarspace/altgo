@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Added
+
+- **Windows arm64 支持**：sherpa-onnx 升级至 1.13.6（上游已发布 Windows arm64 预编译库），CI 与 Release 工作流新增 `aarch64-pc-windows-msvc` 架构构建，发布产物新增 arm64 的 NSIS 安装包与 MSI（#131）。
+
 ## v2.6.4 (2026-08-24)
 
 ### Added

@@ -1,8 +1,8 @@
 # Build artifacts
 /target/
 /src-tauri/target/
-altgo
-altgo.exe
+/altgo
+/altgo.exe
 
 # Test artifacts
 test.*
