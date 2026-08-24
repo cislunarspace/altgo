@@ -11,7 +11,7 @@ use crate::error::{KeyListenerError, OutputError};
 use crate::key_listener::{KeyEvent, KeyListener};
 use crate::output::Output;
 use crate::pipeline_controller::PipelineStatus;
-use crate::recorder::Recorder;
+use crate::recorder::{AudioLevelCallback, Recorder};
 use crate::transcriber::Transcriber;
 
 use super::sink::{PipelineSink, TranscriptionResult};
@@ -81,7 +81,7 @@ pub(super) struct FakeRecorder {
     pub(super) start_count: std::sync::atomic::AtomicUsize,
     pub(super) stop_count: std::sync::atomic::AtomicUsize,
     stop_error: Mutex<Option<crate::error::RecorderError>>,
-    audio_level_cb: Mutex<Option<Arc<dyn Fn(f32) + Send + Sync>>>,
+    audio_level_cb: Mutex<Option<AudioLevelCallback>>,
 }
 
 impl FakeRecorder {
@@ -138,7 +138,7 @@ impl Recorder for FakeRecorder {
         self.recording.load(std::sync::atomic::Ordering::SeqCst)
     }
 
-    fn set_audio_level_callback(&mut self, callback: Option<Arc<dyn Fn(f32) + Send + Sync>>) {
+    fn set_audio_level_callback(&mut self, callback: Option<AudioLevelCallback>) {
         *self.audio_level_cb.lock().unwrap() = callback;
     }
 }
@@ -154,7 +154,7 @@ impl Recorder for std::sync::Arc<FakeRecorder> {
     fn is_recording(&self) -> bool {
         (**self).is_recording()
     }
-    fn set_audio_level_callback(&mut self, callback: Option<Arc<dyn Fn(f32) + Send + Sync>>) {
+    fn set_audio_level_callback(&mut self, callback: Option<AudioLevelCallback>) {
         let ptr: *mut FakeRecorder = Arc::as_ptr(self) as *mut _;
         unsafe { (*ptr).set_audio_level_callback(callback) }
     }
