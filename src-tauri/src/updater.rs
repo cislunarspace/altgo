@@ -150,6 +150,9 @@ pub async fn check_update_core<P: UpdateProvider + ?Sized>(
                 || lower.contains("network")
                 || lower.contains("http")
                 || lower.contains("reqwest")
+                || lower.contains("could not fetch")
+                || lower.contains("failed to fetch")
+                || lower.contains("release json")
             {
                 UpdateErrorKind::Network
             } else {
@@ -373,6 +376,21 @@ mod tests {
 
         assert_eq!(err.kind, UpdateErrorKind::Network);
         assert!(err.message.contains("无法连接到更新服务器"));
+
+        // 测试 Could not fetch a valid release JSON 的映射
+        let provider2 = MockUpdateProvider::new(Err(
+            "Could not fetch a valid release JSON from the remote".to_string(),
+        ));
+        let err2 = check_update_core(
+            &provider2,
+            CheckMode::Manual,
+            Duration::from_secs(10),
+            UpdateSupportTier::InPlace,
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err2.kind, UpdateErrorKind::Network);
+        assert!(err2.message.contains("无法连接到更新服务器"));
     }
 
     #[tokio::test]

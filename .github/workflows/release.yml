@@ -106,13 +106,13 @@ jobs:
         run: npm ci
         working-directory: frontend
 
-      # 同一架构的 deb/rpm/AppImage 共享一次前端和 Rust 构建，只在 bundle 阶段分别打包。
-      # Tauri CLI 用 npm 版（预编译二进制），免去每个 job 源码编译 tauri-cli。
-      # APPIMAGE_EXTRACT_AND_RUN：runner 容器无 FUSE，让 linuxdeploy 以解压模式运行。
+      # 构建 deb、rpm 与 AppImage（若配置了签名密钥则生成 updater bundle 与签名）
       - name: 构建 deb、rpm 与 AppImage
         run: npm --prefix frontend exec -- tauri build --bundles deb,rpm,appimage
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
           APPIMAGE_EXTRACT_AND_RUN: "1"
 
       - name: 上传 Linux 软件包产物
@@ -123,7 +123,10 @@ jobs:
             src-tauri/target/release/bundle/deb/*.deb
             src-tauri/target/release/bundle/rpm/*.rpm
             src-tauri/target/release/bundle/appimage/*.AppImage
-          if-no-files-found: error
+            src-tauri/target/release/bundle/appimage/*.AppImage.tar.gz*
+            src-tauri/target/release/bundle/appimage/*.AppImage.sig
+            src-tauri/target/release/bundle/appimage/latest.json
+          if-no-files-found: warn
 
   build-windows:
     name: 构建 Windows 安装包 (x64)
@@ -157,6 +160,8 @@ jobs:
         run: npm --prefix frontend exec -- tauri build --bundles nsis,msi
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_KEY_PASSWORD }}
 
       - name: 上传 Windows 安装包产物
         uses: actions/upload-artifact@v4
@@ -164,8 +169,12 @@ jobs:
           name: altgo-windows-packages
           path: |
             src-tauri/target/release/bundle/nsis/*-setup.exe
+            src-tauri/target/release/bundle/nsis/*-setup.exe.sig
+            src-tauri/target/release/bundle/nsis/*-setup.nsis.zip*
+            src-tauri/target/release/bundle/nsis/latest.json
             src-tauri/target/release/bundle/msi/*.msi
-          if-no-files-found: error
+            src-tauri/target/release/bundle/msi/*.msi.zip*
+          if-no-files-found: warn
 
   gen-aur:
     name: Generate AUR PKGBUILD
@@ -260,6 +269,11 @@ jobs:
           cd ..
           cat checksums.txt
 
+      - name: 合并各平台 Updater 产物并生成 latest.json
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          bash packaging/scripts/merge-updater-json.sh release-assets release-assets/latest.json "${VERSION}" release_notes.md
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -270,12 +284,15 @@ jobs:
             release-assets/**/*.AppImage
             release-assets/**/*.AppImage.tar.gz
             release-assets/**/*.AppImage.tar.gz.sig
+            release-assets/**/*.AppImage.sig
             release-assets/**/*-setup.exe
             release-assets/**/*-setup.exe.sig
+            release-assets/**/*-setup.nsis.zip
+            release-assets/**/*-setup.nsis.zip.sig
             release-assets/**/*.msi
             release-assets/**/*.msi.zip
             release-assets/**/*.msi.zip.sig
-            release-assets/**/latest.json
+            release-assets/latest.json
             release-assets/PKGBUILD
             release-assets/.SRCINFO
             checksums.txt
