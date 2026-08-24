@@ -14,9 +14,15 @@ describe("saveRequestBody", () => {
     polishProtocol: "openai",
     guiLanguage: "zh",
     overlayPosition: "bottom_center",
+    autoCheckUpdate: true,
     polisherApiKey: "",
     hasPolisherApiKey: false,
   };
+
+  it("includes autoCheckUpdate in the request body", () => {
+    const result = saveRequestBody({ ...base, autoCheckUpdate: false });
+    expect(result).toHaveProperty("autoCheckUpdate", false);
+  });
 
   it("includes overlayPosition in the request body", () => {
     const result = saveRequestBody({ ...base, overlayPosition: "top_center" });
@@ -71,6 +77,7 @@ describe("normalizeConfig", () => {
       polishProtocol: "openai",
       guiLanguage: "zh",
       overlayPosition: "bottom_center",
+      autoCheckUpdate: true,
       polisherApiKey: "secret",
       hasPolisherApiKey: true,
     };

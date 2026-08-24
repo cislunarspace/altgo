@@ -50,6 +50,7 @@ pub struct ConfigResponse {
     pub polish_api_base_url: String,
     pub gui_language: String,
     pub overlay_position: String,
+    pub auto_check_update: bool,
     pub has_polisher_api_key: bool,
 }
 
@@ -66,6 +67,7 @@ fn build_config_response(cfg: &crate::config::Config) -> ConfigResponse {
         polish_api_base_url: cfg.polisher.api_base_url.clone(),
         gui_language: cfg.gui.language.clone(),
         overlay_position: cfg.gui.overlay_position.clone(),
+        auto_check_update: cfg.gui.auto_check_update,
         has_polisher_api_key: !cfg.polisher.api_key.trim().is_empty(),
     }
 }
@@ -74,6 +76,31 @@ fn build_config_response(cfg: &crate::config::Config) -> ConfigResponse {
 pub async fn get_config(config_store: State<'_, ConfigStore>) -> Result<ConfigResponse, String> {
     let cfg = config_store.snapshot().await;
     Ok(build_config_response(&cfg))
+}
+
+#[tauri::command]
+pub async fn check_update(
+    app: AppHandle,
+    mode: crate::updater::CheckMode,
+) -> Result<crate::updater::UpdateCheckResponse, crate::updater::UpdateErrorResponse> {
+    let provider = crate::updater::TauriUpdateProvider { app };
+    let support_tier = crate::updater::detect_support_tier();
+    crate::updater::check_update_core(
+        &provider,
+        mode,
+        std::time::Duration::from_secs(10),
+        support_tier,
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn install_update(
+    app: AppHandle,
+    controller: State<'_, PipelineController>,
+) -> Result<(), String> {
+    let provider = crate::updater::TauriUpdateProvider { app };
+    crate::updater::install_update_core(&provider, &controller).await
 }
 
 #[tauri::command]
@@ -546,6 +573,7 @@ mod tests {
         assert!(resp.has_polisher_api_key);
         assert_eq!(resp.polish_level, "light");
         assert_eq!(resp.overlay_position, "bottom_center");
+        assert!(resp.auto_check_update);
     }
 
     struct FakeOutput {

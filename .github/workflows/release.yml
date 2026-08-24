@@ -268,8 +268,14 @@ jobs:
             release-assets/**/*.deb
             release-assets/**/*.rpm
             release-assets/**/*.AppImage
+            release-assets/**/*.AppImage.tar.gz
+            release-assets/**/*.AppImage.tar.gz.sig
             release-assets/**/*-setup.exe
+            release-assets/**/*-setup.exe.sig
             release-assets/**/*.msi
+            release-assets/**/*.msi.zip
+            release-assets/**/*.msi.zip.sig
+            release-assets/**/latest.json
             release-assets/PKGBUILD
             release-assets/.SRCINFO
             checksums.txt

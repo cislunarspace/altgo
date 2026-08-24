@@ -76,6 +76,18 @@ export default function Settings() {
   const [testResult, setTestResult] = useState<{ ok: boolean; error?: string } | null>(null);
   const [clearingKey, setClearingKey] = useState(false);
 
+  const [checkingUpdate, setCheckingUpdate] = useState(false);
+  const [installingUpdate, setInstallingUpdate] = useState(false);
+  const [updateInfo, setUpdateInfo] = useState<{
+    hasUpdate: boolean;
+    currentVersion: string;
+    latestVersion: string;
+    body?: string;
+    date?: string;
+    supportTier: "in_place" | "external";
+  } | null>(null);
+  const [updateError, setUpdateError] = useState<string | null>(null);
+
   const modelMgr = useModelManager({ t });
   const form = useConfigForm({
     t,
@@ -156,6 +168,46 @@ export default function Settings() {
     } finally {
       setClearingKey(false);
     }
+  };
+
+  const handleCheckUpdate = async () => {
+    setCheckingUpdate(true);
+    setUpdateError(null);
+    setUpdateInfo(null);
+    try {
+      const res = await invoke<{
+        hasUpdate: boolean;
+        currentVersion: string;
+        latestVersion: string;
+        body?: string;
+        date?: string;
+        supportTier: "in_place" | "external";
+      }>("check_update", { mode: "manual" });
+      setUpdateInfo(res);
+    } catch (err: any) {
+      if (err && typeof err === "object" && err.message) {
+        setUpdateError(err.message);
+      } else {
+        setUpdateError(String(err));
+      }
+    } finally {
+      setCheckingUpdate(false);
+    }
+  };
+
+  const handleInstallUpdate = async () => {
+    setInstallingUpdate(true);
+    setUpdateError(null);
+    try {
+      await invoke("install_update");
+    } catch (err: any) {
+      setUpdateError(String(err));
+      setInstallingUpdate(false);
+    }
+  };
+
+  const handleOpenReleasePage = () => {
+    window.open("https://github.com/cislunarspace/altgo/releases/latest", "_blank");
   };
 
   if (!config) {
@@ -621,10 +673,80 @@ export default function Settings() {
           </div>
           <div className="settings-field">
             <span className="settings-field-label-text">{t("settings.version")}</span>
-            <div className="settings-field-control">
+            <div className="settings-field-control" style={{ display: "flex", gap: "8px", alignItems: "center" }}>
               <span className="settings-muted">{appVersion || "…"}</span>
+              <button
+                type="button"
+                className="settings-btn settings-btn-secondary"
+                onClick={handleCheckUpdate}
+                disabled={checkingUpdate || installingUpdate}
+                style={{ padding: "3px 8px", fontSize: "12px" }}
+              >
+                {checkingUpdate ? t("settings.checking_update") : t("settings.check_update")}
+              </button>
             </div>
           </div>
+
+          <div className="settings-field">
+            <span className="settings-field-label-text">{t("settings.auto_check_update")}</span>
+            <div className="settings-field-control">
+              <label style={{ display: "flex", alignItems: "center", cursor: "pointer", gap: "6px" }}>
+                <input
+                  type="checkbox"
+                  checked={config.autoCheckUpdate}
+                  onChange={(e) => update("autoCheckUpdate", e.target.checked)}
+                />
+              </label>
+            </div>
+          </div>
+
+          {updateError && (
+            <div className="settings-save-msg settings-save-msg--err" style={{ marginTop: "8px" }}>
+              {updateError}
+            </div>
+          )}
+
+          {updateInfo && !updateInfo.hasUpdate && !updateError && (
+            <div className="settings-save-msg settings-save-msg--ok" style={{ marginTop: "8px" }}>
+              <Check size={12} /> {t("settings.update_not_found")} ({updateInfo.latestVersion})
+            </div>
+          )}
+
+          {updateInfo && updateInfo.hasUpdate && (
+            <div style={{ marginTop: "12px", padding: "10px", background: "var(--bg-secondary, rgba(0,0,0,0.05))", borderRadius: "6px" }}>
+              <div style={{ fontWeight: 600, display: "flex", alignItems: "center", gap: "6px", color: "var(--accent-color, #2563eb)" }}>
+                <Sparkles size={14} />
+                {t("settings.update_available")}: v{updateInfo.latestVersion}
+              </div>
+              {updateInfo.body && (
+                <div style={{ marginTop: "6px", fontSize: "12px", whiteSpace: "pre-wrap", opacity: 0.85 }}>
+                  <div style={{ fontWeight: 500 }}>{t("settings.update_notes")}</div>
+                  {updateInfo.body}
+                </div>
+              )}
+              <div style={{ marginTop: "10px", display: "flex", gap: "8px" }}>
+                {updateInfo.supportTier === "in_place" ? (
+                  <button
+                    type="button"
+                    className="settings-btn settings-btn-primary"
+                    onClick={handleInstallUpdate}
+                    disabled={installingUpdate}
+                  >
+                    <Download size={13} />
+                    {installingUpdate ? t("settings.update_installing") : t("settings.update_install")}
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="settings-btn settings-btn-primary"
+                    onClick={handleOpenReleasePage}
+                  >
+                    {t("settings.update_open_release")}
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
         </section>
 
         <div className="settings-save-row">

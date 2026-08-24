@@ -56,6 +56,15 @@ jobs:
         with:
           extra-packages: rpm
 
+      - name: Preload sherpa-onnx prebuilt libs
+        run: |
+          mkdir -p src-tauri/target/sherpa-onnx-prebuilt
+          ARCH="${{ matrix.arch == 'amd64' && 'x64' || 'aarch64' }}"
+          ARCHIVE="sherpa-onnx-v1.13.5-linux-${ARCH}-static-lib.tar.bz2"
+          URL="https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.5/${ARCHIVE}"
+          curl -fSL -o "src-tauri/target/sherpa-onnx-prebuilt/${ARCHIVE}" "${URL}"
+          tar -xjf "src-tauri/target/sherpa-onnx-prebuilt/${ARCHIVE}" -C src-tauri/target/sherpa-onnx-prebuilt/
+
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -102,6 +111,15 @@ jobs:
         with:
           workspaces: |
             src-tauri -> target
+
+      - name: Preload sherpa-onnx prebuilt libs
+        shell: bash
+        run: |
+          mkdir -p src-tauri/target/sherpa-onnx-prebuilt
+          ARCHIVE="sherpa-onnx-v1.13.5-win-x64-static-MT-Release-lib.tar.bz2"
+          URL="https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.5/${ARCHIVE}"
+          curl -fSL -o "src-tauri/target/sherpa-onnx-prebuilt/${ARCHIVE}" "${URL}"
+          tar -xjf "src-tauri/target/sherpa-onnx-prebuilt/${ARCHIVE}" -C src-tauri/target/sherpa-onnx-prebuilt/
 
       - uses: actions/setup-node@v4
         with:
