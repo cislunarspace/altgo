@@ -85,3 +85,17 @@ _Avoid_: capture mode、key capture mode。
 
 **状态机（State Machine）**
 把原始按键事件翻译成管道 `StartRecord` / `StopRecord` 命令的 5 状态 FSM（`Idle → PotentialPress → Recording → WaitSecondClick → ContinuousRecording`）。
+
+## 更新
+
+**应用更新器（App Updater）**
+负责检查、下载和安装应用新版本的模块。支持后台静默检查（启动时）与用户手动检查（设置页触发）。
+
+**检查模式（Check Mode）**
+检查更新的触发模式：`Silent`（静默模式，启动时触发，失败时不打扰用户，发现新版本时以轻量徽标提示）与 `Manual`（手动模式，用户主动点击触发，带加载状态并在超时或失败时反馈具体原因）。
+
+**更新支持级别（Update Support Tier）**
+不同平台及打包分发方式下的更新能力分级：
+- `InPlace`（就地更新）：Windows（NSIS）与 Linux（AppImage），支持由更新器自动下载差量/全量包并就地替换重启。
+- `External`（外部引导）：Linux 传统包管理分发（deb、rpm、AUR），因需要系统提权或由系统包管理器托管，更新器提示新版本变更并提供一键打开下载页或包管理器更新命令。
+

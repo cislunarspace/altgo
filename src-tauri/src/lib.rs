@@ -25,6 +25,7 @@ pub mod state_machine;
 pub mod tauri_sink;
 pub mod transcriber;
 pub mod tray;
+pub mod updater;
 pub mod voice_pipeline;
 
 use std::sync::Arc;
@@ -111,6 +112,7 @@ pub fn run() {
             }
         }))
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let config_path = config::Config::default_config_path();
             let history_path = config_path
@@ -168,6 +170,8 @@ pub fn run() {
             cmd::delete_history_entries,
             cmd::clear_history,
             cmd::polish_history_entry,
+            cmd::check_update,
+            cmd::install_update,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

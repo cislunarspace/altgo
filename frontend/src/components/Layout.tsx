@@ -2,6 +2,7 @@ import { useTranslation } from "../i18n";
 import { NavLink } from "react-router-dom";
 import { Mic, Settings, History, Minus, Maximize2, Minimize2, X } from "lucide-react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { invoke } from "@tauri-apps/api/core";
 import { useState, useEffect } from "react";
 
 interface LayoutProps {
@@ -11,6 +12,26 @@ interface LayoutProps {
 export default function Layout({ children }: LayoutProps) {
   const { t } = useTranslation();
   const [isMaximized, setIsMaximized] = useState(false);
+  const [hasNewUpdate, setHasNewUpdate] = useState(false);
+
+  useEffect(() => {
+    // 启动时静默检查更新（受配置控制；若网络失败静默忽略）
+    const performSilentUpdateCheck = async () => {
+      try {
+        const cfg = await invoke<{ autoCheckUpdate: boolean }>("get_config");
+        if (cfg.autoCheckUpdate !== false) {
+          const res = await invoke<{ hasUpdate: boolean }>("check_update", { mode: "silent" });
+          if (res && res.hasUpdate) {
+            setHasNewUpdate(true);
+          }
+        }
+      } catch {
+        // 静默检查失败不打扰用户
+      }
+    };
+
+    performSilentUpdateCheck();
+  }, []);
 
   useEffect(() => {
     const win = getCurrentWindow();
@@ -127,9 +148,24 @@ export default function Layout({ children }: LayoutProps) {
               className={({ isActive }) =>
                 `layout-nav-link ${isActive ? "active" : ""}`
               }
+              style={{ position: "relative" }}
             >
               <Settings size={16} />
               {t("nav.settings")}
+              {hasNewUpdate && (
+                <span
+                  style={{
+                    position: "absolute",
+                    top: "4px",
+                    right: "4px",
+                    width: "7px",
+                    height: "7px",
+                    borderRadius: "50%",
+                    backgroundColor: "#ef4444",
+                  }}
+                  title={t("settings.update_available")}
+                />
+              )}
             </NavLink>
           </nav>
           <div className="window-controls">

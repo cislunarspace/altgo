@@ -202,6 +202,8 @@ pub struct GuiConfig {
     pub language: String,
     /// 悬浮窗位置：`"bottom_center"`（默认）或 `"top_center"`
     pub overlay_position: String,
+    /// 启动时是否自动检查更新（默认开启）
+    pub auto_check_update: bool,
 }
 
 impl Default for GuiConfig {
@@ -209,6 +211,7 @@ impl Default for GuiConfig {
         Self {
             language: "zh".to_string(),
             overlay_position: "bottom_center".to_string(),
+            auto_check_update: true,
         }
     }
 }
@@ -389,6 +392,7 @@ pub struct ConfigPatch {
     pub polish_api_base_url: Option<String>,
     pub gui_language: Option<String>,
     pub overlay_position: Option<String>,
+    pub auto_check_update: Option<bool>,
 }
 
 impl ConfigPatch {
@@ -429,6 +433,9 @@ impl ConfigPatch {
         if let Some(ref v) = self.overlay_position {
             cfg.gui.overlay_position = v.clone();
         }
+        if let Some(v) = self.auto_check_update {
+            cfg.gui.auto_check_update = v;
+        }
     }
 }
 
@@ -456,6 +463,7 @@ mod tests {
         assert_eq!(cfg.polisher.level, "none");
         assert_eq!(cfg.polisher.temperature, 0.3);
         assert!(cfg.output.prefer_polished);
+        assert!(cfg.gui.auto_check_update);
     }
 
     #[test]
