@@ -66,6 +66,10 @@
 **录音输出格式（Recorder Output Format）**
 语音管道期望录音器以固定的 16kHz、单声道、16 位 PCM WAV 字节返回音频。SenseVoice 只接受这一采样率，其他配置值会在管道启动前被拒绝。
 
+**音频电平（Audio Level）**
+录音期间由录音器从实时 PCM 音频块计算出的感知音量大小（范围 0.0 ~ 1.0）。录音线程在读取音频流时计算均方根（RMS）并通过非线性增益映射为感知电平，经 `PipelineSink::on_audio_level` 和 Tauri `audio-level` 事件以轻量节流频率（约 20~30 FPS）派发给悬浮窗，用于驱动实时音量律动波形。
+
+
 ## 按键输入
 
 **按键监听器（KeyListener）**

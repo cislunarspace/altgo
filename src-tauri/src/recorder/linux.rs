@@ -5,10 +5,10 @@
 
 use crate::audio::{self, Buffer};
 use crate::error::RecorderError;
-use crate::recorder::Recorder;
+use crate::recorder::{AudioLevelCallback, Recorder};
 use std::io::Read;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::thread::JoinHandle;
 
 /// PulseAudio 录音器，从默认音频源捕获 16 位 PCM 音频（16kHz 单声道）。
@@ -17,6 +17,7 @@ pub struct PulseRecorder {
     shared_buffer: Arc<Buffer>,
     recording: Arc<AtomicBool>,
     done: std::sync::Mutex<Option<JoinHandle<()>>>,
+    audio_level_cb: Arc<RwLock<Option<AudioLevelCallback>>>,
 }
 
 impl PulseRecorder {
@@ -27,6 +28,7 @@ impl PulseRecorder {
             shared_buffer: Arc::new(Buffer::new()),
             recording: Arc::new(AtomicBool::new(false)),
             done: std::sync::Mutex::new(None),
+            audio_level_cb: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -42,6 +44,7 @@ impl PulseRecorder {
         let sample_rate = self.sample_rate;
         let buffer = Arc::clone(&self.shared_buffer);
         let recording = Arc::clone(&self.recording);
+        let audio_level_cb = Arc::clone(&self.audio_level_cb);
 
         let handle = std::thread::spawn(move || {
             let child = std::process::Command::new("parecord")
@@ -73,12 +76,20 @@ impl PulseRecorder {
             };
 
             let mut reader = std::io::BufReader::new(stdout);
-            let mut chunk = [0u8; 4096];
+            let mut chunk = [0u8; 1024];
 
             while recording.load(Ordering::SeqCst) {
                 match reader.read(&mut chunk) {
                     Ok(0) => break,
-                    Ok(n) => buffer.write(&chunk[..n]),
+                    Ok(n) => {
+                        let data = &chunk[..n];
+                        buffer.write(data);
+                        if let Some(cb) = audio_level_cb.read().ok().and_then(|guard| guard.clone())
+                        {
+                            let level = audio::calculate_audio_level(data);
+                            cb(level);
+                        }
+                    }
                     Err(e) => {
                         tracing::debug!(error = %e, "read error in parecord, stopping");
                         break;
@@ -144,6 +155,12 @@ impl Recorder for PulseRecorder {
 
     fn is_recording(&self) -> bool {
         self.recording.load(Ordering::SeqCst)
+    }
+
+    fn set_audio_level_callback(&mut self, callback: Option<AudioLevelCallback>) {
+        if let Ok(mut guard) = self.audio_level_cb.write() {
+            *guard = callback;
+        }
     }
 }
 

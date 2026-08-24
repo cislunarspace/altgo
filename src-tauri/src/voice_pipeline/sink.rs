@@ -36,6 +36,9 @@ pub trait PipelineSink: Send + Sync + 'static {
 
     /// 按键监听后端已启动（如 `"xinput"` / `"evtest"`）。
     fn on_key_listener_backend(&self, backend: &str);
+
+    /// 实时感知音频电平更新（0.0 ~ 1.0）。
+    fn on_audio_level(&self, _level: f32) {}
 }
 
 /// 派发结果。

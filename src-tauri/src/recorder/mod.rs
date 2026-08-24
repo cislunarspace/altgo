@@ -17,15 +17,22 @@ pub type PlatformRecorder = PulseRecorder;
 #[cfg(target_os = "windows")]
 pub type PlatformRecorder = WindowsRecorder;
 
+use std::sync::Arc;
+
 pub use crate::error::RecorderError;
 
 /// SenseVoice 的固定输入采样率（Hz）。
 pub const SAMPLE_RATE: u32 = 16_000;
 
+/// 实时音频电平回调函数类型。
+pub type AudioLevelCallback = Arc<dyn Fn(f32) + Send + Sync>;
+
 pub trait Recorder: Send {
     fn start_recording(&mut self) -> Result<(), RecorderError>;
     fn stop_recording(&self) -> Result<Vec<u8>, RecorderError>;
     fn is_recording(&self) -> bool;
+    /// 注册录音时的实时音频电平回调。
+    fn set_audio_level_callback(&mut self, _callback: Option<AudioLevelCallback>) {}
 }
 
 #[cfg(all(test, target_os = "linux"))]

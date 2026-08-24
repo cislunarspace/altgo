@@ -34,6 +34,10 @@ function emitResult(text: string) {
   act(() => handlers.get("transcription-result")!({ payload: text }));
 }
 
+function emitAudioLevel(level: number) {
+  act(() => handlers.get("audio-level")!({ payload: level }));
+}
+
 describe("Overlay 相位转换", () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -94,6 +98,22 @@ describe("Overlay 相位转换", () => {
     // 容器自身的 transitionend：退出动画结束，内容清除。
     fireEvent.transitionEnd(containerEl);
     expect(container.querySelector(".island")).toBeNull();
+  });
+
+  it("recording 状态下展示 4 根动态波形条并随 audio-level 缩放", () => {
+    const { container } = render(<Overlay />);
+    emitPhase("recording");
+
+    const bars = container.querySelectorAll(".recording-bar");
+    expect(bars.length).toBe(4);
+
+    // 默认静音/无电平时保持基础 scale
+    expect((bars[0] as HTMLElement).style.transform).toBe("scaleY(0.2)");
+
+    // 收到 audio-level 事件后动态更新 scale
+    emitAudioLevel(0.8);
+    const updatedBars = container.querySelectorAll(".recording-bar");
+    expect((updatedBars[1] as HTMLElement).style.transform).not.toBe("scaleY(0.2)");
   });
 
   it("result 先于 done 到达（修复后的顺序）时正常显示结果", () => {

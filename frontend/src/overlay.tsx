@@ -89,6 +89,9 @@ export function Overlay() {
     fraction: number | null;
   } | null>(null);
 
+  // Audio level during recording (0.0 ~ 1.0).
+  const [audioLevel, setAudioLevel] = useState<number>(0);
+
   // Whether we are in an exit transition (CSS class toggle).
   const [isExiting, setIsExiting] = useState(false);
   // Crossfade（相位间切换）只做淡出，不带退出位移；exit（隐藏）才滑出。
@@ -161,10 +164,17 @@ export function Overlay() {
         setResult(null);
         setCopied(false);
         setPolishError(null);
+        setAudioLevel(0);
       } else if (newPhase === "done") {
         setTxProgress(null);
+        setAudioLevel(0);
       }
       prevPhaseRef.current = newPhase;
+    });
+
+    const unlistenAudioLevel = listen<number>("audio-level", (event) => {
+      if (!active) return;
+      setAudioLevel(event.payload ?? 0);
     });
 
     const unlistenResult = listen<string>("transcription-result", (event) => {
@@ -193,6 +203,7 @@ export function Overlay() {
       unlistenResult.then((fn) => fn());
       unlistenPolishFailed.then((fn) => fn());
       unlistenTxProgress.then((fn) => fn());
+      unlistenAudioLevel.then((fn) => fn());
     };
   }, []);
 
@@ -290,9 +301,17 @@ export function Overlay() {
       <div className="island">
         {effectivePhase === "recording" && (
           <>
-            <div className="recording-indicator">
-              <div className="recording-glow" />
-              <div className="recording-core" />
+            <div className="recording-bars" aria-hidden>
+              {[0.6, 1.0, 0.8, 0.5].map((factor, i) => {
+                const scale = Math.min(1.0, Math.max(0.2, 0.2 + audioLevel * factor * 0.8));
+                return (
+                  <div
+                    key={i}
+                    className="recording-bar"
+                    style={{ transform: `scaleY(${scale})` }}
+                  />
+                );
+              })}
             </div>
             <span className="label">{t("overlay.recording")}</span>
           </>
