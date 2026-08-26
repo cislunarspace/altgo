@@ -1,19 +1,11 @@
 ---
 sidebar_position: 5
-title: 常见问题
+title: FAQ
 ---
-
-# 常见问题
 
 # FAQ
 
-## 录音相关
-
-### 录音没有声音 / 转写结果为空
-
-1. 检查麦克风是否被系统识别
-2. 确认录音工具已安装（`parecord`）
-3. 查看日志输出：`RUST_LOG=altgo=debug altgo`
+## Recording Issues
 
 ### Recording has no sound / empty transcription
 
@@ -21,29 +13,11 @@ title: 常见问题
 2. Confirm the recording tool is installed (`parecord`)
 3. Check the log output: `RUST_LOG=altgo=debug altgo`
 
-### 录音启动慢
-
-首次启动录音时设备初始化可能需要几秒，后续会更快。
-
-## Recording Issues
-
 ### Recording starts slowly
 
 Device initialization on first recording may take a few seconds; subsequent runs are faster.
 
-## 按键相关
-
-### 按右 Alt 没有反应
-
-**Linux：**
-
-1. **用户是否在 `input` 组并已重新登录？** 无法读取 `/dev/input/event*` 时，按键监听会失败：`sudo usermod -aG input "$USER"` 后注销/重启再试。
-2. 确认 `xinput` 可用：`which xinput`（X11 路径）。
-3. 检查 Alt 绑定：`xmodmap -pke | grep Alt`；配置里默认 `key_name = "Alt_R"`，与设置页「按下以设置」一致即可。
-4. **Wayland**：仍依赖能访问 evdev；若仅用 XWayland 且无权限，现象与未加 `input` 组类似。剪贴板在 Wayland 上建议安装 **`wl-copy`**（或 `xclip`/`xsel` 经 XWayland）。
-5. 若使用 IME，可适当增大 `min_press_duration_ms` 减轻误触。
-
-### Key Presses / Hotkeys
+## Key Presses / Hotkeys
 
 ### Right Alt does nothing
 
@@ -55,15 +29,6 @@ Device initialization on first recording may take a few seconds; subsequent runs
 4. **Wayland**: access to evdev is still required; with only XWayland and no permission, symptoms resemble missing the `input` group. For the clipboard on Wayland we recommend installing **`wl-copy`** (or `xclip`/`xsel` via XWayland).
 5. If you use an IME, consider raising `min_press_duration_ms` to reduce accidental triggers.
 
-### 误触发 / IME 冲突
-
-增加 `min_press_duration_ms` 的值（默认 100ms）来过滤短按抖动：
-
-```toml
-[key_listener]
-min_press_duration_ms = 200
-```
-
 ### Accidental triggers / IME conflicts
 
 Increase `min_press_duration_ms` (default 100ms) to filter out short-press jitter:
@@ -73,15 +38,7 @@ Increase `min_press_duration_ms` (default 100ms) to filter out short-press jitte
 min_press_duration_ms = 200
 ```
 
-## 转写相关
-
-### 能录音但没有转写结果
-
-1. 确认录音结束后**悬浮窗**是否进入「处理中」。
-2. 确认已在设置页下载本地模型（SenseVoice）。
-3. 查看日志：`RUST_LOG=altgo=debug altgo`，检查 `transcription failed`、模型路径与润色服务请求失败信息。
-
-### Transcription Issues
+## Transcription Issues
 
 ### Recording works but there is no transcription result
 
@@ -89,49 +46,22 @@ min_press_duration_ms = 200
 2. Confirm the local model (SenseVoice) has been downloaded from the Settings page.
 3. Check the logs (`RUST_LOG=altgo=debug altgo`) for `transcription failed`, model path issues, or polishing request failures.
 
-### 中文识别效果不好
-
-1. 确认 `language = "zh"` 设置正确
-2. 确认模型文件完整下载（`model.int8.onnx` 与 `tokens.txt` 均存在）
-
 ### Poor recognition of Chinese
 
 1. Confirm that `language = "zh"` is set correctly
 2. Confirm the model files were fully downloaded (both `model.int8.onnx` and `tokens.txt` exist)
 
-### 本地模型在哪里下载？
-
-在设置页的「本地模型」中点击下载即可（SenseVoice int8，约 230MB，中/英/日/韩/粤自动检测）。也可从 Hugging Face 仓库 `csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17` 手动下载 `model.int8.onnx` 与 `tokens.txt` 放入模型目录。
-
 ### Where do I download the local model?
 
 Click Download under "Local Models" on the Settings page (SenseVoice int8, about 230MB, auto-detecting zh/en/ja/ko/yue). You can also manually download `model.int8.onnx` and `tokens.txt` from the Hugging Face repository `csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17` and place them into the models directory.
 
-## 润色相关
-
-### 润色太慢
-
-1. 降低润色级别（`heavy` → `medium` → `light`）
-2. 使用更快的模型或本地 Ollama
-3. 设置 `level = "none"` 关闭润色
-
-### Polishing Issues
+## Polishing Issues
 
 ### Polishing is too slow
 
 1. Lower the polishing level (`heavy` → `medium` → `light`)
 2. Use a faster model or local Ollama
 3. Set `level = "none"` to disable polishing
-
-### 润色改变了原意
-
-使用 `light` 级别，只修正标点和错别字，不改变内容。或者使用自定义 system prompt：
-
-```toml
-[polisher]
-level = "light"
-system_prompt = "只修正标点和错别字，不要改变原文的意思和语气"
-```
 
 ### Polishing changes the meaning
 
@@ -140,17 +70,8 @@ Use the `light` level, which only fixes punctuation and typos without altering c
 ```toml
 [polisher]
 level = "light"
-system_prompt = "只修正标点和错别字，不要改变原文的意思和语气"
+system_prompt = "Fix only punctuation and typos; do not change the meaning or tone of the original text"
 ```
-
-## 剪贴板与悬浮窗
-
-### 提示成功但粘贴出来是旧内容 / 剪贴板失败
-
-1. 安装 `xclip`、`xsel` 或 `wl-copy` 之一，并确保在图形会话内运行 altgo。
-2. 若其他程序锁定了剪贴板，稍后重试即可。
-3. 在**悬浮窗**或**历史**页使用复制按钮（WebView 手势复制有时比后端剪贴板更稳）。
-4. 调试：`RUST_LOG=altgo=debug altgo` 查看是否有 clipboard 相关错误。
 
 ## Clipboard and Overlay Window
 
@@ -161,27 +82,6 @@ system_prompt = "只修正标点和错别字，不要改变原文的意思和语
 3. Use the copy button in the **overlay window** or on the **History** page (WebView gesture-copying is sometimes more reliable than the backend clipboard).
 4. To debug: run `RUST_LOG=altgo=debug altgo` and look for clipboard-related errors.
 
-## 通用
-
-### 如何后台运行？
-
-```bash
-# Linux
-nohup altgo &
-# 或使用 systemd user service
-```
-
-
-### 如何查看日志？
-
-```bash
-# Linux
-RUST_LOG=altgo=debug altgo
-```
-
-
-可用的日志级别：`debug`、`info`、`warn`、`error`
-
 ## General
 
 ### How to run it in the background?
@@ -189,7 +89,7 @@ RUST_LOG=altgo=debug altgo
 ```bash
 # Linux
 nohup altgo &
-# 或使用 systemd user service
+# or use a systemd user service
 ```
 
 
