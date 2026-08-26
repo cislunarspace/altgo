@@ -19,6 +19,16 @@ export type Phase = "recording" | "processing" | "done" | "hidden" | null;
 
 export const CROSSFADE_DURATION_MS = 180;
 
+/** 电平轨迹：采样间隔与窗口长度（10 秒 × 10 帧/秒 = 100 帧）。 */
+export const TRACE_SAMPLE_INTERVAL_MS = 100;
+export const TRACE_MAX_FRAMES = 100;
+
+/** 把 0.0~1.0 的电平映射为轨迹条高度（px）。 */
+export function traceBarHeight(level: number): number {
+  const clamped = Math.min(1, Math.max(0, level));
+  return 3 + clamped * 17;
+}
+
 export interface PhaseTransitionResult {
   action: "show" | "crossfade" | "exit" | "none";
   /** show: phase to display; exit→hidden: null to clear after animation */
@@ -89,8 +99,10 @@ export function Overlay() {
     fraction: number | null;
   } | null>(null);
 
-  // Audio level during recording (0.0 ~ 1.0).
-  const [audioLevel, setAudioLevel] = useState<number>(0);
+  // 电平轨迹：录音期间按 TRACE_SAMPLE_INTERVAL_MS 采样的电平历史（最多
+  // TRACE_MAX_FRAMES 帧）。松开后冻结（processing 不采样），结果出现即清空。
+  const [levelTrace, setLevelTrace] = useState<number[]>([]);
+  const lastSampleAtRef = useRef(0);
 
   // Whether we are in an exit transition (CSS class toggle).
   const [isExiting, setIsExiting] = useState(false);
@@ -141,6 +153,14 @@ export function Overlay() {
             setCopied(false);
             setPolishError(null);
           }
+          if (newPhase === "recording") {
+            // 新一轮录音：轨迹重新累积（不存在 processing→recording 路径，
+            // 进入 recording 即代表上一轮已结束）。
+            setLevelTrace([]);
+          } else if (newPhase === "done") {
+            // 结果文本已出，轨迹完成使命随 crossfade 退场。
+            setLevelTrace([]);
+          }
           setIsCrossfading(true);
           setIsExiting(true);
           prevPhaseRef.current = transition.enterPhase ?? null;
@@ -164,17 +184,30 @@ export function Overlay() {
         setResult(null);
         setCopied(false);
         setPolishError(null);
-        setAudioLevel(0);
+        if (newPhase === "recording") {
+          setLevelTrace([]);
+        }
       } else if (newPhase === "done") {
         setTxProgress(null);
-        setAudioLevel(0);
+        setLevelTrace([]);
       }
       prevPhaseRef.current = newPhase;
     });
 
     const unlistenAudioLevel = listen<number>("audio-level", (event) => {
       if (!active) return;
-      setAudioLevel(event.payload ?? 0);
+      const level = event.payload ?? 0;
+      // 仅录音相位采样；processing 冻结轨迹，done/hidden 不采。
+      if (prevPhaseRef.current !== "recording") return;
+      const now = Date.now();
+      if (now - lastSampleAtRef.current < TRACE_SAMPLE_INTERVAL_MS) return;
+      lastSampleAtRef.current = now;
+      setLevelTrace((prev) => {
+        const next = [...prev, level];
+        return next.length > TRACE_MAX_FRAMES
+          ? next.slice(next.length - TRACE_MAX_FRAMES)
+          : next;
+      });
     });
 
     const unlistenResult = listen<string>("transcription-result", (event) => {
@@ -299,22 +332,22 @@ export function Overlay() {
   return (
     <div className={containerClass} onTransitionEnd={handleTransitionEnd}>
       <div className="island">
+        {(effectivePhase === "recording" || effectivePhase === "processing") && (
+          <div
+            className={`level-trace ${effectivePhase === "processing" ? "level-trace--frozen" : ""}`}
+            aria-hidden
+          >
+            {levelTrace.map((level, i) => (
+              <div
+                key={i}
+                className="trace-bar"
+                style={{ height: `${traceBarHeight(level).toFixed(1)}px` }}
+              />
+            ))}
+          </div>
+        )}
         {effectivePhase === "recording" && (
-          <>
-            <div className="recording-bars" aria-hidden>
-              {[0.6, 1.0, 0.8, 0.5].map((factor, i) => {
-                const scale = Math.min(1.0, Math.max(0.2, 0.2 + audioLevel * factor * 0.8));
-                return (
-                  <div
-                    key={i}
-                    className="recording-bar"
-                    style={{ transform: `scaleY(${scale})` }}
-                  />
-                );
-              })}
-            </div>
-            <span className="label">{t("overlay.recording")}</span>
-          </>
+          <span className="label">{t("overlay.recording")}</span>
         )}
         {effectivePhase === "processing" && (
           <div className="island-processing-inner">

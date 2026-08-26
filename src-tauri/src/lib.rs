@@ -50,11 +50,13 @@ pub(crate) fn spawn_pipeline_thread(
     let app_handle = app.clone();
     let cfg_clone = cfg.clone();
 
-    let overlay: Arc<dyn overlay::seam::OverlaySink> =
-        Arc::new(overlay::manager::OverlayManager::new(
+    let overlay: Arc<dyn overlay::seam::OverlaySink> = Arc::new(
+        overlay::manager::OverlayManager::new(
             overlay::tauri::TauriOverlayWindow::new(app_handle.clone()),
             overlay::seam::OverlayPosition::effective(&cfg.gui.overlay_position),
-        ));
+        )
+        .with_auto_fade(overlay::manager::platform_auto_fade_policy()),
+    );
 
     let thread_handle = std::thread::spawn(move || {
         let rt = tokio::runtime::Builder::new_current_thread()
@@ -65,6 +67,7 @@ pub(crate) fn spawn_pipeline_thread(
             .state::<Arc<dyn output::Output>>()
             .inner()
             .clone();
+        let inject_text = cfg_clone.output.inject_text;
         let dispatch: Arc<dyn voice_pipeline::TranscriptionDispatch> =
             Arc::new(voice_pipeline::TranscriptionDispatcherImpl {
                 output,
@@ -72,6 +75,7 @@ pub(crate) fn spawn_pipeline_thread(
                     .state::<crate::history::HistoryStore>()
                     .inner()
                     .clone(),
+                inject_text,
             });
         let sink = tauri_sink::TauriPipelineSink::new(
             Arc::new(tauri_sink::TauriEventEmitter::new(app_handle.clone())),

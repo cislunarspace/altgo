@@ -52,6 +52,7 @@ pub struct ConfigResponse {
     pub overlay_position: String,
     pub auto_check_update: bool,
     pub has_polisher_api_key: bool,
+    pub inject_text: bool,
 }
 
 fn build_config_response(cfg: &crate::config::Config) -> ConfigResponse {
@@ -69,6 +70,7 @@ fn build_config_response(cfg: &crate::config::Config) -> ConfigResponse {
         overlay_position: cfg.gui.overlay_position.clone(),
         auto_check_update: cfg.gui.auto_check_update,
         has_polisher_api_key: !cfg.polisher.api_key.trim().is_empty(),
+        inject_text: cfg.output.inject_text,
     }
 }
 
@@ -564,6 +566,7 @@ mod tests {
         cfg.transcriber.model = "sense-voice".to_string();
         cfg.polisher.level = "light".to_string();
         cfg.polisher.api_key = "polish-key".to_string();
+        cfg.output.inject_text = true;
 
         let resp = build_config_response(&cfg);
         assert_eq!(resp.key_name, "space");
@@ -574,6 +577,7 @@ mod tests {
         assert_eq!(resp.polish_level, "light");
         assert_eq!(resp.overlay_position, "bottom_center");
         assert!(resp.auto_check_update);
+        assert!(resp.inject_text);
     }
 
     struct FakeOutput {

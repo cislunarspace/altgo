@@ -15,6 +15,7 @@ describe("saveRequestBody", () => {
     guiLanguage: "zh",
     overlayPosition: "bottom_center",
     autoCheckUpdate: true,
+    injectText: false,
     polisherApiKey: "",
     hasPolisherApiKey: false,
   };
@@ -22,6 +23,11 @@ describe("saveRequestBody", () => {
   it("includes autoCheckUpdate in the request body", () => {
     const result = saveRequestBody({ ...base, autoCheckUpdate: false });
     expect(result).toHaveProperty("autoCheckUpdate", false);
+  });
+
+  it("includes injectText in the request body", () => {
+    const result = saveRequestBody({ ...base, injectText: true });
+    expect(result).toHaveProperty("injectText", true);
   });
 
   it("includes overlayPosition in the request body", () => {
@@ -78,6 +84,7 @@ describe("normalizeConfig", () => {
       guiLanguage: "zh",
       overlayPosition: "bottom_center",
       autoCheckUpdate: true,
+      injectText: false,
       polisherApiKey: "secret",
       hasPolisherApiKey: true,
     };

@@ -357,6 +357,19 @@ export default function Settings() {
                   <p className="settings-hint">{t("settings.custom_path_hint")}</p>
                 </div>
               )}
+              <div className="settings-field">
+                <span className="settings-field-label-text">{t("settings.inject_text")}</span>
+                <div className="settings-field-control">
+                  <label style={{ display: "flex", alignItems: "center", cursor: "pointer", gap: "6px" }}>
+                    <input
+                      type="checkbox"
+                      checked={config.injectText}
+                      onChange={(e) => update("injectText", e.target.checked)}
+                    />
+                  </label>
+                </div>
+              </div>
+              <p className="settings-hint">{t("settings.inject_text_hint")}</p>
             </>
         </section>
 

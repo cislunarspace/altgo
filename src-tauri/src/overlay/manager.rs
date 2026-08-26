@@ -15,6 +15,7 @@ use std::time::Duration;
 
 use tauri::{LogicalSize, PhysicalPosition};
 
+use crate::overlay::activity::UserActivityClock;
 use crate::overlay::seam::{OverlayError, OverlaySink, OverlayWindow};
 
 pub use crate::overlay::seam::{OverlayPhase, OverlayPosition, OverlayState};
@@ -33,6 +34,53 @@ const EDGE_OFFSET: f64 = 80.0;
 /// （前端 --duration-normal 为 180ms，再加少量余量）。
 const HIDE_DELAY: Duration = Duration::from_millis(220);
 
+/// 自动淡出生产参数：检测到输入活动后多久淡出（ADR 0006）。
+/// 仅 Windows 空闲感知策略使用；Linux 走固定超时（见下）。
+#[cfg(target_os = "windows")]
+const AUTO_FADE_DELAY: Duration = Duration::from_secs(3);
+
+/// 空闲感知的轮询间隔。
+#[cfg(target_os = "windows")]
+const ACTIVITY_POLL_INTERVAL: Duration = Duration::from_millis(500);
+
+/// Linux 固定超时淡出时长（Wayland 无统一空闲 API 的降级策略，ADR 0006）。
+#[cfg(target_os = "linux")]
+const LINUX_FADE_TIMEOUT: Duration = Duration::from_secs(8);
+
+/// done 浮窗的自动淡出策略。
+#[derive(Clone)]
+pub enum AutoFadePolicy {
+    /// 空闲感知：done 出现即开始观察全局输入。结果出现时用户「最近刚操作过」
+    /// （距上次输入不超过 fade_delay），或随后出现新输入，都视为用户已继续
+    /// 工作，fade_delay 后淡出（倒计时不可逆）；无输入则一直保留。
+    ActivityAware {
+        clock: Arc<dyn UserActivityClock>,
+        poll_interval: Duration,
+        fade_delay: Duration,
+    },
+    /// 固定超时：done 出现后固定时长淡出（无空闲检测平台的降级策略）。
+    FixedTimeout { delay: Duration },
+}
+
+/// 按平台返回生产默认的自动淡出策略。
+pub fn platform_auto_fade_policy() -> AutoFadePolicy {
+    // Linux：Wayland 会话无统一的全局空闲查询 API，降级为固定超时。
+    #[cfg(target_os = "linux")]
+    {
+        AutoFadePolicy::FixedTimeout {
+            delay: LINUX_FADE_TIMEOUT,
+        }
+    }
+    #[cfg(target_os = "windows")]
+    {
+        AutoFadePolicy::ActivityAware {
+            clock: Arc::new(crate::overlay::activity::WindowsActivityClock),
+            poll_interval: ACTIVITY_POLL_INTERVAL,
+            fade_delay: AUTO_FADE_DELAY,
+        }
+    }
+}
+
 /// 悬浮窗管理器 —— 负责把 Overlay 状态意图翻译成窗口操作。
 #[derive(Clone)]
 pub struct OverlayManager<W: OverlayWindow> {
@@ -42,6 +90,8 @@ pub struct OverlayManager<W: OverlayWindow> {
     /// 代际计数：每次 set_state 递增。延迟 hide 执行前比对代际，
     /// 防止「hide 延迟期间用户重新开始录音」时旧 hide 关掉新内容。
     generation: Arc<AtomicU64>,
+    /// done 阶段的自动淡出策略；`None` 时 done 一直保留（旧行为）。
+    auto_fade: Option<Arc<AutoFadePolicy>>,
 }
 
 impl<W: OverlayWindow + 'static> OverlayManager<W> {
@@ -50,7 +100,14 @@ impl<W: OverlayWindow + 'static> OverlayManager<W> {
             window,
             position,
             generation: Arc::new(AtomicU64::new(0)),
+            auto_fade: None,
         }
+    }
+
+    /// 注入自动淡出策略（builder）。
+    pub fn with_auto_fade(mut self, policy: AutoFadePolicy) -> Self {
+        self.auto_fade = Some(Arc::new(policy));
+        self
     }
 
     /// 设置悬浮窗状态。
@@ -105,6 +162,57 @@ impl<W: OverlayWindow + 'static> OverlayManager<W> {
 
         if let Err(error) = self.window.show() {
             tracing::warn!(%error, "overlay show failed");
+        }
+
+        // done 阶段挂起自动淡出观察：到点转 hidden（复用 generation 防竞态）。
+        if matches!(state.phase, OverlayPhase::Done) {
+            if let Some(policy) = &self.auto_fade {
+                let manager = self.clone();
+                let policy = Arc::clone(policy);
+                std::thread::spawn(move || manager.watch_done(seq, &policy));
+            }
+        }
+    }
+
+    /// done 阶段的自动淡出观察。任何退出路径都先比对代际：
+    /// 期间出现新状态（新录音/手动关闭/管道停止）时本观察作废。
+    fn watch_done(&self, seq: u64, policy: &AutoFadePolicy) {
+        let still_current = |seq: u64| self.generation.load(Ordering::SeqCst) == seq;
+
+        match policy {
+            AutoFadePolicy::FixedTimeout { delay } => {
+                std::thread::sleep(*delay);
+                if still_current(seq) {
+                    self.set_state(OverlayState::hidden());
+                }
+            }
+            AutoFadePolicy::ActivityAware {
+                clock,
+                poll_interval,
+                fade_delay,
+            } => {
+                let baseline = clock.ms_since_last_input();
+                // 结果出现时用户最近刚操作过（如转写期间已在打字）：
+                // 视为已检测到活动，直接开始倒计时。
+                let already_active = baseline <= fade_delay.as_millis() as u64;
+                if !already_active {
+                    // 无活动则一直保留，等新输入出现（idle 相对 baseline 变小）。
+                    loop {
+                        std::thread::sleep(*poll_interval);
+                        if !still_current(seq) {
+                            return;
+                        }
+                        if clock.ms_since_last_input() < baseline {
+                            break;
+                        }
+                    }
+                }
+                // 倒计时不可逆：触发后不再读时钟，只看代际。
+                std::thread::sleep(*fade_delay);
+                if still_current(seq) {
+                    self.set_state(OverlayState::hidden());
+                }
+            }
         }
     }
 }
@@ -533,5 +641,174 @@ mod tests {
         let expected_x = (1920 - physical_width) / 2; // 570
         let expected_y = 1080 - physical_height - offset; // 690
         assert_eq!(position, PhysicalPosition::new(expected_x, expected_y));
+    }
+
+    // -----------------------------------------------------------------------
+    // 自动淡出（done 阶段的退出策略）测试
+    // -----------------------------------------------------------------------
+
+    /// 受控活动时钟：测试中直接设置「距上次输入的毫秒数」。
+    #[derive(Clone)]
+    struct FakeClock {
+        idle_ms: Arc<Mutex<u64>>,
+    }
+
+    impl FakeClock {
+        fn new(idle_ms: u64) -> Self {
+            Self {
+                idle_ms: Arc::new(Mutex::new(idle_ms)),
+            }
+        }
+
+        fn set(&self, idle_ms: u64) {
+            *self.idle_ms.lock().unwrap() = idle_ms;
+        }
+    }
+
+    impl crate::overlay::activity::UserActivityClock for FakeClock {
+        fn ms_since_last_input(&self) -> u64 {
+            *self.idle_ms.lock().unwrap()
+        }
+    }
+
+    /// 等待 window 出现（或确认不出现）目标调用，避免固定 sleep 的脆弱性。
+    fn wait_for_call(window: &RecordingOverlayWindow, call: &str, timeout: Duration) -> bool {
+        let deadline = std::time::Instant::now() + timeout;
+        while std::time::Instant::now() < deadline {
+            if window.calls().iter().any(|c| c == call) {
+                return true;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        window.calls().iter().any(|c| c == call)
+    }
+
+    #[test]
+    fn test_done_auto_fades_after_fixed_timeout() {
+        let window = RecordingOverlayWindow::new((0, 0, 1920, 1080), 1.0);
+        let manager = OverlayManager::new(window.clone(), OverlayPosition::BottomCenter)
+            .with_auto_fade(AutoFadePolicy::FixedTimeout {
+                delay: Duration::from_millis(50),
+            });
+
+        manager.set_state(OverlayState::done());
+
+        // 淡出 = fade delay + hidden 的 HIDE_DELAY 退出动画。
+        assert!(
+            wait_for_call(
+                &window,
+                "emit:hidden",
+                Duration::from_millis(50) + HIDE_DELAY + Duration::from_millis(500)
+            ),
+            "done 后应按固定超时自动淡出，got {:?}",
+            window.calls()
+        );
+        assert!(wait_for_call(&window, "hide", Duration::from_millis(500)));
+    }
+
+    #[test]
+    fn test_fixed_timeout_fade_cancelled_by_newer_state() {
+        let window = RecordingOverlayWindow::new((0, 0, 1920, 1080), 1.0);
+        let manager = OverlayManager::new(window.clone(), OverlayPosition::BottomCenter)
+            .with_auto_fade(AutoFadePolicy::FixedTimeout {
+                delay: Duration::from_millis(80),
+            });
+
+        manager.set_state(OverlayState::done());
+        std::thread::sleep(Duration::from_millis(20));
+        // 淡出倒计时期间用户开始新一轮录音：旧定时器不得把新内容关掉。
+        manager.set_state(OverlayState::recording());
+
+        std::thread::sleep(Duration::from_millis(80) + HIDE_DELAY + Duration::from_millis(100));
+        let calls = window.calls();
+        assert!(
+            !calls.contains(&"emit:hidden".to_string()),
+            "新状态后不得自动隐藏，got {:?}",
+            calls
+        );
+        assert!(!calls.contains(&"hide".to_string()));
+    }
+
+    #[test]
+    fn test_activity_aware_keeps_done_when_user_idle() {
+        let window = RecordingOverlayWindow::new((0, 0, 1920, 1080), 1.0);
+        let clock = FakeClock::new(10_000);
+        let manager = OverlayManager::new(window.clone(), OverlayPosition::BottomCenter)
+            .with_auto_fade(AutoFadePolicy::ActivityAware {
+                clock: Arc::new(clock.clone()),
+                poll_interval: Duration::from_millis(15),
+                fade_delay: Duration::from_millis(40),
+            });
+
+        manager.set_state(OverlayState::done());
+
+        // 用户一直没碰电脑（idle 持续为 10s，无新输入）：浮窗必须一直保留。
+        std::thread::sleep(Duration::from_millis(200));
+        let calls = window.calls();
+        assert!(
+            !calls.contains(&"emit:hidden".to_string()),
+            "无输入活动时 done 浮窗不得自动隐藏，got {:?}",
+            calls
+        );
+
+        // 清理：发出新状态让观察线程退出。
+        manager.set_state(OverlayState::recording());
+        std::thread::sleep(Duration::from_millis(60));
+    }
+
+    #[test]
+    fn test_activity_aware_fades_on_new_input_irreversibly() {
+        let window = RecordingOverlayWindow::new((0, 0, 1920, 1080), 1.0);
+        let clock = FakeClock::new(10_000);
+        let manager = OverlayManager::new(window.clone(), OverlayPosition::BottomCenter)
+            .with_auto_fade(AutoFadePolicy::ActivityAware {
+                clock: Arc::new(clock.clone()),
+                poll_interval: Duration::from_millis(15),
+                fade_delay: Duration::from_millis(40),
+            });
+
+        manager.set_state(OverlayState::done());
+        std::thread::sleep(Duration::from_millis(30));
+        // 用户操作了电脑（idle 突然变小 → 新输入）。
+        clock.set(200);
+        // 倒计时触发后用户又停手（idle 变大）：倒计时不可逆，仍应淡出。
+        std::thread::sleep(Duration::from_millis(5));
+        clock.set(60_000);
+
+        assert!(
+            wait_for_call(
+                &window,
+                "emit:hidden",
+                Duration::from_millis(40) + HIDE_DELAY + Duration::from_millis(500)
+            ),
+            "检测到输入活动后应淡出（不可逆），got {:?}",
+            window.calls()
+        );
+    }
+
+    #[test]
+    fn test_activity_aware_fades_immediately_when_user_was_just_active() {
+        let window = RecordingOverlayWindow::new((0, 0, 1920, 1080), 1.0);
+        // 结果出现前 30ms 用户刚敲过键盘（转写期间已在打字）：
+        // 视为「正在操作」，结果一出现就开始倒计时。
+        let clock = FakeClock::new(30);
+        let manager = OverlayManager::new(window.clone(), OverlayPosition::BottomCenter)
+            .with_auto_fade(AutoFadePolicy::ActivityAware {
+                clock: Arc::new(clock),
+                poll_interval: Duration::from_millis(15),
+                fade_delay: Duration::from_millis(40),
+            });
+
+        manager.set_state(OverlayState::done());
+
+        assert!(
+            wait_for_call(
+                &window,
+                "emit:hidden",
+                Duration::from_millis(40) + HIDE_DELAY + Duration::from_millis(500)
+            ),
+            "结果出现时用户正在操作，应直接进入淡出倒计时，got {:?}",
+            window.calls()
+        );
     }
 }

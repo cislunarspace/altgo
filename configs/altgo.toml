@@ -37,6 +37,7 @@ system_prompt = ""                  # 自定义则完全替换内置；为空时
 
 [output]
 prefer_polished = true             # 剪贴板复制时优先使用润色后的文本
+inject_text = false                # 转写完成后把文本自动输入到当前焦点窗口（仅 Windows；关闭时仅写剪贴板）
 
 [logging]
 level = "info"

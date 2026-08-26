@@ -5,7 +5,9 @@
 //! - `seam`：`OverlayWindow` / `OverlaySink` / `OverlayState` / `OverlayError` 接口
 //! - `manager`：`OverlayManager`，把状态意图翻译成窗口操作
 //! - `tauri`：`TauriOverlayWindow`，Tauri 平台的 `OverlayWindow` adapter
+//! - `activity`：`UserActivityClock`，自动淡出用的全局输入活动时钟
 
+pub mod activity;
 pub mod manager;
 pub mod seam;
 pub mod tauri;
