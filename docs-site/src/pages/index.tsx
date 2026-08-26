@@ -3,7 +3,7 @@ import clsx from 'clsx';
 import Link from '@docusaurus/Link';
 import useDocusaurusContext from '@docusaurus/useDocusaurusContext';
 import Layout from '@theme/Layout';
-import {translate} from '@docusaurus/Translate';
+import Translate, {translate} from '@docusaurus/Translate';
 import {
   Mic,
   Infinity,
@@ -88,7 +88,10 @@ export default function Home(): JSX.Element {
   }, []);
 
   return (
-    <Layout title={siteConfig.title} description={siteConfig.tagline}>
+    <Layout
+      title={siteConfig.title}
+      description={translate({id: 'home.meta.description', message: '无需打字，言出法随'})}
+    >
       {/* ─── Hero ─── */}
       <header className={styles.heroBanner}>
         <div className={styles.heroGlow} />
@@ -96,27 +99,27 @@ export default function Home(): JSX.Element {
         <div className={clsx('container', styles.heroInner)}>
           <div className={styles.heroBadge}>
             <span className={styles.heroBadgeDot} />
-            <translate id="home.hero.badge">Linux 语音转文字桌面工具</translate>
+            <Translate id="home.hero.badge">Linux 语音转文字桌面工具</Translate>
           </div>
           <h1 className={styles.heroTitle}>
-            <translate id="home.hero.title.line1">无需打字</translate>
+            <Translate id="home.hero.title.line1">无需打字</Translate>
             <br />
             <span className={styles.heroTitleAccent}>
-              <translate id="home.hero.title.line2">言出法随</translate>
+              <Translate id="home.hero.title.line2">言出法随</Translate>
             </span>
           </h1>
           <p className={styles.heroTagline}>
-            <translate
+            <Translate
               id="home.hero.tagline.line1"
               description="hero tagline, first line">
               基于 Tauri + React + Rust 的语音转文字应用。
-            </translate>
+            </Translate>
             <br />
-            <translate
+            <Translate
               id="home.hero.tagline.line2"
               description="hero tagline, second line">
               按住 Alt 说话，松开后在本地用 SenseVoice 转写，可接入 LLM 润色。
-            </translate>
+            </Translate>
           </p>
           <div className={styles.buttons}>
             <Link
@@ -124,14 +127,14 @@ export default function Home(): JSX.Element {
               to="/docs/quick-start"
             >
               <Download size={18} />
-              <translate id="home.cta.quickStart">快速开始</translate>
+              <Translate id="home.cta.quickStart">快速开始</Translate>
             </Link>
             <Link
               className={clsx('button', styles.btnSecondary)}
               to="/docs/usage"
             >
               <BookOpen size={18} />
-              <translate id="home.cta.usage">使用说明</translate>
+              <Translate id="home.cta.usage">使用说明</Translate>
             </Link>
             <Link
               className={clsx('button', styles.btnGhost)}
@@ -186,39 +189,39 @@ export default function Home(): JSX.Element {
         <section className={styles.howItWorks}>
           <div className="container">
             <p className={styles.sectionKicker}>
-              <translate id="home.steps.kicker">三步上手</translate>
+              <Translate id="home.steps.kicker">三步上手</Translate>
             </p>
             <h2 className={styles.sectionTitle}>
-              <translate id="home.steps.title">简单到不需要教程</translate>
+              <Translate id="home.steps.title">简单到不需要教程</Translate>
             </h2>
             <div className={styles.steps}>
               <div className={styles.step}>
                 <div className={styles.stepNum}>1</div>
-                <h3><translate id="home.steps.install.title">安装并设置</translate></h3>
+                <h3><Translate id="home.steps.install.title">安装并设置</Translate></h3>
                 <p>
-                  <translate id="home.steps.install.description">
+                  <Translate id="home.steps.install.description">
                     下载 deb / rpm 安装包，在设置中下载 SenseVoice 模型。
-                  </translate>
+                  </Translate>
                 </p>
               </div>
               <ArrowRight className={styles.stepArrow} size={24} />
               <div className={styles.step}>
                 <div className={styles.stepNum}>2</div>
-                <h3><translate id="home.steps.speak.title">按住 Alt 说话</translate></h3>
+                <h3><Translate id="home.steps.speak.title">按住 Alt 说话</Translate></h3>
                 <p>
-                  <translate id="home.steps.speak.description">
+                  <Translate id="home.steps.speak.description">
                     长按右 Alt 开始录音，松开自动转写；双击进入连续模式。
-                  </translate>
+                  </Translate>
                 </p>
               </div>
               <ArrowRight className={styles.stepArrow} size={24} />
               <div className={styles.step}>
                 <div className={styles.stepNum}>3</div>
-                <h3><translate id="home.steps.paste.title">粘贴使用</translate></h3>
+                <h3><Translate id="home.steps.paste.title">粘贴使用</Translate></h3>
                 <p>
-                  <translate id="home.steps.paste.description">
+                  <Translate id="home.steps.paste.description">
                     转写结果自动写入剪贴板，悬浮窗同步展示，随时可再次复制。
-                  </translate>
+                  </Translate>
                 </p>
               </div>
             </div>
@@ -229,10 +232,10 @@ export default function Home(): JSX.Element {
         <section className={styles.features}>
           <div className="container">
             <p className={styles.sectionKicker}>
-              <translate id="home.features.kicker">功能特点</translate>
+              <Translate id="home.features.kicker">功能特点</Translate>
             </p>
             <h2 className={styles.sectionTitle}>
-              <translate id="home.features.title">为你设计的细节体验</translate>
+              <Translate id="home.features.title">为你设计的细节体验</Translate>
             </h2>
             <div className={styles.featureGrid}>
               {features.map((f) => {
@@ -256,26 +259,26 @@ export default function Home(): JSX.Element {
           <div className="container">
             <div className={styles.ctaBox}>
               <h2 className={styles.ctaTitle}>
-                <translate id="home.cta.finalTitle">准备好提升输入效率了吗？</translate>
+                <Translate id="home.cta.finalTitle">准备好提升输入效率了吗？</Translate>
               </h2>
               <p className={styles.ctaSubtitle}>
-                <translate id="home.cta.finalSubtitle">
+                <Translate id="home.cta.finalSubtitle">
                   30 秒安装，永久改变你的输入方式
-                </translate>
+                </Translate>
               </p>
               <div className={styles.buttons}>
                 <Link
                   className={clsx('button', styles.btnPrimary)}
                   to="/docs/quick-start"
                 >
-                  <translate id="home.cta.quickStart">快速开始</translate>{' '}
+                  <Translate id="home.cta.quickStart">快速开始</Translate>{' '}
                   <ArrowRight size={18} />
                 </Link>
                 <Link
                   className={clsx('button', styles.btnGhost)}
                   href="https://github.com/cislunarspace/altgo/releases"
                 >
-                  <translate id="home.cta.download">下载最新版</translate>
+                  <Translate id="home.cta.download">下载最新版</Translate>
                 </Link>
               </div>
             </div>

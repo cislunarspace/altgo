@@ -379,5 +379,70 @@
   "theme.docs.DocCard.categoryDescription.plurals": {
     "message": "1 item|{count} items",
     "description": "The default description for a category card in the generated index about how many items this category includes"
+  },
+  "home.hero.badge": {
+    "message": "Linux voice-to-text desktop app"
+  },
+  "home.hero.title.line1": {
+    "message": "No typing."
+  },
+  "home.hero.title.line2": {
+    "message": "Just speak."
+  },
+  "home.hero.tagline.line1": {
+    "message": "A voice-to-text desktop app built on Tauri + React + Rust.",
+    "description": "hero tagline, first line"
+  },
+  "home.hero.tagline.line2": {
+    "message": "Hold Alt to speak; SenseVoice transcribes locally when you release, with optional LLM polishing.",
+    "description": "hero tagline, second line"
+  },
+  "home.cta.quickStart": {
+    "message": "Quick Start"
+  },
+  "home.cta.usage": {
+    "message": "Usage Guide"
+  },
+  "home.steps.kicker": {
+    "message": "Three steps"
+  },
+  "home.steps.title": {
+    "message": "So simple it needs no tutorial"
+  },
+  "home.steps.install.title": {
+    "message": "Install & set up"
+  },
+  "home.steps.install.description": {
+    "message": "Download the deb / rpm package and grab the SenseVoice model in Settings."
+  },
+  "home.steps.speak.title": {
+    "message": "Hold Alt and speak"
+  },
+  "home.steps.speak.description": {
+    "message": "Hold right Alt to record; release to transcribe automatically. Double-click for continuous mode."
+  },
+  "home.steps.paste.title": {
+    "message": "Paste & go"
+  },
+  "home.steps.paste.description": {
+    "message": "Results land in your clipboard with the overlay showing them live; copy again anytime."
+  },
+  "home.features.kicker": {
+    "message": "Features"
+  },
+  "home.features.title": {
+    "message": "Details designed around you"
+  },
+  "home.cta.finalTitle": {
+    "message": "Ready to type less?"
+  },
+  "home.cta.finalSubtitle": {
+    "message": "A 30-second install that changes how you input text forever."
+  },
+  "home.cta.download": {
+    "message": "Download latest"
+  },
+  "home.meta.description": {
+    "message": "Type less. Say more."
   }
 }
