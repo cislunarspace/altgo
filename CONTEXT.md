@@ -47,7 +47,7 @@
 ## 输出
 
 **悬浮窗（Overlay）**
-录音、处理与结果显示时出现的悬浮状态窗口。定位在主显示器（Linux 用 `xrandr` 取显示器几何），位置可配置（`gui.overlay_position`：`bottom_center` 默认 / `top_center`），对全部阶段生效。Wayland 协议不允许客户端定位窗口（`set_position` 为 no-op），因此启动时检测会话：Wayland 且未显式设置 `GDK_BACKEND` 时切到 X11 后端（XWayland），定位才能生效。状态切换时由 `TauriPipelineSink` 经 `OverlaySink` 抽象管理；`TauriPipelineSink` 只描述意图（"recording" / "processing" / "hidden" / "done"），浮窗管理器把它转成窗口尺寸、位置、显示与隐藏。窗口在全部阶段使用一个固定尺寸——会话中调整透明窗口尺寸会在 Linux 合成器上产生黑色边缘，所以阶段切换只替换前端内容（CSS 交叉淡入）。`hidden` 先发出，实际隐藏延迟约 220ms 以便退出动画可见。转写结果路径上，`transcription-result` 在 `done` 浮窗状态之前发出，前端不会渲染出空 island。island 不使用 `box-shadow`——半透明阴影叠加在透明窗口上会在某些 Linux 合成器上合成出暗色光晕。
+录音、处理与结果显示时出现的悬浮状态窗口。定位在主显示器（Linux 解析 `xrandr` 输出，Windows 用 Tauri `primary_monitor()`），位置可配置（`gui.overlay_position`：`bottom_center` 默认 / `top_center`），对全部阶段生效。Wayland 协议不允许客户端定位窗口（`set_position` 为 no-op），因此启动时检测会话：Wayland 且未显式设置 `GDK_BACKEND` 时切到 X11 后端（XWayland），定位才能生效。状态切换时由 `TauriPipelineSink` 经 `OverlaySink` 抽象管理；`TauriPipelineSink` 只描述意图（"recording" / "processing" / "hidden" / "done"），浮窗管理器把它转成窗口尺寸、位置、显示与隐藏。窗口在全部阶段使用一个固定尺寸——会话中调整透明窗口尺寸会在 Linux 合成器上产生黑色边缘，所以阶段切换只替换前端内容（CSS 交叉淡入）。`hidden` 先发出，实际隐藏延迟约 220ms 以便退出动画可见。转写结果路径上，`transcription-result` 在 `done` 浮窗状态之前发出，前端不会渲染出空 island。island 不使用 `box-shadow`——半透明阴影叠加在透明窗口上会在某些 Linux 合成器上合成出暗色光晕。
 
 **自动淡出（Auto-fade）**
 结果浮窗（done 阶段）的退出策略：无用户输入活动时无限保留，检测到输入活动后延时数秒自动隐藏。_Avoid_: 自动关闭、auto-hide。
@@ -82,11 +82,11 @@
 ## 按键输入
 
 **按键监听器（KeyListener）**
-管道运行期间持续监听配置的激活键并发出 `KeyEvent` 的接口。由 Linux 适配器实现（`X11Listener`）。管道以 `Box<dyn KeyListener>` 消费它。
+管道运行期间持续监听配置的激活键并发出 `KeyEvent` 的接口。Linux 实现（`X11Listener`）在 X11 用 `xinput test-xi2`、失败回退 `evtest`，Wayland 会话优先 `evtest`；Windows 用 WH_KEYBOARD_LL 低级键盘钩子。管道以 `Box<dyn KeyListener>` 消费它。
 _Avoid_: key listener（指概念时小写）、platform listener。
 
 **按键捕获（KeyCapture）**
-设置配置期间一次性捕获任意物理键的接口（Linux 用 evtest），返回 `KeyListenerConfig` 所需的键标识符（`key_name`、`linux_evdev_code`）。平台实现复用与 `KeyListener` 相同的底层输入机制，但暴露同步阻塞式 API。
+设置配置期间一次性捕获任意物理键的接口，返回 `KeyListenerConfig` 所需的键标识符（`key_name`、`linux_evdev_code`）。Linux 通过 `evtest` 子进程监听 `/dev/input/event*`；Windows 临时挂 WH_KEYBOARD_LL 钩子等待一次按键。暴露同步阻塞式 API。
 _Avoid_: capture mode、key capture mode。
 
 **激活键（Activation Key）**
@@ -108,3 +108,112 @@ _Avoid_: capture mode、key capture mode。
 - `InPlace`（就地更新）：Windows（NSIS）与 Linux（AppImage），支持由更新器自动下载差量/全量包并就地替换重启。
 - `External`（外部引导）：Linux 传统包管理分发（deb、rpm、AUR），因需要系统提权或由系统包管理器托管，更新器提示新版本变更并提供一键打开下载页或包管理器更新命令。
 
+# Domain Glossary
+
+This file defines the terms used across the altgo codebase. Use them verbatim in code, docs, and architecture discussions.
+
+## Core Pipeline
+
+**Voice Pipeline**
+The end-to-end processing chain: key press → record → transcribe → polish → output. Driven by the state machine; managed at runtime by `PipelineController`.
+
+**Transcription Engine**
+The backend that turns WAV audio into text. Currently a single implementation: the local `SherpaTranscriber` (SenseVoice via embedded sherpa-onnx).
+
+**Provider Preset**
+A preconfigured API provider template: name, base URL, API format, recommended models, and category. Currently used only by polisher settings. Lives in `frontend/src/config/modelPresets.ts`.
+
+**Model Catalog**
+The list of recommended models associated with a provider preset. Each entry carries a model ID, display name, description, context window, and input modalities (text/audio/image). Users pick from the catalog instead of typing model names.
+
+**Provider Category**
+Classification of polisher API providers: `official` (OpenAI, Anthropic), `cn_official` (DeepSeek, Kimi, Zhipu), `aggregator` (SiliconFlow, OpenRouter). Determines ordering and grouping in the preset picker UI.
+
+**Pipeline Status**
+The lifecycle phase of the voice pipeline at any moment: `Idle`, `Recording`, `Processing`, `Done`, `Stopped`. Represented in the Rust backend as the `PipelineStatus` enum and serialized as lowercase strings to the frontend across the IPC boundary.
+
+**PipelineController**
+Owns the pipeline run handle plus a shared `PipelineStatus` Arc. Handles start, stop, restart. It never knows how to spawn the pipeline—callers inject the spawn closure, keeping this module free of Tauri and sink dependencies. Located in `pipeline_controller.rs`.
+
+**PipelineSink**
+Trait receiving events from a running pipeline: status changes, progress, errors, transcription results. The concrete production adapter is `TauriPipelineSink` in `tauri_sink.rs`. On the transcription-result path it delegates business work (clipboard write + history append) to the `TranscriptionDispatch` trait object injected at construction; the sink itself only emits Tauri events and switches overlay states.
+
+## Configuration
+
+**ConfigStore**
+Holds the in-memory live config behind a `Mutex`, along with its file path. Exposes `snapshot`, `snapshot_blocking`, and `apply_patch`. Every config change goes through `apply_patch` for validation and persistence. When validation fails, memory may be partially applied while nothing is written to disk (non-atomic rollback). Located in `config_store.rs`.
+
+**ConfigPatch**
+A partial config update: all fields optional; unprovided fields stay unchanged. The `linux_evdev_code` field uses a three-state deserializer distinguishing absent (no change) from JSON `null` (clear stored code). This is the type accepted over IPC by `save_config`.
+
+## History
+
+**HistoryStore**
+Wraps the history JSON file with named operations: `list`, `count`, `append`, `delete`, `clear`, `get`, `update_text`. Callers never touch file paths or module-private helpers. Located in `history.rs`. Cloning an instance is cheap (a single `PathBuf` inside).
+
+**HistoryEntry**
+One transcription record: `id`, `createdAtMs`, `rawText` (original transcript), `text` (polished, or equal to raw when unpolished). Audio is never stored.
+
+## Output
+
+**Overlay**
+The floating state window shown during recording, processing, and result display. Positioned on the primary monitor (Linux parses `xrandr` output; Windows uses Tauri's `primary_monitor()`); placement is configurable (`gui.overlay_position`: `bottom_center` default / `top_center`) and applies to all phases. The Wayland protocol forbids client-side window positioning (`set_position` is a no-op), so the session is probed at startup: on Wayland without an explicit `GDK_BACKEND` we switch to the X11 backend (XWayland) so positioning works. State switching is driven by `TauriPipelineSink` through the `OverlaySink` abstraction; the sink only states intent ("recording" / "processing" / "hidden" / "done") and the overlay manager translates that into window size, position, show, and hide. The window uses one fixed size across all phases—resizing a transparent window mid-session produces black edges on Linux compositors, so phase changes merely swap frontend content (CSS crossfade). `hidden` is emitted first; actual hiding is delayed ~220ms so the exit animation stays visible. On the transcription-result path, `transcription-result` is emitted before the `done` overlay state, sparing the frontend an empty island. The island avoids `box-shadow`—a translucent shadow layered on a transparent window renders dark halos on some Linux compositors.
+
+**Auto-fade**
+Exit policy of the result overlay (done phase): stays indefinitely without user input activity, hides automatically seconds after input activity is detected. _Avoid_: auto-close, auto-hide.
+
+**Text Injection**
+Output action typing the final text once at the cursor of the focused window after transcription; Windows only, governed by the `inject_text` setting, off by default. _Avoid_: auto-paste, streaming insert.
+
+**Polisher**
+Optional LLM post-processing step, controlled by `PolishLevel` (`none`/`light`/`medium`/`heavy`). Talks to any OpenAI-compatible chat API or the Anthropic Messages API.
+
+**PromptStore**
+Manages the polisher's prompt template files: loaded from `resources/prompts/`, combining base + per-level suffixes into complete system prompts, validated at first use. Loaded once at startup; file edits need a restart. Validation failures degrade gracefully (fall back to custom or built-in prompts; polishing continues with raw text).
+
+**Prompt Template**
+Text files under `resources/prompts/`: `base.txt` (shared instructions + Chinese writing guidance) or `{level}-suffix.txt` (per-level instructions appended to base). Composed at runtime into the full system prompt sent to the LLM.
+
+**System Prompt**
+The full prompt text sent to the LLM for polishing, composed from `base.txt` + `{level}-suffix.txt`, cached in memory, loaded once at startup.
+
+## Recording
+
+**Recorder Output Format**
+The voice pipeline expects recorders to return audio as fixed 16kHz mono 16-bit PCM WAV bytes. SenseVoice accepts only this sample rate; other settings are rejected before the pipeline starts.
+
+**Audio Level**
+Perceptual loudness (0.0–1.0) computed by the recorder from realtime PCM chunks during recording. The recording thread computes RMS while reading the stream and maps it through nonlinear gain onto a perceptual level; dispatched via `PipelineSink::on_audio_level` and the Tauri `audio-level` event at a light throttle (~20–30 FPS) to feed the overlay's level trace.
+
+**Level Trace**
+A rolling history built from continuous audio-level samples during recording, showing recent speech activity; frozen once the activation key is released, kept until the result overlay appears. _Avoid_: voiceprint, waveform.
+
+
+## Key Input
+
+**KeyListener**
+Interface that continuously watches the configured activation key while the pipeline runs, emitting `KeyEvent`s. The Linux implementation (`X11Listener`) uses `xinput test-xi2` on X11 with an `evtest` fallback, preferring `evtest` on Wayland sessions; Windows uses a WH_KEYBOARD_LL low-level hook. Consumed by the pipeline as `Box<dyn KeyListener>`.
+_Avoid_: key listener (lowercase when referring to the concept), platform listener.
+
+**KeyCapture**
+One-shot interface capturing any physical key during configuration, returning the identifiers `KeyListenerConfig` needs (`key_name`, `linux_evdev_code`). Linux listens on `/dev/input/event*` through an `evtest` subprocess; Windows temporarily installs a WH_KEYBOARD_LL hook awaiting one press. Exposes a synchronous blocking API.
+_Avoid_: capture mode, key capture mode.
+
+**Activation Key**
+The physical key held down to start recording. Configured per device either as an X11 keysym name (`key_name`) or an evdev scancode (`linux_evdev_code`). The evdev path is preferred on Wayland.
+
+**State Machine**
+The 5-state FSM translating raw key events into pipeline `StartRecord` / `StopRecord` commands (`Idle → PotentialPress → Recording → WaitSecondClick → ContinuousRecording`).
+
+## Updates
+
+**App Updater**
+Module checking for, downloading, and installing new app versions. Supports background silent checks (at startup) and user-initiated manual checks (from the Settings page).
+
+**Check Mode**
+Trigger pattern of an update check: `Silent` (at startup; failures never disturb the user; a lightweight badge appears when a new version is found) versus `Manual` (user-initiated click; shows a loading state and reports the concrete reason on timeout/failure).
+
+**Update Support Tier**
+How update capability is tiered across platforms and packaging/distribution formats:
+- `InPlace`: Windows (NSIS) and Linux (AppImage); the updater downloads delta/full packages and replaces + restarts in place.
+- `External`: traditional Linux package-manager distributions (deb, rpm, AUR), which require root privileges or are owned by the system package manager; the updater announces new versions and offers one-click access to the download page or the package-manager update command.

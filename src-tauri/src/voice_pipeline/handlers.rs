@@ -2,6 +2,12 @@
 //!
 //! `handle_start_record` / `handle_stop_record` 是按状态机命令调用的纯业务逻辑。
 //! `process_transcription_result` 处理转写完成后的剪贴板写入和历史追加。
+//!
+//! Command handlers and result processing.
+//!
+//! `handle_start_record` / `handle_stop_record` are pure business logic dispatched per state-machine
+//! command; `process_transcription_result` handles clipboard writing and history appending once a
+//! transcription completes.
 
 use std::sync::Arc;
 
@@ -14,6 +20,7 @@ use crate::transcriber::Transcriber;
 use super::sink::{DispatchOutcome, PipelineSink, TranscriptionResult};
 use crate::pipeline_controller::PipelineStatus;
 
+/// 处理 StartRecord 命令：开始录音并通知 sink。
 /// Handle StartRecord command: start recording and notify sink.
 pub fn handle_start_record(
     recorder: &mut dyn Recorder,
@@ -30,6 +37,7 @@ pub fn handle_start_record(
     Ok(())
 }
 
+/// 处理 StopRecord 命令：停止录音、处理音频并通知 sink。
 /// Handle StopRecord command: stop recording, process audio, notify sink.
 pub async fn handle_stop_record(
     recorder: &mut dyn Recorder,
@@ -52,6 +60,7 @@ pub async fn handle_stop_record(
 
     sink.on_progress("transcribe", None);
 
+    // 进度回调是同步的，直接转发给 sink。
     // Progress callbacks are synchronous, so forward them directly to the sink.
     let progress_sink = sink.clone();
     let progress_cb: Arc<dyn Fn(f32) + Send + Sync> = Arc::new(move |fr: f32| {
@@ -111,6 +120,7 @@ pub async fn handle_stop_record(
     sink.on_transcription_result(&output);
 }
 
+/// 按偏好设置与润色状态选择要使用的文本。
 /// Select which text to use based on preferences and polish status.
 pub fn select_text(prefer_polished: bool, output: &TranscriptionResult) -> String {
     if prefer_polished && !output.polish_failed && !output.text.trim().is_empty() {
@@ -120,6 +130,10 @@ pub fn select_text(prefer_polished: bool, output: &TranscriptionResult) -> Strin
     }
 }
 
+/// 为已有历史条目编排一次「润色后再持久化」。
+///
+/// 从 `history` 读入 `id`，对 `raw_text` 执行 `formatter.polish`，经 `polish_entry` 写回。
+/// 所有阻塞 I/O 均移入 `spawn_blocking`。返回更新后的 `HistoryEntry`。
 /// Dispatch a polish-then-persist pass for an existing history entry.
 ///
 /// Loads `id` from `history`, runs `formatter.polish` on `raw_text`, writes
@@ -170,6 +184,7 @@ pub async fn process_transcription_result(
 
     let text_to_use = select_text(prefer_polished, output);
 
+    // 写剪贴板（阻塞 I/O；调用方已在异步上下文中）
     // Write to clipboard (blocking I/O; caller is already in an async context)
     let text_clone = text_to_use.clone();
     let output_handle = output_adapter.clone_box();
@@ -184,6 +199,7 @@ pub async fn process_transcription_result(
     }
 
     // Windows: 注入到当前焦点窗口；其他平台为 no-op
+    // Windows: inject into the currently focused window; other platforms treat it as a no-op
     if inject_text {
         let text_clone = text_to_use.clone();
         let output_handle = output_adapter.clone_box();
@@ -197,6 +213,7 @@ pub async fn process_transcription_result(
         }
     }
 
+    // 追加历史
     // Append to history
     let raw = output.raw_text.clone();
     let display = text_to_use.clone();
@@ -421,6 +438,7 @@ mod tests {
 
     // ---------------------------------------------------------------------------
     // Helpers for the handle_stop_record success/failure path tests.
+    // handle_stop_record 成功/失败路径测试辅助
     // ---------------------------------------------------------------------------
 
     fn make_test_wav() -> Vec<u8> {
@@ -434,6 +452,7 @@ mod tests {
 
     fn failing_formatter() -> LLMFormatter {
         // 连接到一个不会响应的地址，让 polish 在超时/重试后失败。
+        // Connect to an address that never responds so polish fails after timeout/retries.
         LLMFormatter::new(
             "test-key".to_string(),
             "http://127.0.0.1:9".to_string(),
@@ -445,6 +464,7 @@ mod tests {
 
     // ---------------------------------------------------------------------------
     // handle_stop_record 成功与失败分支测试
+    // Success and failure branch tests for handle_stop_record
     // ---------------------------------------------------------------------------
 
     type ProgressCallback = Arc<dyn Fn(f32) + Send + Sync>;
@@ -658,6 +678,7 @@ mod tests {
 
     // ---------------------------------------------------------------------------
     // dispatch_history_polish 测试
+    // dispatch_history_polish tests
     // ---------------------------------------------------------------------------
 
     #[tokio::test]
@@ -669,6 +690,8 @@ mod tests {
             .unwrap();
 
         // PolishLevel::None 会成功返回原文，适合测编排链路而不过度依赖网络。
+        // PolishLevel::None returns the original text without network calls—good for testing the
+        // orchestration chain without depending on external services.
         let formatter = failing_formatter();
         let result =
             dispatch_history_polish(&store, &entry.id, &formatter, PolishLevel::None).await;
@@ -705,6 +728,7 @@ mod tests {
             .unwrap();
 
         // 使用需要实际调用 API 的级别，让 polish 在连接失败后返回 Err。
+        // Use a level that really calls the API so polish returns Err once the connection fails.
         let formatter = failing_formatter();
         let result =
             dispatch_history_polish(&store, &entry.id, &formatter, PolishLevel::Medium).await;
@@ -713,6 +737,7 @@ mod tests {
         assert!(!result.unwrap_err().is_empty());
 
         // 失败时不应写入历史。
+        // Failures must not be appended to history.
         let fetched = store.get(&entry.id).unwrap().unwrap();
         assert_eq!(fetched.text, "原始文本");
     }

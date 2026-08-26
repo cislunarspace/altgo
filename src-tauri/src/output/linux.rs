@@ -2,6 +2,11 @@
 //!
 //! 剪切板支持三种后端：`xclip`、`xsel`、`wl-copy`（Wayland）。
 //! 根据 `XDG_SESSION_TYPE` 自动检测可用工具。
+//!
+//! Linux output module.
+//!
+//! The clipboard has three supported backends: `xclip`, `xsel`, and `wl-copy` (Wayland). Available
+//! tools are auto-detected from `XDG_SESSION_TYPE`.
 
 use std::process::Command;
 use std::sync::Arc;
@@ -9,6 +14,7 @@ use std::sync::Arc;
 use crate::error::OutputError;
 
 /// Linux 上可用的剪切板管理工具。
+/// Clipboard tools available on Linux.
 #[derive(Debug, Clone, Copy)]
 pub enum ClipboardTool {
     XClip,
@@ -27,6 +33,7 @@ impl std::fmt::Display for ClipboardTool {
 }
 
 /// 检测系统上可用的剪切板工具。
+/// Detects the clipboard tools available on this system.
 pub fn detect_clipboard_tool() -> Option<ClipboardTool> {
     let session_type = std::env::var("XDG_SESSION_TYPE").unwrap_or_default();
 
@@ -35,6 +42,7 @@ pub fn detect_clipboard_tool() -> Option<ClipboardTool> {
             return Some(ClipboardTool::WlCopy);
         }
         // Wayland 下没有 wl-copy 时，回退到 xclip/xsel（可能通过 XWayland 工作）
+        // On Wayland without wl-copy, fall back to xclip/xsel (may work through XWayland)
         if which("xclip") {
             return Some(ClipboardTool::XClip);
         }
@@ -44,6 +52,7 @@ pub fn detect_clipboard_tool() -> Option<ClipboardTool> {
         return None;
     }
 
+    // X11 或未指定：优先 xclip，其次 xsel。
     // X11 or unspecified: prefer xclip, then xsel.
     if which("xclip") {
         return Some(ClipboardTool::XClip);
@@ -52,6 +61,7 @@ pub fn detect_clipboard_tool() -> Option<ClipboardTool> {
         return Some(ClipboardTool::XSel);
     }
 
+    // 兜底：检查 wl-copy，防止用户在 Wayland 上但未设置 XDG_SESSION_TYPE。
     // Fallback: check wl-copy in case user is on Wayland without XDG_SESSION_TYPE.
     if which("wl-copy") {
         return Some(ClipboardTool::WlCopy);
@@ -61,6 +71,7 @@ pub fn detect_clipboard_tool() -> Option<ClipboardTool> {
 }
 
 /// 使用指定的剪切板工具写入文本。
+/// Writes text using the given clipboard tool.
 pub fn write_clipboard_with_tool(tool: ClipboardTool, text: &str) -> Result<(), OutputError> {
     let args: Vec<&str> = match tool {
         ClipboardTool::XClip => vec!["-selection", "clipboard"],
@@ -96,11 +107,13 @@ pub fn write_clipboard_with_tool(tool: ClipboardTool, text: &str) -> Result<(), 
     }
 }
 
+/// 检查命令是否存在于 PATH 中。
 /// Check if a command exists in PATH.
 fn which(cmd: &str) -> bool {
     crate::resource::which_binary(cmd).is_some()
 }
 
+/// Linux `Output` 适配器 —— 封装各类剪切板工具。
 /// Linux `Output` adapter — wraps clipboard tools.
 pub struct LinuxOutput {
     tool: Option<ClipboardTool>,

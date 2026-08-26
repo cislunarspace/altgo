@@ -3,6 +3,12 @@
 //! 提供 SenseVoice（sherpa-onnx）模型的注册、下载、切换功能。
 //! 模型存储在 altgo 配置目录的 `models/<name>/` 子目录下，每个模型
 //! 一个目录，内含 `model.int8.onnx` 与 `tokens.txt` 两个文件。
+//!
+//! SenseVoice model management.
+//!
+//! Registers, downloads, and switches SenseVoice (sherpa-onnx) models. Models live under the
+//! altgo config directory at `models/<name>/`, one directory per model containing
+//! `model.int8.onnx` and `tokens.txt`.
 
 use crate::error::ModelError;
 use futures_util::StreamExt;
@@ -15,6 +21,7 @@ use std::sync::OnceLock;
 use std::time::Duration;
 
 /// SenseVoice 模型仓库基址（sherpa-onnx 官方 HF 仓库）。
+/// Base URL of the SenseVoice model repository (the official sherpa-onnx HF repo).
 const MODEL_BASE_URL: &str =
     "https://huggingface.co/csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/resolve/main";
 
@@ -25,13 +32,16 @@ const ENV_MODEL_BASE_URL: &str = "ALTGO_MODEL_BASE_URL";
 const DOWNLOAD_ATTEMPTS: u32 = 3;
 
 /// 主模型文件最小可接受大小（字节）。小于此值视为下载损坏。
+/// Minimum acceptable size of the main model file in bytes; smaller means a corrupted download.
 const MIN_MODEL_FILE_BYTES: u64 = 10 * 1024 * 1024;
 
 /// 国内常用 HF 镜像（与官方路径一致，仅替换域名）。
+/// Common HF mirrors in mainland China (identical paths to the official repo; domain only).
 const HF_MIRROR_BASE_URL: &str =
     "https://hf-mirror.com/csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/resolve/main";
 
 /// 主模型文件名（其余文件为配套资源）。
+/// Main model file name (remaining files are supporting resources).
 const MAIN_MODEL_FILENAME: &str = "model.int8.onnx";
 const TOKENS_FILENAME: &str = "tokens.txt";
 const MAIN_MODEL_SHA256: &str = "c71f0ce00bec95b07744e116345e33d8cbbe08cef896382cf907bf4b51a2cd51";
@@ -61,6 +71,7 @@ fn model_download_client() -> &'static Client {
             .build()
             .unwrap_or_else(|e| {
                 tracing::error!(error = %e, "failed to build model download client");
+                // 回退到默认 client——下载仍可能成功，只是设置不够优。
                 // Fallback to default client — download may still work with less optimal settings.
                 Client::new()
             })
@@ -68,15 +79,19 @@ fn model_download_client() -> &'static Client {
 }
 
 /// 模型内单个文件。
+/// A single file within a model.
 pub struct ModelFile {
     pub filename: &'static str,
     /// 近似大小（用于进度条；与 Content-Length 接近即可）。
+    /// Approximate size (for progress display; close to Content-Length is fine).
     pub size_bytes: u64,
     /// 官方发布文件的 SHA-256，用于识别中断下载和损坏缓存。
+    /// SHA-256 of the official release file, used to spot interrupted downloads and corrupt caches.
     pub sha256: &'static str,
 }
 
 /// 已知模型信息。
+/// Known-model metadata.
 pub struct ModelInfo {
     pub name: &'static str,
     pub files: &'static [ModelFile],
@@ -84,6 +99,8 @@ pub struct ModelInfo {
 }
 
 /// SenseVoice int8：中/英/日/韩/粤自动检测，CPU 实时率远高于 whisper。
+/// SenseVoice int8: auto-detects Chinese/English/Japanese/Korean/Cantonese with far better CPU
+/// real-time performance than whisper.
 const SENSE_VOICE_FILES: &[ModelFile] = &[
     ModelFile {
         filename: MAIN_MODEL_FILENAME,
@@ -108,6 +125,7 @@ pub fn models_info() -> &'static [ModelInfo] {
 }
 
 /// 返回模型存储根目录（`~/.config/altgo/models/` 或 `%APPDATA%/altgo/models/`）。
+/// Returns the model storage root (`~/.config/altgo/models/` or `%APPDATA%/altgo/models/`).
 pub fn models_dir() -> PathBuf {
     dirs::config_dir()
         .unwrap_or_else(|| PathBuf::from("."))
@@ -116,6 +134,7 @@ pub fn models_dir() -> PathBuf {
 }
 
 /// 返回指定模型的目录。
+/// Returns the directory of the given model.
 pub fn model_dir(name: &str) -> PathBuf {
     models_dir().join(name)
 }
@@ -160,16 +179,19 @@ where
 }
 
 /// 内置模型文件是否齐全且校验和匹配官方发布版本。
+/// Whether the built-in model's files are complete and checksums match the official release.
 fn model_files_ready(dir: &Path) -> bool {
     model_files_ready_with(dir, SENSE_VOICE_FILES, model_file_ready)
 }
 
 /// 自定义模型目录是否包含可供 SenseVoice 加载的文件。
+/// Whether a custom model directory holds files loadable by SenseVoice.
 fn custom_model_files_ready(dir: &Path) -> bool {
     model_files_ready_with(dir, SENSE_VOICE_FILES, model_file_structurally_ready)
 }
 
 /// 扫描已下载的模型，返回存在的模型名称列表。
+/// Scans downloaded models, returning the list of names present on disk.
 pub fn list_downloaded() -> Vec<String> {
     let dir = models_dir();
     if !dir.exists() {
@@ -193,6 +215,7 @@ pub fn list_downloaded() -> Vec<String> {
 }
 
 /// 检查指定模型是否已下载。
+/// Checks whether the given model has been downloaded.
 pub fn is_downloaded(name: &str) -> bool {
     MODELS
         .iter()
@@ -202,6 +225,7 @@ pub fn is_downloaded(name: &str) -> bool {
 }
 
 /// 模型列表项（含下载状态），供 IPC 返回给前端。
+/// Model list entry (with download status) returned to the frontend over IPC.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelEntry {
@@ -213,6 +237,7 @@ pub struct ModelEntry {
 }
 
 /// 返回所有已知模型及下载状态。
+/// Returns every known model plus its download status.
 pub fn list_all_with_status() -> Vec<ModelEntry> {
     models_info()
         .iter()
@@ -227,6 +252,7 @@ pub fn list_all_with_status() -> Vec<ModelEntry> {
 }
 
 /// 校验模型名是否在已知模型列表中。
+/// Validates that a model name is among the known models.
 pub fn validate_name(name: &str) -> Result<(), ModelError> {
     if models_info().iter().any(|m| m.name == name) {
         Ok(())
@@ -236,6 +262,7 @@ pub fn validate_name(name: &str) -> Result<(), ModelError> {
 }
 
 /// 删除指定根目录下的模型目录。
+/// Removes a model directory under the given root.
 fn delete_from_root(name: &str, root: &Path) -> Result<(), ModelError> {
     validate_name(name)?;
     let path = root.join(name);
@@ -246,6 +273,7 @@ fn delete_from_root(name: &str, root: &Path) -> Result<(), ModelError> {
 }
 
 /// 删除指定模型的本地目录。
+/// Removes the local directory of the given model.
 pub fn delete(name: &str) -> Result<(), ModelError> {
     delete_from_root(name, &models_dir())
 }
@@ -255,11 +283,19 @@ pub fn delete(name: &str) -> Result<(), ModelError> {
 /// 如果 `config_model` 是模型名称（如 "sense-voice"），返回已下载的模型目录。
 /// 如果是目录路径，直接返回；如果是 `.onnx` 文件路径，返回其父目录。
 /// 如果为空或目录不完整，返回 None。
+///
+/// Resolves the configured model value into a model directory (containing `model.int8.onnx`
+/// and `tokens.txt`).
+///
+/// If `config_model` is a model name (e.g. "sense-voice"), returns its downloaded directory.
+/// Directory paths pass through as-is; `.onnx` file paths resolve to their parent. Empty values
+/// or incomplete directories yield `None`.
 pub fn resolve_model_dir(config_model: &str) -> Option<PathBuf> {
     if config_model.is_empty() {
         return None;
     }
 
+    // 是模型名吗？
     // Check if it's a model name.
     if MODELS.iter().any(|m| m.name == config_model) {
         let dir = model_dir(config_model);
@@ -269,12 +305,14 @@ pub fn resolve_model_dir(config_model: &str) -> Option<PathBuf> {
         return None;
     }
 
+    // 是目录路径吗？
     // Check if it's a directory path.
     let path = Path::new(config_model);
     if path.is_dir() && custom_model_files_ready(path) {
         return Some(path.to_path_buf());
     }
 
+    // 是直接的 .onnx 文件路径吗？
     // Check if it's a direct .onnx file path.
     if path.is_file() && path.file_name().is_some_and(|n| n == MAIN_MODEL_FILENAME) {
         if let Some(parent) = path.parent() {
@@ -290,6 +328,10 @@ pub fn resolve_model_dir(config_model: &str) -> Option<PathBuf> {
 /// 下载指定模型（全部文件），通过回调报告进度。
 ///
 /// `on_progress` 参数为 `(downloaded_bytes, total_bytes)`，跨文件累计。
+///
+/// Downloads all files of the given model, reporting progress via callback.
+///
+/// The `on_progress` arguments are `(downloaded_bytes, total_bytes)`, accumulated across files.
 pub async fn download_with_progress<F>(name: &str, on_progress: F) -> Result<PathBuf, ModelError>
 where
     F: FnMut(u64, u64),
@@ -481,6 +523,7 @@ where
     Ok(())
 }
 
+/// 把字节数格式化为人类可读的大小。
 /// Format bytes as human-readable size.
 #[cfg(test)]
 fn format_size(bytes: u64) -> String {
@@ -553,6 +596,7 @@ mod tests {
     fn test_resolve_model_dir_incomplete_dir() {
         let dir = tempfile::tempdir().unwrap();
         // 只有 tokens.txt 没有主模型 → 视为未下载
+        // tokens.txt without the main model → treat as not downloaded
         std::fs::write(dir.path().join("tokens.txt"), b"tok").unwrap();
         assert!(resolve_model_dir(dir.path().to_str().unwrap()).is_none());
     }
@@ -641,6 +685,7 @@ mod tests {
         assert_eq!(entries.len(), models_info().len());
         assert!(entries.iter().any(|e| e.name == "sense-voice"));
         // 主模型文件名应暴露给前端展示
+        // The main model filename should be exposed for frontend display
         assert!(entries.iter().all(|e| e.filename == MAIN_MODEL_FILENAME));
     }
 
@@ -707,6 +752,7 @@ mod tests {
             let calls = progress_calls.lock().unwrap();
             assert!(!calls.is_empty());
             // total 恒为声明总大小；进度按实际下载字节累计
+            // total stays the declared total; progress accumulates actual downloaded bytes
             let total = calls.last().unwrap().1;
             assert_eq!(
                 total,
@@ -851,6 +897,8 @@ mod tests {
         .await;
 
         // mockito 同名 mock 按创建顺序匹配，只要最终成功即可验证重试语义。
+        // mockito matches same-named mocks in creation order; eventual success is enough to
+        // verify retry semantics.
         assert!(result.is_ok());
         assert_eq!(
             std::fs::metadata(result.unwrap().join(MAIN_MODEL_FILENAME))
@@ -875,6 +923,7 @@ mod tests {
         std::fs::write(dest_dir.join(TOKENS_FILENAME), tokens_payload).unwrap();
 
         // 全部文件已存在：即使下载源不可达也应直接成功
+        // All files already exist: must succeed even when the download source is unreachable
         let result = download_model_with_progress_to(
             &info,
             vec!["http://127.0.0.1:1".to_string()],

@@ -161,6 +161,7 @@ export default function HistoryPage() {
       markCopied();
       return;
     } catch {
+      // 后端剪贴板（xclip 等）可能失败；从点击手势内改试 WebView API。
       // Backend clipboard (xclip / etc.) may fail; try WebView API from the click gesture.
     }
     try {

@@ -52,8 +52,8 @@ describe("Overlay 相位转换", () => {
     emitPhase("processing");
     expect(container.textContent).toContain("overlay.transcribing");
 
-    // 生产端修复后 result 先于 done 到达；即使乱序到达，前端也应继续
-    // 显示 processing 视图，而不是渲染没有任何内容的空 pill（闪烁）。
+    // 生产端契约是 result 先于 done；即使乱序到达，前端也应继续显示
+    // processing 视图，而不是渲染没有任何内容的空 pill（闪烁）。
     emitPhase("done");
     act(() => {
       vi.advanceTimersByTime(250);
@@ -143,7 +143,7 @@ describe("Overlay 相位转换", () => {
     expect(trace.querySelectorAll(".trace-bar").length).toBe(2);
   });
 
-  it("result 先于 done 到达（修复后的顺序）时正常显示结果", () => {
+  it("result 先于 done 到达时正常显示结果", () => {
     const { container } = render(<Overlay />);
     emitPhase("processing");
     emitResult("你好，世界");

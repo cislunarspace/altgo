@@ -8,6 +8,18 @@
 //! 浮窗物理操作由 `OverlaySink` trait 注入（本模块只描述阶段意图）；
 //! 框架事件发射由 `PipelineEventEmitter` trait 注入，方便测试注入 fake，
 //! 无需构造真实 Wry app。
+//!
+//! Tauri pipeline event sink implementation.
+//!
+//! Forwards pipeline events into Tauri events and overlay state switches: the sink only emits and
+//! switches states, holding no business dependencies like `Output` / `HistoryStore`.
+//!
+//! Clipboard-write and history-append business is injected through the
+//! `voice_pipeline::TranscriptionDispatch` trait (this module never calls
+//! `process_transcription_result` directly); physical overlay operations are injected through the
+//! `OverlaySink` trait (this module only describes phase intent); framework event emission is
+//! injected through the `PipelineEventEmitter` trait, so tests can plug in fakes without building
+//! a real Wry app.
 
 use std::sync::Arc;
 use tauri::Emitter;
@@ -24,6 +36,12 @@ use crate::{
 /// `TauriPipelineSink` 把全部 `app.emit(...)` 操作收敛到这里，
 /// 生产环境由 `TauriEventEmitter` 转发给 `tauri::AppHandle`，
 /// 测试环境注入 `MockEmitter` 即可断言事件内容与顺序。
+///
+/// Pipeline event emission seam.
+///
+/// `TauriPipelineSink` funnels all `app.emit(...)` calls through here: production forwards them to
+/// `tauri::AppHandle` via `TauriEventEmitter`, while tests inject a `MockEmitter` and assert on
+/// event content and ordering.
 pub trait PipelineEventEmitter: Send + Sync + 'static {
     fn emit_pipeline_status(&self, status: &str);
     fn emit_pipeline_error(&self, message: &str);
@@ -36,6 +54,7 @@ pub trait PipelineEventEmitter: Send + Sync + 'static {
 }
 
 /// 生产实现：把事件转发给 Tauri 前端。
+/// Production implementation: forwards events to the Tauri frontend.
 pub struct TauriEventEmitter {
     app: tauri::AppHandle,
 }
@@ -98,6 +117,11 @@ fn emit_pipeline_status(
 ///
 /// 只持有 `dispatch: Arc<dyn TranscriptionDispatch>` 与 overlay / emitter 抽象，
 /// 业务侧由调用方在构造时一次性注入。
+///
+/// Tauri pipeline event sink — turns pipeline events into Tauri events plus overlay state switches.
+///
+/// Holds only `dispatch: Arc<dyn TranscriptionDispatch>` plus the overlay/emitter abstractions;
+/// the business side is injected once by the caller at construction.
 pub struct TauriPipelineSink {
     emitter: Arc<dyn PipelineEventEmitter>,
     pipeline_status: Arc<std::sync::RwLock<PipelineStatus>>,
@@ -131,6 +155,10 @@ impl PipelineSink for TauriPipelineSink {
         // 通过 OverlaySink 统一设置悬浮窗状态 —— 一次性 emit + resize + position + show/hide。
         // recording/processing/idle/stopped 各自映射到一个 overlay 阶段；
         // Done 不在此驱动（done 浮窗由转写完成路径异步设置）。
+        // Sets the overlay state uniformly through OverlaySink—one emit + resize + position + show/hide.
+        // recording/processing/idle/stopped each map onto one overlay phase;
+        // Done is not driven here (the done overlay is set asynchronously by the transcription-
+        // completion path).
         let overlay_state = match status {
             PipelineStatus::Recording => OverlayState::recording(),
             PipelineStatus::Processing => OverlayState::processing(),
@@ -170,6 +198,8 @@ impl PipelineSink for TauriPipelineSink {
 
                     // 润色失败先于结果文本告知前端，让悬浮窗在 done 阶段能同时
                     // 展示「已回退原文」提示。
+                    // The polish failure reaches the frontend before the result text, letting the done overlay
+                    // also show the "fell back to raw text" hint.
                     if output_clone.polish_failed {
                         emitter.emit_polish_failed(
                             output_clone
@@ -181,9 +211,12 @@ impl PipelineSink for TauriPipelineSink {
 
                     // 先送结果文本再切 done：前端收到 done 时若还没有结果，
                     // 会渲染出空 island（闪烁）。
+                    // Result text goes before switching to done: if done arrived without a result, the frontend
+                    // would render an empty island (flicker).
                     emitter.emit_transcription_result(&res.text);
 
                     // 通过 OverlaySink 切换到 done 状态
+                    // Switch to the done state through OverlaySink
                     overlay.set_state(OverlayState::done());
                 }
                 None => {
@@ -207,7 +240,9 @@ impl PipelineSink for TauriPipelineSink {
 }
 
 // 测试通过注入 `PipelineEventEmitter` fake 来验证事件内容与顺序，
-// 不再依赖真实 Wry app，因此可在 Linux 的 `cargo test --lib` 下直接运行。
+// 不依赖真实 Wry app，可在 Linux 的 `cargo test --lib` 下直接运行。
+// Tests inject a `PipelineEventEmitter` fake to verify event content and ordering. No real Wry
+// app needed; runs directly under Linux `cargo test --lib`.
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -219,9 +254,11 @@ mod tests {
 
     // -----------------------------------------------------------------------
     // Test doubles
+    // Test doubles（测试替身）
     // -----------------------------------------------------------------------
 
     /// Mock `TranscriptionDispatch`：可预设返回结果。
+    /// Mock `TranscriptionDispatch` with presettable outcomes.
     struct MockDispatch {
         outcome: Option<DispatchOutcome>,
     }
@@ -236,6 +273,7 @@ mod tests {
         }
     }
 
+    /// Mock `OverlaySink`，记录每一次 `set_state` 调用。
     /// Mock `OverlaySink` that records every `set_state` call.
     struct MockOverlay {
         states: Mutex<Vec<OverlayState>>,
@@ -260,6 +298,7 @@ mod tests {
     }
 
     /// 一次记录的事件调用。
+    /// One recorded event invocation.
     #[derive(Debug, Clone, PartialEq)]
     enum EmittedEvent {
         PipelineStatus(String),
@@ -276,6 +315,7 @@ mod tests {
     }
 
     /// Mock `PipelineEventEmitter`：把每次调用按顺序记录下来。
+    /// Mock `PipelineEventEmitter`, recording every call in order.
     struct MockEmitter {
         events: Mutex<Vec<EmittedEvent>>,
     }
@@ -396,6 +436,7 @@ mod tests {
 
     // -----------------------------------------------------------------------
     // on_status_change 测试
+    // on_status_change tests
     // -----------------------------------------------------------------------
 
     #[test]
@@ -435,6 +476,7 @@ mod tests {
 
         assert_eq!(*fx.status.read().unwrap(), PipelineStatus::Done);
         // Done 不在此驱动 overlay（done 浮窗由转写完成路径异步设置）
+        // Done does not drive the overlay here (done overlay set async by the completion path)
         assert!(fx.overlay.recorded_states().is_empty());
         assert_eq!(
             fx.emitter.recorded_events(),
@@ -474,6 +516,7 @@ mod tests {
 
     // -----------------------------------------------------------------------
     // on_error 测试
+    // on_error tests
     // -----------------------------------------------------------------------
 
     #[test]
@@ -493,12 +536,14 @@ mod tests {
 
     // -----------------------------------------------------------------------
     // on_transcription_result 测试
+    // on_transcription_result tests
     // -----------------------------------------------------------------------
 
     #[test]
     fn on_transcription_result_empty_raw_text_resets_to_idle() {
         let fx = make_fixture(true, None);
 
+        // 先把状态设为非 idle，才能观察到复位。
         // Set status to something non-idle first so we can observe the reset.
         *fx.status.write().unwrap() = PipelineStatus::Recording;
 
@@ -509,6 +554,7 @@ mod tests {
             polish_error: None,
         });
 
+        // 同步提前返回：状态必须被复位为 Idle。
         // Synchronous early-return: status must be reset to Idle.
         assert_eq!(*fx.status.read().unwrap(), PipelineStatus::Idle);
         assert_eq!(
@@ -536,6 +582,8 @@ mod tests {
 
         // spawned 任务跑在 tauri::async_runtime 的全局 runtime 上，
         // 与 #[tokio::test] 的 runtime 不同；轮询等待它完成。
+        // The spawned task runs on tauri::async_runtime's global runtime, distinct from #[tokio::test]'s;
+        // poll until it completes.
         for _ in 0..100 {
             if fx.emitter.recorded_events().len() >= 3 {
                 break;
@@ -551,6 +599,8 @@ mod tests {
 
         // 真实代码顺序：history-updated → pipeline-status(Done) → transcription-result(text)
         // 先送文本再切 done，前端收到 done 时已有结果，避免空 island 闪烁。
+        // Real code order: history-updated → pipeline-status(Done) → transcription-result(text).
+        // Text precedes the done switch, so results exist when done lands—no empty-island flicker.
         assert_eq!(
             fx.emitter.recorded_events(),
             vec![
@@ -586,6 +636,7 @@ mod tests {
         }
 
         // 失败事件先于结果文本，悬浮窗 done 阶段可同时展示回退提示。
+        // Failure event precedes result text; the done overlay can show the fallback hint alongside.
         assert_eq!(
             fx.emitter.recorded_events(),
             vec![
@@ -599,6 +650,7 @@ mod tests {
 
     // -----------------------------------------------------------------------
     // on_progress 测试
+    // on_progress tests
     // -----------------------------------------------------------------------
 
     #[test]
@@ -644,6 +696,7 @@ mod tests {
 
     // -----------------------------------------------------------------------
     // on_key_listener_backend 测试
+    // on_key_listener_backend tests
     // -----------------------------------------------------------------------
 
     #[test]

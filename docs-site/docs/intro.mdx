@@ -4,9 +4,15 @@ slug: /
 
 # altgo 文档
 
-欢迎使用 **altgo**：基于 **Tauri + React + Rust** 的 Linux 语音转文字桌面应用，支持 **x86_64** 与 **aarch64** 架构（主要在 **Ubuntu 22.04** 上验证）。
+欢迎使用 **altgo**：基于 **Tauri + React + Rust** 的语音转文字桌面应用，支持 **Linux**（Ubuntu 22.04+，x86_64 与 aarch64）与 **Windows 10+**（x86_64 与 arm64）。
 
 按住触发键（默认**右 Alt**）说话，松开后在本地用 **SenseVoice**（内嵌 sherpa-onnx）转写，并可选用 **OpenAI 兼容 API** 做 LLM 润色。转写成功后会**尝试写入系统剪贴板**，同时用**悬浮窗**展示结果，方便核对或在剪贴板失败时手动复制。
+
+# altgo Documentation
+
+Welcome to **altgo**: a voice-to-text desktop app built on **Tauri + React + Rust**, supporting **Linux** (Ubuntu 22.04+, x86_64 and aarch64) and **Windows 10+** (x86_64 and arm64).
+
+Hold the trigger key (**right Alt** by default) to speak; on release, transcription runs locally with **SenseVoice** (embedded sherpa-onnx), optionally followed by LLM polishing via an **OpenAI-compatible API**. After successful transcription the result is **copied to the system clipboard** when possible, and shown in an **overlay window** for easy verification or manual copying if clipboard access fails.
 
 ---
 
@@ -35,7 +41,7 @@ slug: /
 <a href="/docs/architecture" className="doc-nav-card">
   <div className="doc-nav-icon">🏗️</div>
   <h3>架构设计</h3>
-  <p>模块结构、状态机与 Linux 平台策略</p>
+  <p>模块结构、状态机与平台策略</p>
 </a>
 
 <a href="/docs/faq" className="doc-nav-card">
@@ -52,6 +58,8 @@ slug: /
 
 </div>
 
+## Quick Navigation
+
 ---
 
 ## 核心特性一览
@@ -63,4 +71,15 @@ slug: /
 | **本地 ASR** | SenseVoice 离线转写，无需 API 密钥 |
 | **LLM 润色** | 四档强度，支持多种 Provider |
 | **剪贴板 + 悬浮窗** | 自动写入剪贴板，悬浮窗可二次复制 |
-| **平台支持** | Linux（X11 / Wayland，x86_64 / aarch64） |
+| **平台支持** | Linux（X11 / Wayland，x86_64 / aarch64）；Windows 10+（x86_64 / arm64） |
+
+## Key Features at a Glance
+
+| Feature | Description |
+|------|------|
+| **Hold to record** | Hold right Alt to speak; release to transcribe automatically |
+| **Continuous mode** | Double-click to enter continuous recording, ideal for long speeches |
+| **Local ASR** | Offline SenseVoice transcription, no API key required |
+| **LLM polishing** | Four strength levels, multiple providers supported |
+| **Clipboard + overlay** | Auto-copies to the clipboard; the overlay window allows re-copying |
+| **Platform support** | Linux (X11 / Wayland, x86_64 / aarch64); Windows 10+ (x86_64 / arm64) |

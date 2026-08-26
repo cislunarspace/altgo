@@ -3,6 +3,7 @@ import clsx from 'clsx';
 import Link from '@docusaurus/Link';
 import useDocusaurusContext from '@docusaurus/useDocusaurusContext';
 import Layout from '@theme/Layout';
+import Translate, {translate} from '@docusaurus/Translate';
 import {
   Mic,
   Infinity,
@@ -16,50 +17,68 @@ import {
 } from 'lucide-react';
 import styles from './index.module.css';
 
-const features = [
-  {
-    icon: Mic,
-    title: '长按即录',
-    description: '按住右 Alt 说话，松开即转写。无需切换窗口，不打断工作流。',
-  },
-  {
-    icon: Infinity,
-    title: '连续模式',
-    description: '双击进入连续录音，适合长篇发言或会议记录。单击停止。',
-  },
-  {
-    icon: Brain,
-    title: '本地 SenseVoice 转写',
-    description: 'SenseVoice 本地转写完全断网可用。',
-  },
-  {
-    icon: Sparkles,
-    title: 'LLM 润色',
-    description: '四档润色强度，支持 OpenAI / DeepSeek / Anthropic / Ollama。',
-  },
-  {
-    icon: Monitor,
-    title: 'Linux 原生',
-    description: '支持 X11 / Wayland，通过子进程集成系统工具，构建简单。',
-  },
-  {
-    icon: ClipboardCopy,
-    title: '剪贴板 + 悬浮窗',
-    description: '转写成功后写入剪贴板并弹出悬浮窗；可核对文本或再次复制。',
-  },
-];
-
-const screenshots = [
-  { src: '/altgo/img/screenshot-main.png', alt: '主界面' },
-  { src: '/altgo/img/screenshot-home.png', alt: '首页转写中' },
-  { src: '/altgo/img/screenshot-overlay.png', alt: '悬浮窗' },
-  { src: '/altgo/img/screenshot-settings.png', alt: '设置页面' },
-  { src: '/altgo/img/screenshot-history.png', alt: '转录历史' },
-];
-
 export default function Home(): JSX.Element {
   const { siteConfig } = useDocusaurusContext();
   const [activeShot, setActiveShot] = React.useState(0);
+
+  const features = [
+    {
+      icon: Mic,
+      title: translate({id: 'home.feature.hold.title', message: '长按即录'}),
+      description: translate({
+        id: 'home.feature.hold.description',
+        message: '按住右 Alt 说话，松开即转写。无需切换窗口，不打断工作流。',
+      }),
+    },
+    {
+      icon: Infinity,
+      title: translate({id: 'home.feature.continuous.title', message: '连续模式'}),
+      description: translate({
+        id: 'home.feature.continuous.description',
+        message: '双击进入连续录音，适合长篇发言或会议记录。单击停止。',
+      }),
+    },
+    {
+      icon: Brain,
+      title: translate({id: 'home.feature.local.title', message: '本地 SenseVoice 转写'}),
+      description: translate({
+        id: 'home.feature.local.description',
+        message: 'SenseVoice 本地转写完全断网可用。',
+      }),
+    },
+    {
+      icon: Sparkles,
+      title: translate({id: 'home.feature.polish.title', message: 'LLM 润色'}),
+      description: translate({
+        id: 'home.feature.polish.description',
+        message: '四档润色强度，支持 OpenAI / DeepSeek / Anthropic / Ollama。',
+      }),
+    },
+    {
+      icon: Monitor,
+      title: translate({id: 'home.feature.linux.title', message: 'Linux 原生'}),
+      description: translate({
+        id: 'home.feature.linux.description',
+        message: '支持 X11 / Wayland，通过子进程集成系统工具，构建简单。',
+      }),
+    },
+    {
+      icon: ClipboardCopy,
+      title: translate({id: 'home.feature.clipboard.title', message: '剪贴板 + 悬浮窗'}),
+      description: translate({
+        id: 'home.feature.clipboard.description',
+        message: '转写成功后写入剪贴板并弹出悬浮窗；可核对文本或再次复制。',
+      }),
+    },
+  ];
+
+  const screenshots = [
+    {src: '/altgo/img/screenshot-main.png', alt: translate({id: 'home.screenshot.main', message: '主界面'})},
+    {src: '/altgo/img/screenshot-home.png', alt: translate({id: 'home.screenshot.home', message: '首页转写中'})},
+    {src: '/altgo/img/screenshot-overlay.png', alt: translate({id: 'home.screenshot.overlay', message: '悬浮窗'})},
+    {src: '/altgo/img/screenshot-settings.png', alt: translate({id: 'home.screenshot.settings', message: '设置页面'})},
+    {src: '/altgo/img/screenshot-history.png', alt: translate({id: 'home.screenshot.history', message: '转录历史'})},
+  ];
 
   React.useEffect(() => {
     const timer = setInterval(() => {
@@ -69,7 +88,10 @@ export default function Home(): JSX.Element {
   }, []);
 
   return (
-    <Layout title={siteConfig.title} description={siteConfig.tagline}>
+    <Layout
+      title={siteConfig.title}
+      description={translate({id: 'home.meta.description', message: '无需打字，言出法随'})}
+    >
       {/* ─── Hero ─── */}
       <header className={styles.heroBanner}>
         <div className={styles.heroGlow} />
@@ -77,17 +99,27 @@ export default function Home(): JSX.Element {
         <div className={clsx('container', styles.heroInner)}>
           <div className={styles.heroBadge}>
             <span className={styles.heroBadgeDot} />
-            Linux 语音转文字桌面工具
+            <Translate id="home.hero.badge">Linux 语音转文字桌面工具</Translate>
           </div>
           <h1 className={styles.heroTitle}>
-            无需打字
+            <Translate id="home.hero.title.line1">无需打字</Translate>
             <br />
-            <span className={styles.heroTitleAccent}>言出法随</span>
+            <span className={styles.heroTitleAccent}>
+              <Translate id="home.hero.title.line2">言出法随</Translate>
+            </span>
           </h1>
           <p className={styles.heroTagline}>
-            基于 Tauri + React + Rust 的语音转文字应用。
+            <Translate
+              id="home.hero.tagline.line1"
+              description="hero tagline, first line">
+              基于 Tauri + React + Rust 的语音转文字应用。
+            </Translate>
             <br />
-            按住 Alt 说话，松开后在本地用 SenseVoice 转写，可接入 LLM 润色。
+            <Translate
+              id="home.hero.tagline.line2"
+              description="hero tagline, second line">
+              按住 Alt 说话，松开后在本地用 SenseVoice 转写，可接入 LLM 润色。
+            </Translate>
           </p>
           <div className={styles.buttons}>
             <Link
@@ -95,14 +127,14 @@ export default function Home(): JSX.Element {
               to="/docs/quick-start"
             >
               <Download size={18} />
-              快速开始
+              <Translate id="home.cta.quickStart">快速开始</Translate>
             </Link>
             <Link
               className={clsx('button', styles.btnSecondary)}
               to="/docs/usage"
             >
               <BookOpen size={18} />
-              使用说明
+              <Translate id="home.cta.usage">使用说明</Translate>
             </Link>
             <Link
               className={clsx('button', styles.btnGhost)}
@@ -141,7 +173,10 @@ export default function Home(): JSX.Element {
                     i === activeShot && styles.showcaseDotActive
                   )}
                   onClick={() => setActiveShot(i)}
-                  aria-label={`查看截图 ${i + 1}`}
+                  aria-label={translate(
+                    {id: 'home.screenshot.viewN', message: '查看截图 {n}'},
+                    {n: i + 1},
+                  )}
                 />
               ))}
             </div>
@@ -153,30 +188,40 @@ export default function Home(): JSX.Element {
         {/* ─── How it works ─── */}
         <section className={styles.howItWorks}>
           <div className="container">
-            <p className={styles.sectionKicker}>三步上手</p>
-            <h2 className={styles.sectionTitle}>简单到不需要教程</h2>
+            <p className={styles.sectionKicker}>
+              <Translate id="home.steps.kicker">三步上手</Translate>
+            </p>
+            <h2 className={styles.sectionTitle}>
+              <Translate id="home.steps.title">简单到不需要教程</Translate>
+            </h2>
             <div className={styles.steps}>
               <div className={styles.step}>
                 <div className={styles.stepNum}>1</div>
-                <h3>安装并设置</h3>
+                <h3><Translate id="home.steps.install.title">安装并设置</Translate></h3>
                 <p>
-                  下载 deb / rpm 安装包，在设置中下载 SenseVoice 模型。
+                  <Translate id="home.steps.install.description">
+                    下载 deb / rpm 安装包，在设置中下载 SenseVoice 模型。
+                  </Translate>
                 </p>
               </div>
               <ArrowRight className={styles.stepArrow} size={24} />
               <div className={styles.step}>
                 <div className={styles.stepNum}>2</div>
-                <h3>按住 Alt 说话</h3>
+                <h3><Translate id="home.steps.speak.title">按住 Alt 说话</Translate></h3>
                 <p>
-                  长按右 Alt 开始录音，松开自动转写；双击进入连续模式。
+                  <Translate id="home.steps.speak.description">
+                    长按右 Alt 开始录音，松开自动转写；双击进入连续模式。
+                  </Translate>
                 </p>
               </div>
               <ArrowRight className={styles.stepArrow} size={24} />
               <div className={styles.step}>
                 <div className={styles.stepNum}>3</div>
-                <h3>粘贴使用</h3>
+                <h3><Translate id="home.steps.paste.title">粘贴使用</Translate></h3>
                 <p>
-                  转写结果自动写入剪贴板，悬浮窗同步展示，随时可再次复制。
+                  <Translate id="home.steps.paste.description">
+                    转写结果自动写入剪贴板，悬浮窗同步展示，随时可再次复制。
+                  </Translate>
                 </p>
               </div>
             </div>
@@ -186,8 +231,12 @@ export default function Home(): JSX.Element {
         {/* ─── Features ─── */}
         <section className={styles.features}>
           <div className="container">
-            <p className={styles.sectionKicker}>功能特点</p>
-            <h2 className={styles.sectionTitle}>为你设计的细节体验</h2>
+            <p className={styles.sectionKicker}>
+              <Translate id="home.features.kicker">功能特点</Translate>
+            </p>
+            <h2 className={styles.sectionTitle}>
+              <Translate id="home.features.title">为你设计的细节体验</Translate>
+            </h2>
             <div className={styles.featureGrid}>
               {features.map((f) => {
                 const Icon = f.icon;
@@ -209,22 +258,27 @@ export default function Home(): JSX.Element {
         <section className={styles.cta}>
           <div className="container">
             <div className={styles.ctaBox}>
-              <h2 className={styles.ctaTitle}>准备好提升输入效率了吗？</h2>
+              <h2 className={styles.ctaTitle}>
+                <Translate id="home.cta.finalTitle">准备好提升输入效率了吗？</Translate>
+              </h2>
               <p className={styles.ctaSubtitle}>
-                30 秒安装，永久改变你的输入方式
+                <Translate id="home.cta.finalSubtitle">
+                  30 秒安装，永久改变你的输入方式
+                </Translate>
               </p>
               <div className={styles.buttons}>
                 <Link
                   className={clsx('button', styles.btnPrimary)}
                   to="/docs/quick-start"
                 >
-                  快速开始 <ArrowRight size={18} />
+                  <Translate id="home.cta.quickStart">快速开始</Translate>{' '}
+                  <ArrowRight size={18} />
                 </Link>
                 <Link
                   className={clsx('button', styles.btnGhost)}
                   href="https://github.com/cislunarspace/altgo/releases"
                 >
-                  下载最新版
+                  <Translate id="home.cta.download">下载最新版</Translate>
                 </Link>
               </div>
             </div>

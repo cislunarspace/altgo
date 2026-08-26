@@ -2,10 +2,15 @@
 //!
 //! Provides user-facing error messages (Chinese) and distinguishes
 //! between fatal errors (stop pipeline) and recoverable errors (degrade gracefully).
+//!
+//! altgo 流水线的结构化错误类型。
+//!
+//! 提供面向用户的错误消息（中文），并区分致命错误（停管道）与可恢复错误（降级继续）。
 
 use std::path::PathBuf;
 
 /// Top-level pipeline error with fatal/recoverable distinction.
+/// 顶层流水线错误，区分致命 / 可恢复两类。
 #[derive(Debug, thiserror::Error)]
 pub enum PipelineError {
     #[error("{0}")]
@@ -27,17 +32,22 @@ impl PipelineError {
     /// Wrap a `TranscriberError` as a fatal `TranscriberInitFailed` (for
     /// construction-time failures) or as a recoverable `TranscriptionFailed`
     /// (for runtime failures). Callers choose which via this method.
+    /// 把 `TranscriberError` 包装为致命的 `TranscriberInitFailed`（构造期失败）
+    /// 或可恢复的 `TranscriptionFailed`（运行期失败）。调用方经由该方法选择。
     pub fn fatal_transcriber(e: TranscriberError) -> Self {
         Self::Fatal(FatalError::TranscriberInitFailed(e))
     }
 
     /// Wrap a `PolisherError` as a fatal `PolisherInitFailed` (for construction
     /// time) or as a recoverable `PolishingFailed` (for runtime failures).
+    /// 把 `PolisherError` 包装为致命的 `PolisherInitFailed`（构造期）
+    /// 或可恢复的 `PolishingFailed`（运行期）。
     pub fn fatal_polisher(e: PolisherError) -> Self {
         Self::Fatal(FatalError::PolisherInitFailed(e))
     }
 
     /// Returns a user-facing error message in Chinese.
+    /// 返回面向用户的中文错误消息。
     pub fn message(&self) -> String {
         match self {
             Self::Fatal(e) => e.message(),
@@ -47,6 +57,7 @@ impl PipelineError {
 }
 
 /// Fatal errors that should stop the pipeline.
+/// 应终止流水线的致命错误。
 #[derive(Debug, thiserror::Error)]
 pub enum FatalError {
     #[error("Model not found: {model}")]
@@ -97,6 +108,7 @@ impl FatalError {
 }
 
 /// Recoverable errors that allow graceful degradation.
+/// 允许优雅降级的可恢复错误。
 #[derive(Debug, thiserror::Error)]
 pub enum RecoverableError {
     #[error("Transcription failed: {0}")]
@@ -124,6 +136,7 @@ impl RecoverableError {
 }
 
 /// Transcriber-specific errors.
+/// 转写器专属错误。
 #[derive(Debug, thiserror::Error)]
 pub enum TranscriberError {
     #[error("Empty audio data")]
@@ -147,6 +160,7 @@ impl TranscriberError {
 }
 
 /// Polisher-specific errors.
+/// 润色器专属错误。
 #[derive(Debug, thiserror::Error)]
 pub enum PolisherError {
     #[error("Unknown protocol: {protocol}")]
@@ -205,6 +219,7 @@ impl PolisherError {
 }
 
 /// Recorder-specific errors.
+/// 录音器专属错误。
 #[derive(Debug, thiserror::Error)]
 pub enum RecorderError {
     #[error("Failed to start recording: {0}")]
@@ -231,11 +246,8 @@ impl RecorderError {
     }
 }
 
-// Conversion from anyhow::Error for gradual migration was removed: modules now
-// return typed errors directly (TranscriberError, PolisherError, RecorderError)
-// and the pipeline aggregates them at the boundary.
-
 /// Output (clipboard) errors.
+/// 输出（剪贴板）错误。
 #[derive(Debug, thiserror::Error)]
 pub enum OutputError {
     #[error("no clipboard tool found")]
@@ -246,6 +258,7 @@ pub enum OutputError {
 }
 
 /// Key listener errors.
+/// 按键监听器错误。
 #[derive(Debug, thiserror::Error)]
 pub enum KeyListenerError {
     #[error("key listener tool not found: {0}")]
@@ -265,6 +278,7 @@ pub enum KeyListenerError {
 }
 
 /// Model management errors.
+/// 模型管理错误。
 #[derive(Debug, thiserror::Error)]
 pub enum ModelError {
     #[error("unknown model: {0}")]
@@ -281,6 +295,7 @@ pub enum ModelError {
 }
 
 /// Configuration errors.
+/// 配置错误。
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
     #[error("I/O error: {0}")]
@@ -297,6 +312,7 @@ pub enum ConfigError {
 }
 
 /// History store errors.
+/// 历史记录存储错误。
 #[derive(Debug, thiserror::Error)]
 pub enum HistoryError {
     #[error("I/O error: {0}")]

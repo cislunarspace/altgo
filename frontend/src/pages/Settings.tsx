@@ -137,6 +137,8 @@ export default function Settings() {
   };
 
   // 用表单当前值直接测试（密钥留空时后端回落到已存密钥），不必先保存。
+  // Test directly with current form values (an empty key falls back to the saved one server-side);
+    // no need to save first.
   const runTestConnection = async () => {
     if (!config) return;
     setTesting(true);
