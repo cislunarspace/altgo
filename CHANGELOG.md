@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Fixes
+
+- **润色思考抑制补全与输出兜底**：DeepSeek、Moonshot/Kimi、z.ai 的模型已默认开启思考，润色延迟凭空多出数秒——这些域名加入「自动关闭思考」抑制表，SiliconFlow 国际站（siliconflow.com）一并覆盖（方言表对齐 zotero-pdf-translate#1464）。同时润色出口统一剥掉响应中混入的 `<think>` 思维链残渣，Anthropic 协议响应取第一个文本块，中转端点混入思考块时不再报错或污染结果。
+
 ## v2.6.9 (2026-08-26)
 
 ### Fixes

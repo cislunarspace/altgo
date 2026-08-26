@@ -158,11 +158,11 @@ model = "qwen2.5:7b"
 
 | 服务商 | 自动附带的参数 |
 |---|---|
-| 通义（dashscope）、SiliconFlow | `enable_thinking: false` |
-| 智谱、火山方舟、MiniMax | `thinking: {"type": "disabled"}` |
+| 通义（dashscope）、SiliconFlow（.cn / .com） | `enable_thinking: false` |
+| 智谱（bigmodel.cn / z.ai）、火山方舟、MiniMax、DeepSeek、Moonshot、Kimi | `thinking: {"type": "disabled"}` |
 | OpenRouter | `reasoning: {"enabled": false}` |
 
-其他服务商（OpenAI、DeepSeek、Anthropic、千帆、Gemini、Ollama）的推荐模型默认不思考，无需处理。注意个别强制思考的模型（如智谱 GLM-5.3）不接受关闭参数，选择预设推荐的模型即可避开。
+其他服务商（OpenAI、Anthropic、千帆、Gemini、Ollama）的推荐模型默认不思考，无需处理。注意个别强制思考的模型（如智谱 GLM-5.3）不接受关闭参数，选择预设推荐的模型即可避开。对未命中上表的中转端点，应用还会在出口剥掉响应中混入的 `<think>` 思维链残渣（Anthropic 协议取第一个文本块），避免其进入剪贴板。
 
 环境变量覆盖密钥：
 

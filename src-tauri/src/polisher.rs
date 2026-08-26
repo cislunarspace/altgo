@@ -312,6 +312,12 @@ fn host_of(url: &str) -> &str {
     authority.split(':').next().unwrap_or("")
 }
 
+/// 判断 host 是否属于某域名（等于该域，或为其子域）。
+/// 边界检查防短域名误命中（如 `notz.ai` 不应命中 `z.ai`）。
+fn host_matches(host: &str, domain: &str) -> bool {
+    host == domain || host.ends_with(&format!(".{domain}"))
+}
+
 /// 按 host 返回「关闭思考」的请求字段。
 ///
 /// 语音润色是轻量文本任务，思考（深度推理）只会增加数秒延迟与 token 花费。
@@ -319,23 +325,66 @@ fn host_of(url: &str) -> &str {
 /// 因此只对已确认接受对应参数的服务商返回字段，其余返回空：
 ///
 /// - 通义（dashscope）/ SiliconFlow：`enable_thinking: false`
-/// - 智谱 / 火山方舟 / MiniMax：`thinking: {"type": "disabled"}`
+/// - 智谱 / z.ai / 火山方舟 / MiniMax / DeepSeek / Moonshot / Kimi：
+///   `thinking: {"type": "disabled"}`
 /// - OpenRouter：`reasoning: {"enabled": false}`
 fn thinking_suppression_fields(host: &str) -> Vec<(&'static str, serde_json::Value)> {
+    const ENABLE_THINKING_HOSTS: &[&str] = &[
+        "dashscope.aliyuncs.com",
+        "siliconflow.cn",
+        "siliconflow.com",
+    ];
+    const THINKING_TYPE_HOSTS: &[&str] = &[
+        "bigmodel.cn",
+        "z.ai",
+        "volces.com",
+        "minimaxi.com",
+        "minimax.io",
+        "deepseek.com",
+        "moonshot.cn",
+        "kimi.com",
+        "kimi.ai",
+    ];
+    const REASONING_HOSTS: &[&str] = &["openrouter.ai"];
+
     let h = host.to_lowercase();
-    if h.ends_with("dashscope.aliyuncs.com") || h.ends_with("siliconflow.cn") {
+    if ENABLE_THINKING_HOSTS.iter().any(|d| host_matches(&h, d)) {
         vec![("enable_thinking", serde_json::json!(false))]
-    } else if h.ends_with("bigmodel.cn")
-        || h.ends_with("volces.com")
-        || h.ends_with("minimaxi.com")
-        || h.ends_with("minimax.io")
-    {
+    } else if THINKING_TYPE_HOSTS.iter().any(|d| host_matches(&h, d)) {
         vec![("thinking", serde_json::json!({ "type": "disabled" }))]
-    } else if h.ends_with("openrouter.ai") {
+    } else if REASONING_HOSTS.iter().any(|d| host_matches(&h, d)) {
         vec![("reasoning", serde_json::json!({ "enabled": false }))]
     } else {
         Vec::new()
     }
+}
+
+/// ASCII 大小写不敏感的字串查找（返回字节下标）。
+fn find_ascii_ci(haystack: &str, needle: &str) -> Option<usize> {
+    haystack
+        .as_bytes()
+        .windows(needle.len())
+        .position(|w| w.eq_ignore_ascii_case(needle.as_bytes()))
+}
+
+/// 剥掉 `<think>…</think>` 块（含截断导致的未闭合块）。
+///
+/// 部分 OpenAI 兼容端点（尤其未命中抑制表的中转站）会把思维链以 think 块
+/// 内联进正文；润色结果不应混入这些残渣。
+pub fn strip_thinking_tags(text: &str) -> String {
+    let mut rest = text;
+    let mut out = String::with_capacity(text.len());
+    while let Some(start) = find_ascii_ci(rest, "<think>") {
+        out.push_str(&rest[..start]);
+        let after = &rest[start + "<think>".len()..];
+        match find_ascii_ci(after, "</think>") {
+            Some(end) => rest = &after[end + "</think>".len()..],
+            // 未闭合块：剥到末尾
+            None => return out,
+        }
+    }
+    out.push_str(rest);
+    out
 }
 
 /// 用给定参数构造临时润色器并发一次最小请求，验证地址、密钥与模型可用。
@@ -576,7 +625,7 @@ impl LLMFormatter {
             .and_then(|s| s.get_prompt(level, &self.language).ok())
             .unwrap_or_else(|| get_system_prompt(level, &self.language));
 
-        retry_with_backoff(self.max_retries, || async {
+        let polished = retry_with_backoff(self.max_retries, || async {
             match self.protocol {
                 protocol::ApiProtocol::OpenAi => {
                     let body = protocol::ChatRequest {
@@ -612,7 +661,10 @@ impl LLMFormatter {
                 }
             }
         })
-        .await
+        .await?;
+        // 未命中抑制表的端点（如中转站）可能把思维链以 <think> 块混进正文，
+        // 润色出口统一剥掉并去除首尾空白，避免污染剪贴板。
+        Ok(strip_thinking_tags(&polished).trim().to_string())
     }
 
     async fn do_openai_request(
@@ -706,11 +758,13 @@ impl LLMFormatter {
             .json()
             .await
             .map_err(|e| PolisherError::JsonError(e.to_string()))?;
+        // 取第一个文本块：响应混入 thinking 块时它在最前（无 text 字段）；
+        // 不填 type 的中转端点按文本块处理。
         anthropic_resp
             .content
             .into_iter()
-            .next()
-            .map(|c| c.text)
+            .find(|b| b.block_type.is_empty() || b.block_type == "text")
+            .and_then(|b| b.text)
             .ok_or(PolisherError::EmptyResponse)
     }
 }
@@ -853,6 +907,8 @@ mod tests {
             "dashscope.aliyuncs.com",
             "api.siliconflow.cn",
             "api.dashscope.aliyuncs.com",
+            "api.siliconflow.com",
+            "cloud.siliconflow.cn",
         ] {
             let fields = thinking_suppression_fields(host);
             assert_eq!(
@@ -864,9 +920,15 @@ mod tests {
         // thinking 系
         for host in [
             "open.bigmodel.cn",
+            "api.z.ai",
+            "z.ai",
             "ark.cn-beijing.volces.com",
             "api.minimaxi.com",
             "api.minimax.io",
+            "api.deepseek.com",
+            "api.moonshot.cn",
+            "api.kimi.com",
+            "kimi.ai",
         ] {
             let fields = thinking_suppression_fields(host);
             assert_eq!(
@@ -883,8 +945,6 @@ mod tests {
         // 不命中的服务商：一个字段都不能发
         for host in [
             "api.openai.com",
-            "api.deepseek.com",
-            "api.moonshot.cn",
             "api.anthropic.com",
             "qianfan.baidubce.com",
             "generativelanguage.googleapis.com",
@@ -896,11 +956,44 @@ mod tests {
                 "host 不应命中：{host}"
             );
         }
+        // 域名边界：短域名的相似拼写不得误命中
+        assert!(thinking_suppression_fields("notz.ai").is_empty());
+        assert!(thinking_suppression_fields("fake-kimi.com").is_empty());
         // host 大小写不敏感
         assert_eq!(
             thinking_suppression_fields("API.SILICONFLOW.CN"),
             vec![("enable_thinking", serde_json::json!(false))]
         );
+    }
+
+    #[test]
+    fn test_host_matches_domain_boundary() {
+        assert!(host_matches("api.z.ai", "z.ai"));
+        assert!(host_matches("z.ai", "z.ai"));
+        assert!(!host_matches("notz.ai", "z.ai"));
+        assert!(!host_matches("z.ai.evil.com", "z.ai"));
+        assert!(host_matches("open.bigmodel.cn", "bigmodel.cn"));
+        assert!(!host_matches("bigmodel.cn.evil.com", "bigmodel.cn"));
+    }
+
+    #[test]
+    fn test_strip_thinking_tags() {
+        // 闭合块
+        assert_eq!(strip_thinking_tags("<think>想一想</think>正文"), "正文");
+        // 未闭合块（流式截断）：剥到末尾
+        assert_eq!(strip_thinking_tags("正文<think>没写完"), "正文");
+        // 多个块
+        assert_eq!(
+            strip_thinking_tags("<think>a</think>中<think>b</think>尾"),
+            "中尾"
+        );
+        // 大小写不敏感
+        assert_eq!(strip_thinking_tags("<THINK>x</THINK>ok"), "ok");
+        // 无标签原样返回
+        assert_eq!(strip_thinking_tags("没有标签"), "没有标签");
+        // 全是 think 块则清空
+        assert_eq!(strip_thinking_tags("<think>只有思考</think>"), "");
+        assert_eq!(strip_thinking_tags(""), "");
     }
 
     #[test]
@@ -1188,6 +1281,70 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(result, "润色后的文本");
+        mock.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn test_polish_strips_inline_think_block() {
+        // 中转端点把思维链以 <think> 块内联进正文：出口应剥掉。
+        let mut server = mockito::Server::new_async().await;
+        let mock = server
+            .mock("POST", "/v1/chat/completions")
+            .with_status(200)
+            .with_body(mock_success_response("<think>推理过程</think>\n\n净文本"))
+            .create_async()
+            .await;
+
+        let formatter = LLMFormatter::new(
+            "key".to_string(),
+            server.url(),
+            "model".to_string(),
+            Duration::from_secs(5),
+        )
+        .unwrap();
+        let result = formatter
+            .polish("原始文本", PolishLevel::Medium)
+            .await
+            .unwrap();
+        assert_eq!(result, "净文本");
+        mock.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn test_polish_anthropic_skips_thinking_block() {
+        // 响应首块为 thinking 块（无 text 字段）：取第一个文本块而不是报错。
+        let mut server = mockito::Server::new_async().await;
+        let mock = server
+            .mock("POST", "/v1/messages")
+            .with_status(200)
+            .with_body(
+                serde_json::json!({
+                    "content": [
+                        {"type": "thinking", "thinking": "推理过程"},
+                        {"type": "text", "text": "净文本"}
+                    ]
+                })
+                .to_string(),
+            )
+            .create_async()
+            .await;
+
+        let formatter = LLMFormatter::with_config(
+            "key".to_string(),
+            server.url(),
+            "claude-3-5-sonnet".to_string(),
+            Duration::from_secs(5),
+            1024,
+            protocol::ApiProtocol::Anthropic,
+            0.3,
+            "zh".to_string(),
+        )
+        .unwrap();
+        let result = formatter
+            .polish("原始文本", PolishLevel::Medium)
+            .await
+            .unwrap();
+        assert_eq!(result, "净文本");
         mock.assert_async().await;
     }
 

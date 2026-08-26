@@ -81,5 +81,10 @@ pub struct AnthropicResponse {
 
 #[derive(Debug, Deserialize)]
 pub struct AnthropicContent {
-    pub text: String,
+    /// 块类型（"text" / "thinking" 等）；缺省按文本块处理，兼容不填 type 的端点。
+    #[serde(rename = "type", default)]
+    pub block_type: String,
+    /// 仅文本块有此字段；thinking 块无。
+    #[serde(default)]
+    pub text: Option<String>,
 }
