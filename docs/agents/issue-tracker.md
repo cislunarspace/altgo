@@ -20,3 +20,26 @@
 ## 当技能说 "fetch the relevant ticket"
 
 运行 `gh issue view <number> --comments`。
+
+# Issue Tracker: GitHub
+
+This repository keeps its issues and PRDs as GitHub issues. All operations use the `gh` CLI.
+
+## Conventions
+
+- **Create an issue**: `gh issue create --title "..." --body "..."`. Use a heredoc for multi-line bodies.
+- **View an issue**: `gh issue view <number> --comments`, filter comments with `jq`, and pull labels too.
+- **List issues**: `gh issue list --state open --json number,title,body,labels,comments --jq '[.[] | {number, title, body, labels: [.labels[].name], comments: [.comments[].body]}]'`, adding `--label` and `--state` filters as needed.
+- **Comment on an issue**: `gh issue comment <number> --body "..."`
+- **Add / remove labels**: `gh issue edit <number> --add-label "..."` / `--remove-label "..."`
+- **Close**: `gh issue close <number> --comment "..."`
+
+The repo is inferred from `git remote -v` — running `gh` inside the clone just works.
+
+## When a skill says "publish to the issue tracker"
+
+Create a GitHub issue.
+
+## When a skill says "fetch the relevant ticket"
+
+Run `gh issue view <number> --comments`.
