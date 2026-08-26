@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## v2.6.9 (2026-08-26)
+
+### Fixes
+
+- **修复自动更新产物缺失**：`bundle.createUpdaterArtifacts` 未配置（当前 Tauri 版本默认 `false`），此前各版本的 Release 虽注入了签名密钥却未生成签名包与 `latest.json`，自动更新从未真正可用。本版以 `v1Compatible` 模式开启，与 release 工作流已约定的产物命名（`.AppImage.tar.gz`、`.nsis.zip`、`.msi.zip` 及签名文件）匹配。
+
+### Notes
+
+- **自动更新自本版起生效**（v2.6.8 的启用声明作废，该版实际未携带 updater 产物）。签名公钥已于 v2.6.8 更换：v2.6.4~v2.6.7 客户端内置旧公钥，验签无法通过，这些版本的用户需手动下载安装一次新版；v2.6.8 及本版之后可正常自动更新。
+
 ## v2.6.8 (2026-08-26)
 
 ### Notes
