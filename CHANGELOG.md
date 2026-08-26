@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## v2.6.10 (2026-08-26)
+
 ### Changed
 
 - **DeepSeek 预设更新至 V4**：默认模型改为 `deepseek-v4-flash`（轻量快速，适合润色），备选 `deepseek-v4-pro`（重度改写）；旧 ID `deepseek-chat` / `deepseek-reasoner` 已不在官方文档中，OpenRouter 预设同步指向 `deepseek/deepseek-v4-flash`。V4 系列默认开启思考，配合本次的思考抑制补全（请求自动附带关闭参数）使用最佳。
