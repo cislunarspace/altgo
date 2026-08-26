@@ -48,16 +48,22 @@
    Island (recording / processing)
    ============================================ */
 
+/* 三个相位（录音 / 处理 / 完成）共用同一可见卡片几何：宽度、高度、圆角
+   完全一致，相位切换只剩内容 crossfade，避免尺寸变化牵扯注意力。
+   高度 92px 由完成相位定：3 行结果文本（13px × 1.6 × 3 ≈ 62px）+ 内边距。 */
+
 .island {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: 8px;
+  width: 400px;
+  height: 92px;
   padding: 12px 20px;
   /* Replaced backdrop-filter with solid translucent background for GPU composite performance */
   background: var(--overlay-surface-solid);
-  border-radius: var(--radius-full);
+  border-radius: var(--radius-xl);
   border: 1px solid var(--overlay-border);
   color: var(--overlay-text);
   font-size: var(--text-sm);
@@ -76,6 +82,8 @@
   display: flex;
   align-items: center;
   gap: 14px;
+  width: 400px;
+  height: 92px;
   padding: 14px 18px;
   background: var(--overlay-surface-solid);
   border-radius: var(--radius-xl);
@@ -85,9 +93,6 @@
   font-size: var(--text-sm);
   font-weight: 500;
   letter-spacing: 0.2px;
-  max-width: 500px;
-  min-width: 200px;
-  width: fit-content;
   position: relative;
   isolation: isolate;
   contain: paint;
@@ -99,24 +104,22 @@
    Level Trace — 滚动电平轨迹（录音）与冻结轨迹（处理）
    ============================================ */
 
-/* 最新一帧在右侧；帧数少时整体居中（fit-content + auto margin），
-   帧满后占满可用宽度、旧帧从左侧裁掉。 */
+/* 最新一帧在右侧；视口宽度固定（100 帧 × 3px = 300px），从零帧起布局
+   即稳定，旧帧随新帧进入从左侧裁出，卡片宽度不再随录音时长增长。 */
 .level-trace {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 2px;
+  gap: 1px;
   height: 22px;
-  max-width: 100%;
-  width: fit-content;
-  margin: 0 auto;
+  width: 300px;
   overflow: hidden;
 }
 
 .trace-bar {
   flex-shrink: 0;
-  width: 3px;
-  min-height: 3px;
+  width: 2px;
+  min-height: 2px;
   border-radius: 1px;
   background: var(--color-red);
 }
@@ -187,7 +190,8 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
-  min-width: 220px;
+  /* 与上方冻结轨迹同宽，构成对齐的竖列。 */
+  width: 300px;
 }
 
 .island-processing-row {
@@ -314,7 +318,6 @@
   gap: 14px;
   flex: 1;
   min-width: 0;
-  max-width: 400px;
 }
 
 .result-text {
