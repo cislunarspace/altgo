@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Changed
+
+- **DeepSeek 预设更新至 V4**：默认模型改为 `deepseek-v4-flash`（轻量快速，适合润色），备选 `deepseek-v4-pro`（重度改写）；旧 ID `deepseek-chat` / `deepseek-reasoner` 已不在官方文档中，OpenRouter 预设同步指向 `deepseek/deepseek-v4-flash`。V4 系列默认开启思考，配合本次的思考抑制补全（请求自动附带关闭参数）使用最佳。
+
 ### Fixes
 
 - **润色思考抑制补全与输出兜底**：DeepSeek、Moonshot/Kimi、z.ai 的模型已默认开启思考，润色延迟凭空多出数秒——这些域名加入「自动关闭思考」抑制表，SiliconFlow 国际站（siliconflow.com）一并覆盖（方言表对齐 zotero-pdf-translate#1464）。同时润色出口统一剥掉响应中混入的 `<think>` 思维链残渣，Anthropic 协议响应取第一个文本块，中转端点混入思考块时不再报错或污染结果。
