@@ -1,7 +1,7 @@
 # ADR-0004: 应用自动更新架构与分发策略
 
-- **状态**: 提议 (Proposed)
-- **日期**: 2025-02-24
+- **状态**: 已接受（随 v2.6.4 落地）
+- **日期**: 2026-08-24
 - **受影响模块**: `src-tauri/`, `frontend/`, `.github/workflows/release.yml`, `tauri.conf.json`
 
 ## 背景与问题
@@ -20,7 +20,7 @@ altgo 是一款常驻后台的桌面语音转文字应用，支持 Linux（x86_6
    - **外部引导（External）**：适用于 Linux 传统包管理格式（deb、rpm、AUR）。由于需要系统 root 权限或由独立包管理器接管，检测到更新后，更新器展示新版本详情、更新日志，并提供直达 GitHub Release 下载页或包管理器更新命令的引导，不在桌面进程内直接调用特权命令。
 
 3. **双检查模式（Check Mode）与 10 秒超时**:
-   - **静默模式（Silent）**：软件启动时在后台静默检查（受配置项 `app.auto_check_update` 控制，默认开启）。失败时不打扰用户；发现新版本时在主界面/托盘显示轻量徽标。
+   - **静默模式（Silent）**：软件启动时在后台静默检查（受配置项 `[gui] auto_check_update` 控制，默认开启）。失败时不打扰用户；发现新版本时在主界面/托盘显示轻量徽标。
    - **手动模式（Manual）**：用户在“关于/设置”页面点击“检查更新”。设置硬性 10 秒超时；失败时返回具体分类原因（`Timeout`、`NetworkError`、`SignatureError`、`RateLimited` 等）。
 
 4. **生命周期与录音安全（Lifecycle Safety）**:

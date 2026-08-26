@@ -10,12 +10,12 @@ title: 架构设计
 altgo 采用线性流水线架构，由键盘事件驱动：
 
 ```
-按键监听 → 状态机 → 录音 → ASR 转写 → LLM 润色 → 剪贴板 + 悬浮窗 + 通知 + 本地转写历史（纯文本 JSON）
+按键监听 → 状态机 → 录音 → ASR 转写 → LLM 润色 → 剪贴板 + 悬浮窗 + 本地转写历史（纯文本 JSON）
 ```
 
 **转写历史**：仅保存文本（原始转写 `rawText` 与当前展示 `text`），不保存录音；数据文件为 `~/.config/altgo/history.json`。转写成功后（以 `raw_text` 非空为准）写入一条记录并广播 `history-updated` 事件，供主窗口历史页刷新。
 
-各模块之间通过 `tokio::sync::mpsc` 异步通道解耦，每个处理阶段作为独立的 `tokio::spawn` 任务运行。
+按键监听器经无界通道把按键事件送入主循环；状态机同步返回命令，由 `tokio::select!` 分支就地执行，单次转写互斥（详见 [ADR-0003](https://github.com/cislunarspace/altgo/blob/master/docs/adr/0003-single-transcription-mutex.md)）。
 
 ## 模块结构
 
@@ -24,8 +24,8 @@ altgo 采用线性流水线架构，由键盘事件驱动：
 ```
 src-tauri/src/
 ├── main.rs            # 薄入口，调用 `lib::run()`
-├── lib.rs             # Tauri 构建入口；AppState（含 history_path）
-├── cmd.rs             # IPC：配置、管道、模型、转写历史等
+├── lib.rs             # Tauri 装配层；managed state + 流水线线程
+├── cmd.rs             # IPC 命令：配置、更新、管道、模型、历史等
 ├── config.rs          # TOML 配置加载（serde）
 ├── history.rs         # 转写历史 persistence（history.json）
 ├── state_machine.rs   # 按键状态机
@@ -33,16 +33,20 @@ src-tauri/src/
 ├── transcriber.rs     # Transcriber trait
 ├── sherpa.rs          # 本地 SenseVoice（内嵌 sherpa-onnx）
 ├── polisher.rs        # LLM 文本润色
-├── pipeline.rs        # 音频处理核心（转写 + 润色）
+├── voice_pipeline/    # 核心流水线（录音 → 转写 → 润色 → 分发）
+├── updater.rs         # 应用自动更新与手动检查
 ├── key_listener/      # 按键监听
 │   ├── mod.rs         # 公共 trait + PlatformListener
-│   └── linux.rs       # xinput test-xi2（X11）
+│   ├── linux.rs       # xinput test-xi2，失败回退 evtest；Wayland 会话优先 evtest
+│   └── windows.rs     # WH_KEYBOARD_LL 低级键盘钩子
 ├── recorder/          # 音频录制
 │   ├── mod.rs         # 公共 trait + PlatformRecorder
-│   └── linux.rs       # parecord（PulseAudio）
-└── output/            # 剪贴板 + 通知
+│   ├── linux.rs       # parecord（PulseAudio）
+│   └── windows.rs     # cpal/WASAPI
+└── output/            # 结果输出（剪贴板写入与文本注入，无系统通知）
     ├── mod.rs         # 公共 trait + PlatformOutput
-    └── linux.rs       # xclip / xsel / wl-copy
+    ├── linux.rs       # xclip / xsel / wl-copy
+    └── windows.rs     # arboard + SendInput
 ```
 
 ## 按键状态机
@@ -68,9 +72,11 @@ src-tauri/src/
 
 ## 平台策略
 
-**Linux**：通过子进程调用 CLI 工具（`parecord`、`xclip`、`xinput`），简化构建和依赖管理。
+**Linux**：通过子进程调用 CLI 工具（`xinput`/`evtest`、`parecord`、`xclip`），简化构建和依赖管理。
 
-平台模块暴露统一 trait（`KeyListener`、`Recorder`、`Output`），管道消费 `Box<dyn Trait>` 实现与平台解耦。
+**Windows**：走原生 API——WH_KEYBOARD_LL 键盘钩子、cpal/WASAPI 录音、arboard 剪贴板 + SendInput 文本注入。
+
+平台模块暴露统一 trait（`KeyListener`、`Recorder`、`Output`），各平台实现在各自模块的 `linux.rs` / `windows.rs` 中，管道消费 `Box<dyn Trait>` 实现与平台解耦。
 
 ## 转写引擎
 
@@ -79,7 +85,7 @@ src-tauri/src/
 ## 润色引擎
 
 - 支持 4 个级别：`none` / `light` / `medium` / `heavy`
-- 使用 OpenAI 兼容 chat API
+- 支持 OpenAI 兼容 chat API 与 Anthropic Messages API
 - 指数退避重试（最多 3 次）
 
 历史页可对单条记录基于 **`rawText`** 再次调用当前润色配置（`polish_history_entry`）。
@@ -94,4 +100,4 @@ src-tauri/src/
 - `sherpa.rs` — SenseVoice 模型存在性与加载失败路径
 - `polisher.rs` — 使用 `mockito` 模拟 OpenAI/Anthropic 润色 API
 - 平台模块 — 仅构造/冒烟测试
-- CI 在 Linux `amd64` 与 `arm64` 上运行：`fmt`、`clippy`、`build --release`、`test`
+- CI 共三个 job：Linux `amd64` 与 `arm64` 都跑 `cargo test --lib`；Windows job 在 x64 上跑测试并构建 NSIS 安装包，arm64 仅交叉编译检查

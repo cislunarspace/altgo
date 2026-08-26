@@ -101,14 +101,14 @@ Linux 平台接缝：
 
 ## 回归基线
 
-**产品支持范围**：Linux x86_64 与 aarch64；Windows x86_64（原生 API 实现：WH_KEYBOARD_LL、cpal/WASAPI、arboard/SendInput）；SenseVoice 本地转写（仅接受 16kHz 单声道 16 位 PCM WAV）；可选 LLM 润色（OpenAI 兼容或 Anthropic 协议）。云端转写已移除，相关测试随实现一并删除，不要回填。
+**产品支持范围**：Linux x86_64 与 aarch64；Windows x86_64 与 arm64（原生 API 实现：WH_KEYBOARD_LL、cpal/WASAPI、arboard/SendInput）；SenseVoice 本地转写（仅接受 16kHz 单声道 16 位 PCM WAV）；可选 LLM 润色（OpenAI 兼容或 Anthropic 协议）。云端转写已移除，相关测试随实现一并删除，不要回填。
 
 **CI 保护范围**：
 
 - `ci.yml` 的 check job 在 ubuntu-22.04（amd64）与 ubuntu-22.04-arm（arm64）各跑全量 `cargo test --manifest-path=src-tauri/Cargo.toml --lib`
 - 前端测试、`cargo fmt --all -- --check`、`cargo clippy --all-targets -- -D warnings`（测试代码也过编译检查）只在 amd64 job 跑一次
-- `ci.yml` 的 check-windows job 在 windows-latest 跑 `cargo test --lib` 并构建 NSIS 包（x64 与 arm64 两个架构）
-- `release.yml` 的 test job 同样双架构跑 `cargo test --lib`；deb/rpm 打包（build-linux）`needs: test`，发版前必须过两种架构的测试；NSIS 打包（build-windows）`needs: validate`，覆盖 Windows x64 与 arm64，并在打包前跑测试
+- `ci.yml` 的 check-windows job 在 windows-latest 上按架构分步：x64 跑 `cargo test --lib`；arm64 交叉编译，只能 `cargo check`。两架构都构建 NSIS 包
+- `release.yml` 的 test job 同样双架构跑 `cargo test --lib`；deb/rpm 打包（build-linux）`needs: test`，发版前必须过两种架构的测试；NSIS 打包（build-windows）`needs: validate`，覆盖 Windows x64 与 arm64，打包前 x64 跑测试、arm64 只做编译检查
 
 **基线要求**：全量全绿，无 `#[ignore]`，无静默跳过。改动落在哪层，测试随代码补在哪层。若改动的风险只有端到端层能覆盖（如安装包真实启动），在 PR 里说明手动验证方式。
 

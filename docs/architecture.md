@@ -1,6 +1,6 @@
 # 系统架构
 
-本文档是 altgo 的架构速览，面向维护者与贡献者，与 [`testing.md`](testing.md) 配套阅读。数据来自 2026-08-19 对 `src-tauri/src/` 的源码调研。文中引用只用模块与符号名，不标行号——行号会漂移，符号名才是稳定的锚点。
+本文档是 altgo 的架构速览，面向维护者与贡献者，与 [`testing.md`](testing.md) 配套阅读。数据来自 2026-08-26 对 `src-tauri/src/` 的源码调研。文中引用只用模块与符号名，不标行号——行号会漂移，符号名才是稳定的锚点。
 
 ## 一、系统概览
 
@@ -17,7 +17,7 @@ altgo 是基于 Tauri 的桌面语音转文字工具：Rust 后端承载整条�
 +-----------------+
 |   React 前端     |  设置 / 历史 / 浮窗
 +-----------------+
-         | IPC (15 命令 + 10 事件)
+         | IPC (17 命令 + 11 事件)
          v
 +-----------------+
 |  装配层 lib.rs   |  spawn_pipeline_thread：管理状态、组合 seam
@@ -102,7 +102,8 @@ lib.rs
   +-- state_machine        (纯同步叶子，由 voice_pipeline::context 驱动)
   +-- pipeline_controller  (生命周期 + PipelineStatus)
   +-- tauri_sink           (经 PipelineEventEmitter 发射事件)
-  +-- cmd.rs               (IPC 命令)
+  +-- cmd.rs               (IPC 命令；check_update/install_update 调用 updater)
+  +-- display_backend      (run() 在 GUI 初始化前探测 Wayland，切 GDK 后端)
 ```
 
 **Seam 规则。** 三类边界必须经 trait，业务核心只面向 trait：
@@ -195,16 +196,18 @@ lib.rs
 
 ## 五、平台抽象
 
-支持范围：Linux（Ubuntu 22.04+）的 x86_64 与 aarch64，无其他平台。平台服务仍全部收在 trait 后面，各模块的实现文件按平台命名为 `linux.rs`——这是未来加平台时的扩展点，也是测试注入 fake 的接缝：
+支持范围：Linux（Ubuntu 22.04+）的 x86_64 与 aarch64，Windows 10+ 的 x86_64 与 arm64。平台服务全部收在 trait 后面，各模块的实现文件按平台命名为 `linux.rs` / `windows.rs`——这是加新平台时的扩展点，也是测试注入 fake 的接缝：
 
-| 模块 | Trait | Linux 实现 |
-|------|-------|------------|
-| `key_listener` | `KeyListener::start()` | `xinput test-xi2` / `evtest` |
-| `recorder` | `Recorder::start_recording/stop_recording/is_recording` | `parecord` 子进程 |
-| `output` | `Output::write_clipboard` + `clone_box` | `xclip`/`xsel`/`wl-copy` 探测一次 |
-| `key_capture` | 无（自由函数） | `evtest` 枚举 `/dev/input` 等一次按键 |
+| 模块 | Trait | Linux 实现 | Windows 实现 |
+|------|-------|------------|--------------|
+| `key_listener` | `KeyListener::start()` | X11 用 `xinput test-xi2`、失败回退 `evtest`；Wayland 会话优先 `evtest` | WH_KEYBOARD_LL 低级键盘钩子 |
+| `recorder` | `Recorder::start_recording/stop_recording/is_recording` | `parecord` 子进程 | cpal/WASAPI |
+| `output` | `Output::write_clipboard` + `clone_box` | `xclip`/`xsel`/`wl-copy` 探测一次 | arboard 剪贴板 + SendInput 文本注入 |
+| `key_capture` | 无（自由函数） | `evtest` 监听 `/dev/input/event*` 等一次按键 | 临时 WH_KEYBOARD_LL 钩子等一次按键 |
 
-`parecord` 输出 16kHz 单声道 16 位 PCM，`audio.rs` 在录音停止时编码为 WAV——这是 SenseVoice 唯一接受的输入格式。
+另有两处平台相关但不走 trait 的分支：`display_backend.rs` 在 GUI 初始化前探测 Wayland 会话并切 GDK 后端；悬浮窗的主显示器几何在 `overlay/tauri.rs` 内按平台取值——Linux 解析 `xrandr` 输出，Windows 用 Tauri `primary_monitor()`。
+
+各平台录音统一输出 16kHz 单声道 16 位 PCM，`audio.rs` 在录音停止时编码为 WAV——这是 SenseVoice 唯一接受的输入格式。
 
 `Box<dyn Trait>` 用于 `PipelineContext` 字段与 builder 返回值；`Arc<dyn Trait>` 用于 Tauri 侧注入。
 
@@ -212,9 +215,10 @@ lib.rs
 
 ### 命令
 
-`cmd.rs` 暴露 15 个命令：
+`cmd.rs` 暴露 17 个命令：
 
 - 配置 4：`get_config`、`save_config`、`capture_activation_key`、`test_polisher_connection`
+- 更新 2：`check_update`、`install_update`
 - 流水线 1：`start_pipeline`
 - 浮窗 2：`copy_text`、`hide_overlay`
 - 模型 4：`list_models`、`download_model`、`delete_model`、`resolve_model`
@@ -222,11 +226,11 @@ lib.rs
 
 ### 事件
 
-共 10 个 Tauri 事件：
+共 11 个 Tauri 事件：
 
-`pipeline-status`、`pipeline-error`、`transcription-result`、`polish-failed`、`transcription-progress`、`key-listener-backend`、`history-updated`、`overlay-state`、`model-download-progress`、`model-download-finished`。
+`pipeline-status`、`pipeline-error`、`transcription-result`、`polish-failed`、`transcription-progress`、`audio-level`、`key-listener-backend`、`history-updated`、`overlay-state`、`model-download-progress`、`model-download-finished`。
 
-`polish-failed` 携带润色失败原因字符串，在 `transcription-result` 之前发出；悬浮窗 done 阶段据此显示「润色失败，已使用原文」。
+`polish-failed` 携带润色失败原因字符串，在 `transcription-result` 之前发出；悬浮窗 done 阶段据此显示「润色失败，已使用原文」。`audio-level` 以约 20~30 FPS 把感知音量派发给悬浮窗，驱动录音阶段的实时波形。
 
 ### 序列化契约
 

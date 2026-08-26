@@ -47,7 +47,7 @@
 ## 输出
 
 **悬浮窗（Overlay）**
-录音、处理与结果显示时出现的悬浮状态窗口。定位在主显示器（Linux 用 `xrandr` 取显示器几何），位置可配置（`gui.overlay_position`：`bottom_center` 默认 / `top_center`），对全部阶段生效。Wayland 协议不允许客户端定位窗口（`set_position` 为 no-op），因此启动时检测会话：Wayland 且未显式设置 `GDK_BACKEND` 时切到 X11 后端（XWayland），定位才能生效。状态切换时由 `TauriPipelineSink` 经 `OverlaySink` 抽象管理；`TauriPipelineSink` 只描述意图（"recording" / "processing" / "hidden" / "done"），浮窗管理器把它转成窗口尺寸、位置、显示与隐藏。窗口在全部阶段使用一个固定尺寸——会话中调整透明窗口尺寸会在 Linux 合成器上产生黑色边缘，所以阶段切换只替换前端内容（CSS 交叉淡入）。`hidden` 先发出，实际隐藏延迟约 220ms 以便退出动画可见。转写结果路径上，`transcription-result` 在 `done` 浮窗状态之前发出，前端不会渲染出空 island。island 不使用 `box-shadow`——半透明阴影叠加在透明窗口上会在某些 Linux 合成器上合成出暗色光晕。
+录音、处理与结果显示时出现的悬浮状态窗口。定位在主显示器（Linux 解析 `xrandr` 输出，Windows 用 Tauri `primary_monitor()`），位置可配置（`gui.overlay_position`：`bottom_center` 默认 / `top_center`），对全部阶段生效。Wayland 协议不允许客户端定位窗口（`set_position` 为 no-op），因此启动时检测会话：Wayland 且未显式设置 `GDK_BACKEND` 时切到 X11 后端（XWayland），定位才能生效。状态切换时由 `TauriPipelineSink` 经 `OverlaySink` 抽象管理；`TauriPipelineSink` 只描述意图（"recording" / "processing" / "hidden" / "done"），浮窗管理器把它转成窗口尺寸、位置、显示与隐藏。窗口在全部阶段使用一个固定尺寸——会话中调整透明窗口尺寸会在 Linux 合成器上产生黑色边缘，所以阶段切换只替换前端内容（CSS 交叉淡入）。`hidden` 先发出，实际隐藏延迟约 220ms 以便退出动画可见。转写结果路径上，`transcription-result` 在 `done` 浮窗状态之前发出，前端不会渲染出空 island。island 不使用 `box-shadow`——半透明阴影叠加在透明窗口上会在某些 Linux 合成器上合成出暗色光晕。
 
 **自动淡出（Auto-fade）**
 结果浮窗（done 阶段）的退出策略：无用户输入活动时无限保留，检测到输入活动后延时数秒自动隐藏。_Avoid_: 自动关闭、auto-hide。
@@ -82,11 +82,11 @@
 ## 按键输入
 
 **按键监听器（KeyListener）**
-管道运行期间持续监听配置的激活键并发出 `KeyEvent` 的接口。由 Linux 适配器实现（`X11Listener`）。管道以 `Box<dyn KeyListener>` 消费它。
+管道运行期间持续监听配置的激活键并发出 `KeyEvent` 的接口。Linux 实现（`X11Listener`）在 X11 用 `xinput test-xi2`、失败回退 `evtest`，Wayland 会话优先 `evtest`；Windows 用 WH_KEYBOARD_LL 低级键盘钩子。管道以 `Box<dyn KeyListener>` 消费它。
 _Avoid_: key listener（指概念时小写）、platform listener。
 
 **按键捕获（KeyCapture）**
-设置配置期间一次性捕获任意物理键的接口（Linux 用 evtest），返回 `KeyListenerConfig` 所需的键标识符（`key_name`、`linux_evdev_code`）。平台实现复用与 `KeyListener` 相同的底层输入机制，但暴露同步阻塞式 API。
+设置配置期间一次性捕获任意物理键的接口，返回 `KeyListenerConfig` 所需的键标识符（`key_name`、`linux_evdev_code`）。Linux 通过 `evtest` 子进程监听 `/dev/input/event*`；Windows 临时挂 WH_KEYBOARD_LL 钩子等待一次按键。暴露同步阻塞式 API。
 _Avoid_: capture mode、key capture mode。
 
 **激活键（Activation Key）**

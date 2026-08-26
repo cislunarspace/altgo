@@ -5,8 +5,8 @@
 | 路径 | 内容 |
 |------|------|
 | [`architecture.md`](architecture.md) | 系统架构速览（与 testing.md 配套） |
-| [`superpowers/plans/`](superpowers/plans/) | 功能或改动的实施计划（按日期命名） |
-| [`superpowers/specs/`](superpowers/specs/) | 对应的设计说明与技术决策记录 |
+| [`testing.md`](testing.md) | 测试套件画像与维护提示 |
+| [`adr/`](adr/) | 架构决策记录（ADR） |
 
 **用户向说明**请优先阅读：
 
