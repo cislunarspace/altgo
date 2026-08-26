@@ -11,6 +11,22 @@
 //! **ljg-writes** / **ljg-plain**（lijigang/ljg-skills）中与「口语文本润色」相关的取向（非全文摘抄 skill 文件）。
 //!
 //! 使用兼容 OpenAI 的聊天 API，支持指数退避重试（最多 3 次）。
+//!
+//! Text polishing module.
+//!
+//! Post-processes speech recognition output with an LLM across four polish levels:
+//!
+//! - `none`: no polishing, return the original text
+//! - `light`: fix punctuation and obvious typos
+//! - `medium`: fix punctuation, typos, and grammar for smoother sentences
+//! - `heavy`: rewrite into well-structured, precise prose
+//!
+//! When the language is `zh`, the built-in system prompt constrains output to standard Simplified
+//! Chinese and merges: material-summarization writing requirements, plus the oral-text polishing
+//! orientations of locally installed **ljg-writes** / **ljg-plain** (lijigang/ljg-skills)—not
+//! quoting the skill files verbatim.
+//!
+//! Uses OpenAI-compatible chat APIs with exponential-backoff retries (up to 3).
 
 pub mod protocol;
 
@@ -19,8 +35,13 @@ use reqwest::Client;
 use std::time::Duration;
 
 /// 重试延迟基数（毫秒），用于指数退避计算。
+/// Base retry delay (ms) for exponential-backoff computation.
 const RETRY_BASE_DELAY_MS: u64 = 500;
 
+/// 指数退避的通用重试助手。
+///
+/// 对给定的异步操作最多重试 `max_retries` 次。
+/// 不可重试的错误（401、403）立即返回。
 /// Generic retry helper with exponential backoff.
 ///
 /// Retries the given async operation up to `max_retries` times.
@@ -43,6 +64,7 @@ where
         match operation().await {
             Ok(result) => return Ok(result),
             Err(e) => {
+                // 检查不可重试的鉴权错误
                 // Check for non-retryable auth errors
                 if matches!(
                     e,
@@ -63,12 +85,16 @@ where
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PolishLevel {
     /// 不润色
+    /// No polishing
     None,
     /// 轻度润色：修复标点和错别字
+    /// Light polish: fix punctuation and typos
     Light,
     /// 中度润色：修复标点、错别字和语病
+    /// Medium polish: fix punctuation, typos, and grammar issues
     Medium,
     /// 重度润色：重写为结构清晰的文字
+    /// Heavy polish: rewrite into well-structured prose
     Heavy,
 }
 
@@ -84,6 +110,7 @@ impl PolishLevel {
     }
 
     /// 解析润色级别字符串，无效值回退到 `Medium`。
+    /// Parses a polish-level string; invalid values fall back to `Medium`.
     pub fn effective(level_str: &str) -> Self {
         <Self as std::str::FromStr>::from_str(level_str).unwrap_or_else(|_| {
             tracing::warn!("invalid polish level '{level_str}', using medium");
@@ -107,9 +134,13 @@ impl std::str::FromStr for PolishLevel {
 }
 
 /// 中文润色时附加的写作与材料概括要求（与简体约束一并传入模型）。
+/// Writing and material-summarization requirements appended for Chinese polishing (sent to the
+/// model together with the Simplified-Chinese constraint).
 const ZH_WRITE_GUIDANCE: &str = r#"注意写作的要求：要善于总结材料，这种总结就是将丰富的感性材料科学地加以概括，进行去粗取精、去伪存真、由此及彼、由表及里地加工改造。具体地讲，就是把材料搞全了、弄准了，把问题掰开了、揉碎了，把内在联系理清了、摆正了，这样才可以得到反映事物本质的真知和理论，才可以发现事物运动的规律。“关于写文章，请注意不要用过于夸大的修饰词，反而减损了力量。必须注意各种词语的逻辑界限和整篇文章的条理（也是逻辑问题）。废话应当尽量除去。”“文章写得通俗、亲切，由小讲到大，由近讲到远，引人入胜，这就很好。”“要采取和读者完全平等的态度。我们应该老老实实地办事，对事物有分析，写文章有说服力，不要靠装腔作势来吓人。”“总是先讲死人、外国人，这不好，应当从当前形势讲起。今后写文章要通俗，使工农都能接受。”"#;
 
 /// 与语音转写润色相关的 **ljg-writes** / **ljg-plain** 取向（摘自用户本机 skill 要义，不含 Org/文件输出等仅技能执行用条款）。
+/// The **ljg-writes** / **ljg-plain** orientations relevant to speech-transcription polishing
+/// (distilled from the user's local skills, excluding Org/file-output clauses that only matter to skill execution).
 const ZH_LJG_GUIDANCE: &str = r#"
 
 【ljg-writes / ljg-plain（语音后润色适用；内化即可，勿输出本段标题或标签）】
@@ -131,6 +162,8 @@ fn get_system_prompt(level: PolishLevel, language: &str) -> String {
     };
 
     // 明确约束简体，避免模型按「繁体/港台书面」习惯输出。
+    // Constrain output to Simplified Chinese explicitly; otherwise models may drift toward
+    // Traditional or HK/TW written conventions.
     let zh_script_rule = if language == "zh" {
         " For Chinese: output in Simplified Chinese only (大陆通用规范简体). Never use Traditional Chinese. If the input is Traditional, convert to Simplified. "
     } else {
@@ -138,6 +171,8 @@ fn get_system_prompt(level: PolishLevel, language: &str) -> String {
     };
 
     // 写作与表达要求：全文融入用户提供的规范；轻量润色时强调不改结构、仅作最小必要调整。
+    // Writing/expressiveness requirements: fold the user-provided rubric throughout the text;
+    // at light polish, stress keeping structure intact with only minimal necessary edits.
     let zh_combined: String = if language == "zh" && !matches!(level, PolishLevel::None) {
         let intro = match level {
             PolishLevel::None => "",
@@ -169,13 +204,19 @@ fn get_system_prompt(level: PolishLevel, language: &str) -> String {
 
 // ---------------------------------------------------------------------------
 // SystemPromptSource trait and implementations
+// SystemPromptSource trait 与实现
 // ---------------------------------------------------------------------------
 
 /// 抽象 system prompt 来源，消除 `polish()` 内部的 fallback 链。
 ///
 /// 由 `LLMFormatter` 持有，使 prompt 选择逻辑可在测试中替换。
+///
+/// Abstracts where a system prompt comes from, dissolving the fallback chain inside `polish()`.
+///
+/// Held by `LLMFormatter`, so prompt-selection logic is swappable in tests.
 pub trait SystemPromptSource: Send + Sync {
     /// 获取指定级别和语言的 system prompt。
+    /// Returns the system prompt for the given level and language.
     fn get_prompt(
         &self,
         level: PolishLevel,
@@ -183,10 +224,12 @@ pub trait SystemPromptSource: Send + Sync {
     ) -> Result<String, crate::prompt_store::PromptError>;
 
     /// 支持 clone 为 trait object（用于 `LLMFormatter::Clone`）。
+    /// Supports cloning into a trait object (for `LLMFormatter::Clone`).
     fn clone_box(&self) -> Box<dyn SystemPromptSource>;
 }
 
 /// 基于 `PromptStore` 的 prompt 来源。
+/// Prompt source backed by a `PromptStore`.
 pub struct PromptStoreSource {
     store: crate::prompt_store::PromptStore,
 }
@@ -214,6 +257,7 @@ impl SystemPromptSource for PromptStoreSource {
 }
 
 /// 用户自定义 prompt 来源（来自 `config.polisher.system_prompt`）。
+/// User-defined prompt source (from `config.polisher.system_prompt`).
 pub struct CustomSource {
     prompt: String,
 }
@@ -242,6 +286,7 @@ impl SystemPromptSource for CustomSource {
 
 // ---------------------------------------------------------------------------
 // Endpoint 推导
+// Endpoint derivation（endpoint 推导）
 // ---------------------------------------------------------------------------
 
 /// 由 base URL 与协议推导请求 endpoint。
@@ -254,6 +299,20 @@ impl SystemPromptSource for CustomSource {
 /// 1. 剥首尾空白与尾部 `/`；
 /// 2. 路径已以该协议的请求路径（openai `/chat/completions`、anthropic
 ///    `/messages`）结尾时，视为完整 endpoint，直接使用；
+///
+/// Derives the request endpoint from a base URL and protocol.
+///
+/// Handles both versioned bases (`https://api.moonshot.cn/v1`,
+/// `https://open.bigmodel.cn/api/paas/v4`) and bare origins (`https://api.deepseek.com`).
+///
+/// Rules:
+/// 1. Trim whitespace and trailing slashes;
+/// 2. A path already ending with the protocol's request path (openai `/chat/completions`,
+///    anthropic `/messages`) counts as a complete endpoint, used as-is;
+/// 3. Empty path: openai appends `/v1/chat/completions`, anthropic `/v1/messages`
+///    (the two official SDK defaults);
+/// 4. Non-empty path: append only the request path—the version segment (`/v1`,
+///    `/api/paas/v4`, ...) comes with the base.
 /// 3. 路径为空：openai 补 `/v1/chat/completions`，anthropic 补 `/v1/messages`
 ///    （两家官方 SDK 的默认约定）；
 /// 4. 路径非空：仅补请求路径，版本段（`/v1`、`/api/paas/v4` 等）由 base 自带。
@@ -267,6 +326,8 @@ pub fn build_endpoint(
     }
 
     // 定位 origin 之后的首个 '/'，其起即为路径；无 scheme 时按首个 '/' 兜底。
+    // Locate the first '/' after the origin; from there on it's the path. Without a scheme,
+    // fall back to the first '/'.
     let path_start = match trimmed.find("://") {
         Some(scheme_end) => trimmed[scheme_end + 3..]
             .find('/')
@@ -299,9 +360,11 @@ pub fn build_endpoint(
 
 // ---------------------------------------------------------------------------
 // 思考模式抑制
+// Thinking-mode suppression（思考模式抑制）
 // ---------------------------------------------------------------------------
 
 /// 从 base URL 提取 host（小写比较由调用方处理，这里保留原文、不含端口）。
+/// Extracts the host from a base URL (callers handle lowercasing; raw text kept, port excluded).
 fn host_of(url: &str) -> &str {
     let trimmed = url.trim();
     let after_scheme = match trimmed.find("://") {
@@ -314,6 +377,8 @@ fn host_of(url: &str) -> &str {
 
 /// 判断 host 是否属于某域名（等于该域，或为其子域）。
 /// 边界检查防短域名误命中（如 `notz.ai` 不应命中 `z.ai`）。
+/// Whether the host belongs to a domain (equals it or is a subdomain). Boundary checks prevent
+/// short-domain false hits (e.g. `notz.ai` must not match `z.ai`).
 fn host_matches(host: &str, domain: &str) -> bool {
     host == domain || host.ends_with(&format!(".{domain}"))
 }
@@ -360,6 +425,7 @@ fn thinking_suppression_fields(host: &str) -> Vec<(&'static str, serde_json::Val
 }
 
 /// ASCII 大小写不敏感的字串查找（返回字节下标）。
+/// ASCII case-insensitive substring search (returns a byte index).
 fn find_ascii_ci(haystack: &str, needle: &str) -> Option<usize> {
     haystack
         .as_bytes()
@@ -371,6 +437,10 @@ fn find_ascii_ci(haystack: &str, needle: &str) -> Option<usize> {
 ///
 /// 部分 OpenAI 兼容端点（尤其未命中抑制表的中转站）会把思维链以 think 块
 /// 内联进正文；润色结果不应混入这些残渣。
+/// Strips `<think>…</think>` blocks (including unclosed ones caused by truncation).
+///
+/// Some OpenAI-compatible endpoints—especially relays missing from the suppression table—inline
+/// chains of thought as think blocks within the body; polished results must not carry that debris.
 pub fn strip_thinking_tags(text: &str) -> String {
     let mut rest = text;
     let mut out = String::with_capacity(text.len());
@@ -380,6 +450,7 @@ pub fn strip_thinking_tags(text: &str) -> String {
         match find_ascii_ci(after, "</think>") {
             Some(end) => rest = &after[end + "</think>".len()..],
             // 未闭合块：剥到末尾
+            // Unclosed block: strip through the end
             None => return out,
         }
     }
@@ -391,6 +462,12 @@ pub fn strip_thinking_tags(text: &str) -> String {
 ///
 /// 供设置页「测试连接」使用：不落盘、不影响流水线，
 /// 请求超时 20 秒、max_tokens 限制在 16 以控制花费。
+///
+/// Builds a throwaway polisher from the given parameters and fires one minimal request,
+/// verifying that the address, key, and model all work.
+///
+/// Powers the Settings page "test connection": nothing is persisted, the pipeline is untouched,
+/// and the request uses a 20s timeout with max_tokens capped at 16 to bound cost.
 pub async fn test_connection(
     api_key: &str,
     api_base_url: &str,
@@ -414,6 +491,7 @@ pub async fn test_connection(
 }
 
 /// 把润色错误转成「测试连接」结果的可读提示，指明最可能的原因。
+/// Turns polishing errors into readable "test connection" outcomes, naming the most likely cause.
 pub fn describe_test_error(e: &PolisherError) -> String {
     match e {
         PolisherError::ApiError { status: 401, .. }
@@ -473,6 +551,14 @@ fn truncate_body(body: &str) -> String {
 ///
 /// System prompt 通过 `SystemPromptSource` trait 注入；`prompt_source` 为 `None` 时
 /// `polish()` 内部用内置 hardcoded prompt 兜底。
+///
+/// The LLM text polisher.
+///
+/// Speaks both the OpenAI and Anthropic API protocols, retrying with exponential backoff
+/// (up to 3 times).
+///
+/// The system prompt is injected through the `SystemPromptSource` trait; when `prompt_source` is
+/// `None`, `polish()` falls back internally to a built-in hardcoded prompt.
 pub struct LLMFormatter {
     api_key: String,
     api_base_url: String,
@@ -522,6 +608,7 @@ impl TryFrom<&crate::config::Config> for LLMFormatter {
 }
 
 impl LLMFormatter {
+    /// 从配置的各小节构造 LLMFormatter。
     /// Create LLMFormatter from config sections.
     pub fn from_config(
         polisher: &crate::config::PolisherConfig,
@@ -550,6 +637,11 @@ impl LLMFormatter {
     /// 实时管道（`voice_pipeline::builder::build_polisher`）与 IPC handler
     /// （`cmd::polish_history_entry`）都通过此构造，确保两条路径走相同的
     /// prompt 解析：PromptStore → Custom → hardcoded fallback。
+    /// Shared factory: builds one LLMFormatter carrying every prompt source from the Config at once.
+    ///
+    /// Both the realtime pipeline (`voice_pipeline::builder::build_polisher`) and the IPC handler
+    /// (`cmd::polish_history_entry`) construct through this so both paths resolve prompts alike:
+    /// PromptStore → Custom → hardcoded fallback.
     pub fn from_config_with_sources(cfg: &crate::config::Config) -> Result<Self, PolisherError> {
         let mut formatter = Self::from_config(&cfg.polisher, &cfg.transcriber.language)?;
         formatter.prompt_source = build_prompt_source_chain(cfg);
@@ -604,7 +696,9 @@ impl LLMFormatter {
         })
     }
 
-    /// Sets the prompt source for system prompt resolution. `None` 表示使用内置 hardcoded prompt。
+    /// 设置 system prompt 的来源；`None` 表示使用内置 hardcoded prompt。
+    /// Sets the prompt source for system prompt resolution; `None` uses the built-in
+    /// hardcoded prompt.
     pub fn with_prompt_source(mut self, source: Option<Box<dyn SystemPromptSource>>) -> Self {
         self.prompt_source = source;
         self
@@ -614,6 +708,9 @@ impl LLMFormatter {
     ///
     /// 如果级别为 `None` 或文本为空，直接返回原文。
     /// 润色失败时返回错误。
+    /// Polishes text with the LLM.
+    ///
+    /// A `None` level or empty text returns the original text directly; polish failures return Err.
     pub async fn polish(&self, text: &str, level: PolishLevel) -> Result<String, PolisherError> {
         if matches!(level, PolishLevel::None) || text.is_empty() {
             return Ok(text.to_string());
@@ -664,6 +761,9 @@ impl LLMFormatter {
         .await?;
         // 未命中抑制表的端点（如中转站）可能把思维链以 <think> 块混进正文，
         // 润色出口统一剥掉并去除首尾空白，避免污染剪贴板。
+        // Endpoints missing from the suppression table (e.g. relays) may inline chains of thought as
+        // <think> blocks in the body; the polished output strips them plus surrounding whitespace
+        // before touching the clipboard.
         Ok(strip_thinking_tags(&polished).trim().to_string())
     }
 
@@ -676,6 +776,9 @@ impl LLMFormatter {
         // 按服务商附加「关闭思考」字段；不命中的服务商保持原始 body，
         // 避免严格校验未知字段的服务商（OpenAI 等）拒绝请求。
         // 经 `extra` 平铺序列化而非 to_value 中转，保持 f32 字段的紧凑表示。
+        // Append vendor-specific "disable thinking" fields; unmatched vendors keep the original body
+        // so strict validators (OpenAI etc.) don't reject unknown fields.
+        // Flatten-serialize via `extra` instead of round-tripping to_value, keeping f32 fields compact.
         let fields = thinking_suppression_fields(host_of(&self.api_base_url));
         if !fields.is_empty() {
             let mut extra = serde_json::Map::new();
@@ -731,6 +834,8 @@ impl LLMFormatter {
             .post(&url)
             // 双鉴权头：官方 Anthropic 用 x-api-key，多数兼容端点/中转用
             // Bearer token——各取所需，多余的头双方都会忽略。
+            // Dual auth headers: official Anthropic wants x-api-key while most compatible endpoints/
+            // relays want Bearer tokens—send both; each side ignores the surplus header.
             .header("x-api-key", &self.api_key)
             .header("Authorization", format!("Bearer {}", self.api_key))
             .header("anthropic-version", "2023-06-01")
@@ -760,6 +865,8 @@ impl LLMFormatter {
             .map_err(|e| PolisherError::JsonError(e.to_string()))?;
         // 取第一个文本块：响应混入 thinking 块时它在最前（无 text 字段）；
         // 不填 type 的中转端点按文本块处理。
+        // Take the first text block: when thinking blocks ride along they come first (no text field);
+        // relays omitting type are treated as text blocks anyway.
         anthropic_resp
             .content
             .into_iter()
@@ -773,6 +880,10 @@ impl LLMFormatter {
 ///
 /// 优先级：PromptStore（`resources/prompts` 加载成功）→ Custom（`system_prompt` 非空）→ `None`。
 /// `None` 时调用方 `polish()` 用内置 hardcoded prompt 兜底。
+/// Extracts the prompt-source-chain construction once living in builder.rs; all callers share it.
+///
+/// Priority: PromptStore (when `resources/prompts` loads) → Custom (non-empty `system_prompt`) →
+/// `None`. On `None` the caller's `polish()` falls back to the built-in hardcoded prompt.
 fn build_prompt_source_chain(cfg: &crate::config::Config) -> Option<Box<dyn SystemPromptSource>> {
     let store_source: Option<Box<dyn SystemPromptSource>> = std::env::current_exe()
         .ok()
@@ -845,6 +956,7 @@ mod tests {
         use protocol::ApiProtocol;
         let p = ApiProtocol::OpenAi;
         // 各预设 base（与 frontend/src/config/modelPresets.ts 对齐）
+        // Preset bases (aligned with frontend/src/config/modelPresets.ts)
         assert_eq!(
             build_endpoint("https://api.deepseek.com", p).unwrap(),
             "https://api.deepseek.com/v1/chat/completions"
@@ -894,8 +1006,10 @@ mod tests {
             "open.bigmodel.cn"
         );
         // 大小写与空白容错
+        // Case and whitespace tolerance
         assert_eq!(host_of("  HTTPS://API.OPENAI.com/"), "API.OPENAI.com");
         // 无 scheme 时按整体 authority 处理
+        // Without a scheme, treat everything as an authority
         assert_eq!(host_of("api.deepseek.com"), "api.deepseek.com");
         assert_eq!(host_of(""), "");
     }
@@ -943,6 +1057,7 @@ mod tests {
             vec![("reasoning", serde_json::json!({ "enabled": false }))]
         );
         // 不命中的服务商：一个字段都不能发
+        // Unmatched vendors: not a single extra field may be sent
         for host in [
             "api.openai.com",
             "api.anthropic.com",
@@ -957,9 +1072,11 @@ mod tests {
             );
         }
         // 域名边界：短域名的相似拼写不得误命中
+        // Domain boundaries: look-alike spellings of short domains must not match
         assert!(thinking_suppression_fields("notz.ai").is_empty());
         assert!(thinking_suppression_fields("fake-kimi.com").is_empty());
         // host 大小写不敏感
+        // Host matching is case-insensitive
         assert_eq!(
             thinking_suppression_fields("API.SILICONFLOW.CN"),
             vec![("enable_thinking", serde_json::json!(false))]
@@ -979,19 +1096,25 @@ mod tests {
     #[test]
     fn test_strip_thinking_tags() {
         // 闭合块
+        // Closed block
         assert_eq!(strip_thinking_tags("<think>想一想</think>正文"), "正文");
         // 未闭合块（流式截断）：剥到末尾
+        // Unclosed block (streaming truncation): strip to the end
         assert_eq!(strip_thinking_tags("正文<think>没写完"), "正文");
         // 多个块
+        // Multiple blocks
         assert_eq!(
             strip_thinking_tags("<think>a</think>中<think>b</think>尾"),
             "中尾"
         );
         // 大小写不敏感
+        // Case-insensitive
         assert_eq!(strip_thinking_tags("<THINK>x</THINK>ok"), "ok");
         // 无标签原样返回
+        // No tags: returned unchanged
         assert_eq!(strip_thinking_tags("没有标签"), "没有标签");
         // 全是 think 块则清空
+        // All-think input empties out
         assert_eq!(strip_thinking_tags("<think>只有思考</think>"), "");
         assert_eq!(strip_thinking_tags(""), "");
     }
@@ -1000,11 +1123,13 @@ mod tests {
     fn test_build_endpoint_tolerates_common_variants() {
         use protocol::ApiProtocol;
         // 本地 Ollama（origin 无路径）
+        // Local Ollama (bare origin)
         assert_eq!(
             build_endpoint("http://localhost:11434", ApiProtocol::OpenAi).unwrap(),
             "http://localhost:11434/v1/chat/completions"
         );
         // 尾部斜杠与空白
+        // Trailing slashes and whitespace
         assert_eq!(
             build_endpoint("  http://localhost:11434/ ", ApiProtocol::OpenAi).unwrap(),
             "http://localhost:11434/v1/chat/completions"
@@ -1014,6 +1139,7 @@ mod tests {
             "https://api.moonshot.cn/v1/chat/completions"
         );
         // 已是完整 endpoint 时直接使用
+        // Complete endpoints pass through as-is
         assert_eq!(
             build_endpoint("https://x.example/v1/chat/completions", ApiProtocol::OpenAi).unwrap(),
             "https://x.example/v1/chat/completions"
@@ -1023,6 +1149,7 @@ mod tests {
             "https://x.example/v1/messages"
         );
         // 空值报错
+        // Empty values must error
         assert!(matches!(
             build_endpoint("", ApiProtocol::OpenAi),
             Err(PolisherError::InvalidBaseUrl(_))
@@ -1033,6 +1160,7 @@ mod tests {
     #[tokio::test]
     async fn test_polish_success_with_versioned_base_url() {
         // 预设式 base 自带 /v1：endpoint 应为 /v1/chat/completions 而非 /v1/v1/...
+        // Preset-style base already carries /v1: endpoint should be /v1/chat/completions, not /v1/v1/...
         let mut server = mockito::Server::new_async().await;
         let mock = server
             .mock("POST", "/v1/chat/completions")
@@ -1216,6 +1344,8 @@ mod tests {
     async fn test_polish_unknown_host_body_has_no_thinking_fields() {
         // mockito 的 host（127.0.0.1）不命中思考抑制表：请求体必须与
         // ChatRequest 完全一致，不携带任何额外字段（OpenAI 等会拒绝未知参数）。
+        // mockito's host (127.0.0.1) misses the thinking-suppression table: the request body must match
+        // ChatRequest exactly, with no extra fields (OpenAI et al. reject unknown parameters).
         let mut server = mockito::Server::new_async().await;
         let expected_body = serde_json::json!({
             "model": "m",
@@ -1287,6 +1417,7 @@ mod tests {
     #[tokio::test]
     async fn test_polish_strips_inline_think_block() {
         // 中转端点把思维链以 <think> 块内联进正文：出口应剥掉。
+        // Relay endpoints inline chains of thought as <think> blocks: the exit path must strip them.
         let mut server = mockito::Server::new_async().await;
         let mock = server
             .mock("POST", "/v1/chat/completions")
@@ -1313,6 +1444,8 @@ mod tests {
     #[tokio::test]
     async fn test_polish_anthropic_skips_thinking_block() {
         // 响应首块为 thinking 块（无 text 字段）：取第一个文本块而不是报错。
+        // First response block is a thinking block (no text field): take the first text block
+        // instead of erroring.
         let mut server = mockito::Server::new_async().await;
         let mock = server
             .mock("POST", "/v1/messages")

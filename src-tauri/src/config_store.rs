@@ -1,3 +1,7 @@
+//! 配置存储 —— 持久化配置与原子化 patch 保存。
+//!
+//! `Config` 的薄持久化封装。patch 逻辑位于 `config.rs`
+//! （`ConfigPatch::apply_to_config`），配置定义与变更逻辑共处一处。
 //! Config store — persistent config with atomic patch-and-save.
 //!
 //! Thin persistence wrapper around `Config`. Patch logic lives in `config.rs`
@@ -7,6 +11,8 @@ use tokio::sync::{Mutex, MutexGuard};
 
 use crate::config::{Config, ConfigPatch};
 
+/// 持有活动配置及其落盘路径。
+/// 所有变更都经 `apply_patch` 校验并原子持久化。
 /// Holds the live config and its backing file path.
 /// All mutations go through `apply_patch`, which validates and persists atomically.
 pub struct ConfigStore {
@@ -17,6 +23,11 @@ pub struct ConfigStore {
 /// 已校验且已持久化的配置更新。
 ///
 /// 持有锁直到调用方完成依赖本次更新的后续操作，防止其他配置更新插入。
+///
+/// 已校验且已持久化的配置更新。
+///
+/// The lock is held until the caller finishes any dependent follow-up work, preventing other
+/// config updates from interleaving in between.
 pub struct ConfigUpdate<'a> {
     config: Config,
     _guard: MutexGuard<'a, Config>,
@@ -51,6 +62,11 @@ impl ConfigStore {
         self.config.blocking_lock().clone()
     }
 
+    /// 应用部分更新、校验、持久化，并持有配置锁直到返回。
+    ///
+    /// 返回的更新让调用方先完成依赖本次更新的后续操作（如重启语音流水线），
+    /// 之后其他 patch 才能替换当前生效配置。校验或持久化失败时，内存中的配置
+    /// 会先回滚再返回错误，保证内存与磁盘一致。
     /// Apply a partial update, validate, persist, and keep the config lock held.
     ///
     /// The returned update lets a caller finish a dependent operation, such as restarting
@@ -83,6 +99,10 @@ impl ConfigStore {
         })
     }
 
+    /// 应用部分更新、校验并落盘，返回新配置。
+    ///
+    /// 校验失败时，内存中的配置先回滚到 patch 前的状态再返回错误，
+    /// 保证内存与磁盘一致。
     /// Apply a partial update, validate, persist to disk, and return the new config.
     ///
     /// If validation fails, the in-memory config is rolled back to its pre-patch state
@@ -128,6 +148,7 @@ mod tests {
         assert_eq!(result.key_listener.key_name, "space");
         assert_eq!(result.transcriber.language, "en");
 
+        // 验证持久化：从磁盘重新加载
         // Verify persistence: reload from disk
         let path = dir.path().join("altgo.toml");
         let reloaded = Config::load(&path).unwrap();
@@ -152,6 +173,7 @@ mod tests {
         let (store, _dir) = temp_store();
         let patch: ConfigPatch = serde_json::from_str(r#"{"language":"en"}"#).unwrap();
         let result = store.apply_patch(patch).await.unwrap();
+        // 未修改的字段保留默认值
         // Unchanged fields keep defaults
         assert_eq!(result.key_listener.key_name, "Alt_R");
         assert_eq!(result.transcriber.model, "");
@@ -161,6 +183,7 @@ mod tests {
     #[tokio::test]
     async fn apply_patch_rejects_invalid_config() {
         let (store, _dir) = temp_store();
+        // 开启润色但没有 API key 时应校验失败。
         // Enabling polishing without an API key should fail validation.
         let patch: ConfigPatch =
             serde_json::from_str(r#"{"polishLevel":"light","polishApiKey":""}"#).unwrap();
@@ -172,6 +195,7 @@ mod tests {
     #[tokio::test]
     async fn apply_patch_invalid_config_rolls_back_memory() {
         let (store, _dir) = temp_store();
+        // 先搭一个开启润色的合法配置。
         // Set up a valid config with polishing enabled.
         let patch: ConfigPatch = serde_json::from_str(
             r#"{"polishLevel":"light","polishApiKey":"polish-key","polishApiBaseUrl":"https://api.deepseek.com","polishModel":"deepseek-chat"}"#,
@@ -183,12 +207,14 @@ mod tests {
         assert_eq!(original.polisher.level, "light");
         assert_eq!(original.polisher.api_key, "polish-key");
 
+        // 再应用一个会部分篡改配置的非法 patch。
         // Now apply an invalid patch that would partially mutate config.
         let invalid_patch: ConfigPatch =
             serde_json::from_str(r#"{"polishLevel":"medium","polishApiKey":""}"#).unwrap();
         let result = store.apply_patch(invalid_patch).await;
         assert!(result.is_err());
 
+        // 内存必须已回滚到 patch 前状态。
         // Memory must be rolled back to the pre-patch state.
         let after = store.snapshot().await;
         assert_eq!(after.transcriber.model, "");
@@ -223,11 +249,13 @@ mod tests {
     #[tokio::test]
     async fn apply_patch_linux_evdev_null_clears() {
         let (store, _dir) = temp_store();
+        // 先设置 linux_evdev_code
         // First set linux_evdev_code
         let patch: ConfigPatch = serde_json::from_str(r#"{"linuxEvdevCode":56}"#).unwrap();
         let result = store.apply_patch(patch).await.unwrap();
         assert_eq!(result.key_listener.linux_evdev_code, Some(56));
 
+        // 再清除它
         // Then clear it
         let patch: ConfigPatch = serde_json::from_str(r#"{"linuxEvdevCode":null}"#).unwrap();
         let result = store.apply_patch(patch).await.unwrap();

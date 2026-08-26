@@ -16,6 +16,7 @@ export default function Layout({ children }: LayoutProps) {
 
   useEffect(() => {
     // 启动时静默检查更新（受配置控制；若网络失败静默忽略）
+    // Silent update check at startup (config-gated; network failures are ignored silently)
     const performSilentUpdateCheck = async () => {
       try {
         const cfg = await invoke<{ autoCheckUpdate: boolean }>("get_config");
@@ -27,6 +28,7 @@ export default function Layout({ children }: LayoutProps) {
         }
       } catch {
         // 静默检查失败不打扰用户
+        // A silent-check failure never disturbs the user
       }
     };
 

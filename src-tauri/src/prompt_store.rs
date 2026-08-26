@@ -1,3 +1,12 @@
+//! Prompt 模板管理。
+//!
+//! 从 `resources/prompts/` 加载 prompt 模板：
+//! - `base.txt`：共用指令 + 中文写作要求
+//! - `{level}-suffix.txt`：各档位专属指令
+//!
+//! 运行时组合：`base.txt` + `{level}-suffix.txt` → 完整 system prompt。
+//! 模板启动时加载一次；修改文件需重启应用生效。
+//!
 //! Prompt template management.
 //!
 //! Loads prompt templates from `resources/prompts/`:
@@ -13,6 +22,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
+/// Prompt 加载或校验过程中可能出现的错误。
 /// Errors that can occur during prompt loading or validation.
 #[derive(Debug, thiserror::Error)]
 pub enum PromptError {
@@ -29,6 +39,7 @@ pub enum PromptError {
     },
 }
 
+/// 管理 prompt 模板。
 /// Manages prompt templates.
 #[derive(Clone, Debug)]
 pub struct PromptStore {
@@ -51,6 +62,9 @@ impl std::fmt::Debug for PromptCache {
 }
 
 impl PromptStore {
+    /// 为给定 prompts 目录创建新的 PromptStore。
+    ///
+    /// 不会立即加载 prompt——调用 `load()` 或 `ensure_loaded()` 加载。
     /// Creates a new PromptStore for the given prompts directory.
     ///
     /// Does not load prompts immediately—call `load()` or `ensure_loaded()`.
@@ -64,6 +78,9 @@ impl PromptStore {
         }
     }
 
+    /// 从磁盘加载全部 prompt 模板。
+    ///
+    /// 任一文件缺失或为空时返回错误。
     /// Loads all prompt templates from disk.
     ///
     /// Returns error if any file is missing or empty.
@@ -82,6 +99,7 @@ impl PromptStore {
         Ok(())
     }
 
+    /// 缓存为空时从磁盘加载，否则返回已缓存的 prompt。
     /// Loads prompts if cache is empty, otherwise returns cached prompts.
     pub fn ensure_loaded(&self) -> Result<(), PromptError> {
         let cache = self.cache.lock().unwrap();
@@ -93,6 +111,9 @@ impl PromptStore {
         }
     }
 
+    /// 组合出指定润色档位的完整 system prompt。
+    ///
+    /// 未加载时返回错误。
     /// Composes the complete system prompt for the given polish level.
     ///
     /// Returns error if prompts haven't been loaded yet.
@@ -207,9 +228,11 @@ mod tests {
 
         let store = PromptStore::new(temp_dir.path().to_path_buf());
 
+        // 首次调用触发加载
         // First call loads
         assert!(store.ensure_loaded().is_ok());
 
+        // 第二次调用命中缓存
         // Second call uses cache
         assert!(store.ensure_loaded().is_ok());
     }

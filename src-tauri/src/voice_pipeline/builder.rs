@@ -1,4 +1,6 @@
 //! PipelineBuilder — 组件构造。
+//!
+//! PipelineBuilder — component construction.
 
 use std::sync::{Arc, Mutex};
 
@@ -10,6 +12,7 @@ use crate::transcriber::Transcriber;
 
 use super::context::PipelineContext;
 
+/// 从配置构建流水线各组件。
 /// Builds pipeline components from configuration.
 pub struct PipelineBuilder {
     cfg: Arc<crate::config::Config>,
@@ -20,6 +23,7 @@ impl PipelineBuilder {
         Self { cfg }
     }
 
+    /// 从配置构建录音器。
     /// Build recorder from config.
     pub fn build_recorder(&self) -> Box<dyn Recorder> {
         Box::new(crate::recorder::PlatformRecorder::new(
@@ -27,6 +31,9 @@ impl PipelineBuilder {
         ))
     }
 
+    /// 从配置构建本地转写引擎。
+    ///
+    /// 配置的本地模型缺失或加载失败时返回错误。
     /// Build the local transcription engine from config.
     ///
     /// Returns error if the configured local model is missing or fails to load.
@@ -59,6 +66,9 @@ impl PipelineBuilder {
         LLMFormatter::from_config_with_sources(&self.cfg).map_err(PipelineError::fatal_polisher)
     }
 
+    /// 从配置构建按键监听器。
+    ///
+    /// 返回 boxed trait object，供流水线跨平台使用。
     /// Build key listener from config.
     ///
     /// Returns a boxed trait object for platform-independent use in the pipeline.
@@ -73,11 +83,13 @@ impl PipelineBuilder {
         Ok(Box::new(listener))
     }
 
+    /// 从配置读取润色级别。
     /// Get polish level from config.
     pub fn polish_level(&self) -> PolishLevel {
         PolishLevel::effective(&self.cfg.polisher.level)
     }
 
+    /// 从配置构建完整的流水线上下文。
     /// Build the full pipeline context from configuration.
     pub fn build_context(&self) -> Result<PipelineContext, PipelineError> {
         let recorder = self.build_recorder();
@@ -173,6 +185,8 @@ mod tests {
 
     // 端到端入口测试：`run()` 必须在 build_context 失败时把错误上报到 sink。
     // 故障点属于 builder（构建上下文），因此下沉到本模块。
+    // End-to-end entry test: when build_context fails, `run()` must report the error to the sink.
+    // The fault belongs to the builder (context construction), hence this module.
     #[tokio::test]
     async fn run_reports_error_when_context_build_fails() {
         use crate::voice_pipeline::sink::TranscriptionResult;
@@ -191,6 +205,7 @@ mod tests {
             fn on_key_listener_backend(&self, _: &str) {}
         }
 
+        // 用未知的 polisher protocol 强制 build_context 失败。
         // Force build_context to fail via unknown polisher protocol.
         let mut cfg = test_config();
         cfg.polisher.protocol = "unknown".to_string();

@@ -26,6 +26,7 @@ export function useTauriEvent<T>(
       active = false;
       unlistenPromise.then((fn) => fn());
     };
+    // callback 特意不作为依赖项；需要的消费方可自行 memo。
     // callback is intentionally not a dep; consumers that need it can memoise.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [event]);

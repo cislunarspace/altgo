@@ -35,6 +35,10 @@ pub use sink::{DispatchOutcome, PipelineSink, TranscriptionResult};
 
 use std::sync::Arc;
 
+/// 端到端运行语音流水线。
+///
+/// 阻塞当前异步任务直到 `stop_rx` 触发。
+/// 所有状态变化与结果均经 `sink` 上报。
 /// Run the voice pipeline end-to-end.
 ///
 /// Blocks the current async task until `stop_rx` fires.
