@@ -129,8 +129,18 @@ jobs:
           if-no-files-found: warn
 
   build-windows:
-    name: 构建 Windows 安装包 (x64)
+    name: 构建 Windows 安装包 (${{ matrix.arch }})
     needs: validate
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            target: x86_64-pc-windows-msvc
+            sherpa-archive: sherpa-onnx-v1.13.6-win-x64-static-MT-Release-lib.tar.bz2
+          - arch: arm64
+            target: aarch64-pc-windows-msvc
+            sherpa-archive: sherpa-onnx-v1.13.6-win-arm64-static-MT-Release-lib.tar.bz2
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -138,10 +148,22 @@ jobs:
           persist-credentials: false
 
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
         with:
+          key: ${{ matrix.target }}
           workspaces: |
             src-tauri -> target
+
+      - name: Preload sherpa-onnx prebuilt libs
+        shell: bash
+        run: |
+          mkdir -p src-tauri/target/sherpa-onnx-prebuilt
+          ARCHIVE="${{ matrix.sherpa-archive }}"
+          URL="https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.6/${ARCHIVE}"
+          curl -fSL -o "src-tauri/target/sherpa-onnx-prebuilt/${ARCHIVE}" "${URL}"
+          tar -xjf "src-tauri/target/sherpa-onnx-prebuilt/${ARCHIVE}" -C src-tauri/target/sherpa-onnx-prebuilt/
 
       - uses: actions/setup-node@v4
         with:
@@ -154,10 +176,16 @@ jobs:
         working-directory: frontend
 
       - name: Run tests
+        if: matrix.arch == 'x64'
         run: cargo test --manifest-path=src-tauri/Cargo.toml --lib
 
+      # arm64 在 x64 runner 上交叉编译，只能验证编译（无法执行 arm64 测试二进制）
+      - name: Check compile (arm64)
+        if: matrix.arch == 'arm64'
+        run: cargo check --manifest-path=src-tauri/Cargo.toml --target ${{ matrix.target }}
+
       - name: 构建 NSIS 安装包与 MSI
-        run: npm --prefix frontend exec -- tauri build --bundles nsis,msi
+        run: npm --prefix frontend exec -- tauri build --target ${{ matrix.target }} --bundles nsis,msi
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -166,14 +194,14 @@ jobs:
       - name: 上传 Windows 安装包产物
         uses: actions/upload-artifact@v4
         with:
-          name: altgo-windows-packages
+          name: altgo-windows-${{ matrix.arch }}-packages
           path: |
-            src-tauri/target/release/bundle/nsis/*-setup.exe
-            src-tauri/target/release/bundle/nsis/*-setup.exe.sig
-            src-tauri/target/release/bundle/nsis/*-setup.nsis.zip*
-            src-tauri/target/release/bundle/nsis/latest.json
-            src-tauri/target/release/bundle/msi/*.msi
-            src-tauri/target/release/bundle/msi/*.msi.zip*
+            src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*-setup.exe
+            src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*-setup.exe.sig
+            src-tauri/target/${{ matrix.target }}/release/bundle/nsis/*-setup.nsis.zip*
+            src-tauri/target/${{ matrix.target }}/release/bundle/nsis/latest.json
+            src-tauri/target/${{ matrix.target }}/release/bundle/msi/*.msi
+            src-tauri/target/${{ matrix.target }}/release/bundle/msi/*.msi.zip*
           if-no-files-found: warn
 
   gen-aur:
@@ -255,8 +283,8 @@ jobs:
           mapfile -t appimages < <(find release-assets -type f -name '*.AppImage' | sort)
           mapfile -t exes < <(find release-assets -type f -name '*-setup.exe' | sort)
           mapfile -t msis < <(find release-assets -type f -name '*.msi' | sort)
-          if [[ "${#debs[@]}" -ne 2 || "${#rpms[@]}" -ne 2 || "${#appimages[@]}" -ne 2 || "${#exes[@]}" -ne 1 || "${#msis[@]}" -ne 1 ]]; then
-            echo "错误：预期两份 deb、两份 rpm、两份 AppImage、一份 exe 和一份 msi，实际为 ${#debs[@]} 份 deb、${#rpms[@]} 份 rpm、${#appimages[@]} 份 AppImage、${#exes[@]} 份 exe、${#msis[@]} 份 msi" >&2
+          if [[ "${#debs[@]}" -ne 2 || "${#rpms[@]}" -ne 2 || "${#appimages[@]}" -ne 2 || "${#exes[@]}" -ne 2 || "${#msis[@]}" -ne 2 ]]; then
+            echo "错误：预期两份 deb、两份 rpm、两份 AppImage、两份 exe 和两份 msi（Windows x64 与 arm64 各一份），实际为 ${#debs[@]} 份 deb、${#rpms[@]} 份 rpm、${#appimages[@]} 份 AppImage、${#exes[@]} 份 exe、${#msis[@]} 份 msi" >&2
             find release-assets -type f | sort >&2
             exit 1
           fi

@@ -60,8 +60,8 @@ jobs:
         run: |
           mkdir -p src-tauri/target/sherpa-onnx-prebuilt
           ARCH="${{ matrix.arch == 'amd64' && 'x64' || 'aarch64' }}"
-          ARCHIVE="sherpa-onnx-v1.13.5-linux-${ARCH}-static-lib.tar.bz2"
-          URL="https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.5/${ARCHIVE}"
+          ARCHIVE="sherpa-onnx-v1.13.6-linux-${ARCH}-static-lib.tar.bz2"
+          URL="https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.6/${ARCHIVE}"
           curl -fSL -o "src-tauri/target/sherpa-onnx-prebuilt/${ARCHIVE}" "${URL}"
           tar -xjf "src-tauri/target/sherpa-onnx-prebuilt/${ARCHIVE}" -C src-tauri/target/sherpa-onnx-prebuilt/
 
@@ -101,14 +101,27 @@ jobs:
   check-windows:
     name: Check (windows)
     runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            target: x86_64-pc-windows-msvc
+            sherpa-archive: sherpa-onnx-v1.13.6-win-x64-static-MT-Release-lib.tar.bz2
+          - arch: arm64
+            target: aarch64-pc-windows-msvc
+            sherpa-archive: sherpa-onnx-v1.13.6-win-arm64-static-MT-Release-lib.tar.bz2
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
 
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
         with:
+          key: ${{ matrix.target }}
           workspaces: |
             src-tauri -> target
 
@@ -116,8 +129,8 @@ jobs:
         shell: bash
         run: |
           mkdir -p src-tauri/target/sherpa-onnx-prebuilt
-          ARCHIVE="sherpa-onnx-v1.13.5-win-x64-static-MT-Release-lib.tar.bz2"
-          URL="https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.5/${ARCHIVE}"
+          ARCHIVE="${{ matrix.sherpa-archive }}"
+          URL="https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.6/${ARCHIVE}"
           curl -fSL -o "src-tauri/target/sherpa-onnx-prebuilt/${ARCHIVE}" "${URL}"
           tar -xjf "src-tauri/target/sherpa-onnx-prebuilt/${ARCHIVE}" -C src-tauri/target/sherpa-onnx-prebuilt/
 
@@ -132,9 +145,15 @@ jobs:
         working-directory: frontend
 
       - name: Run tests
+        if: matrix.arch == 'x64'
         run: cargo test --manifest-path=src-tauri/Cargo.toml --lib
 
+      # arm64 在 x64 runner 上交叉编译，只能验证编译（无法执行 arm64 测试二进制）
+      - name: Check compile (arm64)
+        if: matrix.arch == 'arm64'
+        run: cargo check --manifest-path=src-tauri/Cargo.toml --target ${{ matrix.target }}
+
       - name: Build Tauri GUI
-        run: npm --prefix frontend exec -- tauri build --bundles nsis
+        run: npm --prefix frontend exec -- tauri build --target ${{ matrix.target }} --bundles nsis
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

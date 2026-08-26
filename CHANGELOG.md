@@ -12,6 +12,16 @@
 
 - **⚠️ Windows 文本自动输入默认改为关闭**：此前 Windows 上转写完成后会无条件把文本直接输入到当前焦点窗口的光标处，属侵入性行为且无法关闭。现在默认只写入剪贴板，需要自动输入的用户请在设置页开启「自动输入到光标位置」（#138）。**存量 Windows 用户升级后行为变化：不再自动输入，请手动粘贴或到设置中开启**。注入本身保持一次性整段输入（非流式），Linux 行为不变。
 
+## v2.6.5 (2026-08-24)
+
+### Added
+
+- **Windows arm64 支持**：sherpa-onnx 升级至 1.13.6（上游已发布 Windows arm64 预编译库），CI 与 Release 工作流新增 `aarch64-pc-windows-msvc` 架构构建，发布产物新增 arm64 的 NSIS 安装包与 MSI（#131）。
+
+### Notes
+
+- **winget / Scoop 分发**：winget-pkgs 与 ScoopInstaller/Extras 的提交清单已入库（`packaging/winget/`、`packaging/scoop/`）并提交上游 PR；审核通过后可用 `winget install cislunarspace.altgo` 与 `scoop install extras/altgo` 安装（#130）。Flatpak / Snap 的沙箱可行性验证仍另行跟踪。
+
 ## v2.6.4 (2026-08-24)
 
 ### Added

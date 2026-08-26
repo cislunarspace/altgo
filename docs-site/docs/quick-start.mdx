@@ -5,7 +5,7 @@ title: 快速开始
 
 # 快速开始
 
-本软件支持 **Linux**（Ubuntu 22.04+）的 **x86_64** 与 **aarch64** 架构。Linux 构建和 Release 在 **Ubuntu 22.04** 上验证；其他发行版可能可用但未保证。目前不支持 Windows 和 macOS。
+本软件支持 **Linux**（Ubuntu 22.04+）的 **x86_64** 与 **aarch64** 架构，以及 **Windows 10+**（x86_64 与 arm64）。Linux 构建和 Release 在 **Ubuntu 22.04** 上验证；其他发行版可能可用但未保证。目前不支持 macOS。
 
 转写引擎内嵌 sherpa-onnx（SenseVoice），无需单独安装任何二进制。
 
@@ -30,6 +30,12 @@ sudo usermod -aG input "$USER"
    - 按需配置 **润色**、**外观**、**触发键**（可用「按下以设置」）；
    - 点击 **保存**。
 4. 识别结果会**写入剪贴板**并在**悬浮窗**中展示；需要时可在悬浮窗内再次复制。
+
+### Windows
+
+1. 从 [Releases](https://github.com/cislunarspace/altgo/releases) 下载与设备架构（x64 或 arm64）对应的 **`*-setup.exe`**（NSIS 安装器）或 **`*.msi`**。
+2. 双击安装，在开始菜单启动 altgo。
+3. 打开 **设置**，完成模型下载、润色、触发键等配置后点击 **保存**。
 
 
 **不要**把「先复制 `configs/altgo.toml` 再手改」当作默认路径——那是高级用法。日常用户只使用界面即可。
