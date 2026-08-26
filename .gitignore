@@ -38,3 +38,6 @@ whisper.cpp/
 
 # Local tooling
 .zcode/
+
+# TypeScript incremental build info (generated)
+/frontend/tsconfig.tsbuildinfo
