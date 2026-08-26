@@ -10,7 +10,7 @@ export type ProviderCategory =
   | "official"      // 官方（OpenAI、Anthropic）
   | "cn_official"   // 国产官方（DeepSeek、Kimi、智谱等）
   | "aggregator"    // 聚合服务（OpenRouter、SiliconFlow 等）
-  | "third_party"   // 第三方中转（迁移自 cc-switch）
+  | "third_party"   // 第三方中转
   | "custom";       // 自定义
 
 export interface ModelCatalogEntry {

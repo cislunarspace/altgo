@@ -231,10 +231,6 @@ impl RecorderError {
     }
 }
 
-// Conversion from anyhow::Error for gradual migration was removed: modules now
-// return typed errors directly (TranscriberError, PolisherError, RecorderError)
-// and the pipeline aggregates them at the boundary.
-
 /// Output (clipboard) errors.
 #[derive(Debug, thiserror::Error)]
 pub enum OutputError {

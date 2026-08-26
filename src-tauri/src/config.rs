@@ -114,8 +114,8 @@ impl Default for RecorderConfig {
 
 /// 本地语音识别配置。
 ///
-/// 旧版本中的 `engine`、`api_key`、`api_base_url`、`temperature` 和 `prompt`
-/// 已从配置结构中移除；遗留 TOML 字段会被 `serde(default)` 忽略。
+/// 遗留的旧版 TOML 字段会被 `serde(default)` 静默忽略
+/// （见测试 `test_load_ignores_legacy_cloud_transcriber_fields`）。
 #[derive(Debug, Deserialize, Clone, serde::Serialize)]
 #[serde(default)]
 pub struct TranscriberConfig {

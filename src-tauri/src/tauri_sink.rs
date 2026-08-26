@@ -207,7 +207,7 @@ impl PipelineSink for TauriPipelineSink {
 }
 
 // 测试通过注入 `PipelineEventEmitter` fake 来验证事件内容与顺序，
-// 不再依赖真实 Wry app，因此可在 Linux 的 `cargo test --lib` 下直接运行。
+// 不依赖真实 Wry app，可在 Linux 的 `cargo test --lib` 下直接运行。
 #[cfg(test)]
 mod tests {
     use super::*;

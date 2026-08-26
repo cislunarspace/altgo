@@ -277,8 +277,8 @@ export function Overlay() {
     isExiting ? (isCrossfading ? "island-crossfade" : "island-exit") : "island-enter"
   }`;
 
-  // done 事件可能先于 transcription-result 到达；结果未到时继续显示
-  // processing 视图，避免渲染出没有内容的空 island（闪烁）。
+  // 生产端保证 transcription-result 先于 done 到达；若乱序先收到 done 且
+  // 结果未到，继续显示 processing 视图，避免渲染出没有内容的空 island（闪烁）。
   const effectivePhase = phase === "done" && !result ? "processing" : phase;
 
   if (phase === "done" && result) {

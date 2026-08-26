@@ -1,7 +1,7 @@
 //! Windows 输出模块。
 //!
 //! 剪贴板通过 arboard 写入；文本注入通过 SendInput 的 Unicode 事件实现
-//! （支持中日韩字符），代码恢复自删除前的原生实现（b6513e9^）。
+//! （支持中日韩字符）。
 
 use super::Output;
 use crate::error::OutputError;

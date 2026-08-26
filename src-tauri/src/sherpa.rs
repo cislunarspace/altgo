@@ -1,9 +1,8 @@
 //! SenseVoice 本地语音识别后端（sherpa-onnx 内嵌）。
 //!
-//! 与子进程方案不同，`SherpaTranscriber` 把 sherpa-onnx 编译进主程序：
-//! 模型在管道启动时加载一次并常驻内存，之后每句话只做波形解码与推理，
-//! 不再有进程启动与模型冷载成本（SenseVoice int8 模型约 230MB，冷载
-//! 往往比转写本身还久）。
+//! sherpa-onnx 编译进主程序：模型在管道启动时加载一次并常驻内存，
+//! 之后每句话只做波形解码与推理。不走子进程方案——SenseVoice int8 模型
+//! 约 230MB，每次冷载往往比转写本身还久。
 //!
 //! 推理是 CPU 密集的同步操作，通过 `tokio::task::spawn_blocking` 放进
 //! blocking 线程池，避免阻塞异步 runtime。

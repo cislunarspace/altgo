@@ -23,8 +23,6 @@ pub enum Command {
     StopRecord,
 }
 
-// 使用 key_listener::KeyEvent，不再重复定义
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum State {
     Idle,
