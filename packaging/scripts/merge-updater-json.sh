@@ -1,10 +1,14 @@
 #!/usr/bin/env bash
-# 合并各平台打包生成的 updater JSON（如 latest.json）为一个完整的 latest.json。
+# 由各平台 updater 签名产物（.AppImage.tar.gz / *-setup.nsis.zip 及其 .sig）
+# 合成 updater 元数据 latest.json。
+# 背景：tauri build 只产出签名包，不生成 latest.json（那是 tauri-action 的职责），
+# 本脚本在 release 流程中承担这一职责。
 # 输入参数：
 #   $1 - 搜索目录（如 release-assets）
 #   $2 - 输出文件路径（如 release-assets/latest.json）
 #   $3 - 版本号（如 2.6.4）
 #   $4 - 发布说明文件路径（可选，如 release_notes.md）
+# 环境变量：GITHUB_REPOSITORY（形如 owner/repo），用于拼产物下载 URL。
 
 set -euo pipefail
 
@@ -12,61 +16,65 @@ SEARCH_DIR="${1:?缺少搜索目录}"
 OUTPUT_FILE="${2:?缺少输出文件路径}"
 VERSION="${3:?缺少版本号}"
 NOTES_FILE="${4:-}"
+REPO="${GITHUB_REPOSITORY:?缺少 GITHUB_REPOSITORY 环境变量（形如 owner/repo）}"
 
 node -e '
 const fs = require("fs");
 const path = require("path");
 
-const searchDir = process.argv[1];
-const outputFile = process.argv[2];
-const version = process.argv[3];
-const notesFile = process.argv[4];
+const [searchDir, outputFile, version, notesFile, repo] = process.argv.slice(1);
+const tag = `v${version.replace(/^v/, "")}`;
 
-let notes = "";
+let notes;
 if (notesFile && fs.existsSync(notesFile)) {
   notes = fs.readFileSync(notesFile, "utf8");
 }
 
-function findJsonFiles(dir) {
-  let results = [];
-  if (!fs.existsSync(dir)) return results;
-  const list = fs.readdirSync(dir, { withFileTypes: true });
-  for (const entry of list) {
-    const fullPath = path.join(dir, entry.name);
-    if (entry.isDirectory()) {
-      results = results.concat(findJsonFiles(fullPath));
-    } else if (entry.name === "latest.json" && fullPath !== path.resolve(outputFile)) {
-      results.push(fullPath);
-    }
+function walk(dir) {
+  const results = [];
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) results.push(...walk(full));
+    else results.push(full);
   }
   return results;
 }
 
-const jsonFiles = findJsonFiles(searchDir);
-console.log(`找到 ${jsonFiles.length} 个 platform latest.json 文件:`, jsonFiles);
+// updater 产物文件名后缀 → updater 平台键（{os}-{arch}，见 tauri-plugin-updater）。
+// Linux 用 .AppImage.tar.gz、Windows 用 .nsis.zip（createUpdaterArtifacts 为
+// v1Compatible 时的 updater 包；原始安装包不进 latest.json）。
+const RULES = [
+  [/_amd64\.AppImage\.tar\.gz$/, "linux-x86_64"],
+  [/_aarch64\.AppImage\.tar\.gz$/, "linux-aarch64"],
+  [/_x64-setup\.nsis\.zip$/, "windows-x86_64"],
+  [/_arm64-setup\.nsis\.zip$/, "windows-aarch64"],
+];
 
-const merged = {
-  version: `v${version.replace(/^v/, "")}`,
+const files = walk(searchDir);
+const platforms = {};
+for (const [pattern, platform] of RULES) {
+  const bundle = files.find((f) => pattern.test(f));
+  if (!bundle) {
+    console.error(`错误：未找到 ${platform} 的 updater 产物（匹配 ${pattern}）`);
+    process.exit(1);
+  }
+  const sigFile = `${bundle}.sig`;
+  if (!fs.existsSync(sigFile)) {
+    console.error(`错误：缺少签名文件 ${sigFile}`);
+    process.exit(1);
+  }
+  platforms[platform] = {
+    signature: fs.readFileSync(sigFile, "utf8").trim(),
+    url: `https://github.com/${repo}/releases/download/${tag}/${path.basename(bundle)}`,
+  };
+}
+
+const manifest = {
+  version: tag,
   notes: notes || undefined,
   pub_date: new Date().toISOString(),
-  platforms: {}
+  platforms,
 };
-
-for (const f of jsonFiles) {
-  try {
-    const content = JSON.parse(fs.readFileSync(f, "utf8"));
-    if (content.platforms) {
-      Object.assign(merged.platforms, content.platforms);
-    }
-  } catch (err) {
-    console.error(`解析 ${f} 失败:`, err);
-  }
-}
-
-if (Object.keys(merged.platforms).length > 0) {
-  fs.writeFileSync(outputFile, JSON.stringify(merged, null, 2), "utf8");
-  console.log(`已成功生成合并后的 ${outputFile}，包含平台:`, Object.keys(merged.platforms));
-} else {
-  console.log("未发现平台更新元数据，跳过 latest.json 生成。");
-}
-' "${SEARCH_DIR}" "${OUTPUT_FILE}" "${VERSION}" "${NOTES_FILE}"
+fs.writeFileSync(outputFile, JSON.stringify(manifest, null, 2), "utf8");
+console.log(`已生成 ${outputFile}，包含平台: ${Object.keys(platforms).join(", ")}`);
+' "${SEARCH_DIR}" "${OUTPUT_FILE}" "${VERSION}" "${NOTES_FILE}" "${REPO}"
