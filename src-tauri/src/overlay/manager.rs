@@ -35,9 +35,12 @@ const EDGE_OFFSET: f64 = 80.0;
 const HIDE_DELAY: Duration = Duration::from_millis(220);
 
 /// 自动淡出生产参数：检测到输入活动后多久淡出（ADR 0006）。
+/// 仅 Windows 空闲感知策略使用；Linux 走固定超时（见下）。
+#[cfg(target_os = "windows")]
 const AUTO_FADE_DELAY: Duration = Duration::from_secs(3);
 
 /// 空闲感知的轮询间隔。
+#[cfg(target_os = "windows")]
 const ACTIVITY_POLL_INTERVAL: Duration = Duration::from_millis(500);
 
 /// Linux 固定超时淡出时长（Wayland 无统一空闲 API 的降级策略，ADR 0006）。
