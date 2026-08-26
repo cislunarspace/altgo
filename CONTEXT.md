@@ -49,6 +49,12 @@
 **悬浮窗（Overlay）**
 录音、处理与结果显示时出现的悬浮状态窗口。定位在主显示器（Linux 用 `xrandr` 取显示器几何），位置可配置（`gui.overlay_position`：`bottom_center` 默认 / `top_center`），对全部阶段生效。Wayland 协议不允许客户端定位窗口（`set_position` 为 no-op），因此启动时检测会话：Wayland 且未显式设置 `GDK_BACKEND` 时切到 X11 后端（XWayland），定位才能生效。状态切换时由 `TauriPipelineSink` 经 `OverlaySink` 抽象管理；`TauriPipelineSink` 只描述意图（"recording" / "processing" / "hidden" / "done"），浮窗管理器把它转成窗口尺寸、位置、显示与隐藏。窗口在全部阶段使用一个固定尺寸——会话中调整透明窗口尺寸会在 Linux 合成器上产生黑色边缘，所以阶段切换只替换前端内容（CSS 交叉淡入）。`hidden` 先发出，实际隐藏延迟约 220ms 以便退出动画可见。转写结果路径上，`transcription-result` 在 `done` 浮窗状态之前发出，前端不会渲染出空 island。island 不使用 `box-shadow`——半透明阴影叠加在透明窗口上会在某些 Linux 合成器上合成出暗色光晕。
 
+**自动淡出（Auto-fade）**
+结果浮窗（done 阶段）的退出策略：无用户输入活动时无限保留，检测到输入活动后延时数秒自动隐藏。_Avoid_: 自动关闭、auto-hide。
+
+**文本注入（Text Injection）**
+转写完成后把最终文本一次性输入到当前焦点窗口光标处的输出动作，仅 Windows 提供；由 `inject_text` 配置控制，默认关闭。_Avoid_: 自动粘贴、流式插入。
+
 **润色器（Polisher）**
 可选的 LLM 后处理步骤。由 `PolishLevel`（`none`/`light`/`medium`/`heavy`）控制。与任意 OpenAI 兼容聊天 API 或 Anthropic Messages API 通信。
 
@@ -67,7 +73,10 @@
 语音管道期望录音器以固定的 16kHz、单声道、16 位 PCM WAV 字节返回音频。SenseVoice 只接受这一采样率，其他配置值会在管道启动前被拒绝。
 
 **音频电平（Audio Level）**
-录音期间由录音器从实时 PCM 音频块计算出的感知音量大小（范围 0.0 ~ 1.0）。录音线程在读取音频流时计算均方根（RMS）并通过非线性增益映射为感知电平，经 `PipelineSink::on_audio_level` 和 Tauri `audio-level` 事件以轻量节流频率（约 20~30 FPS）派发给悬浮窗，用于驱动实时音量律动波形。
+录音期间由录音器从实时 PCM 音频块计算出的感知音量大小（范围 0.0 ~ 1.0）。录音线程在读取音频流时计算均方根（RMS）并通过非线性增益映射为感知电平，经 `PipelineSink::on_audio_level` 和 Tauri `audio-level` 事件以轻量节流频率（约 20~30 FPS）派发给悬浮窗，作为电平轨迹的实时采样来源。
+
+**电平轨迹（Level Trace）**
+录音期间由连续音频电平采样累积成的滚动历史，显示最近一段时间的说话痕迹；松开激活键后冻结保留，直到结果浮窗出现。_Avoid_: 声纹、波形图。
 
 
 ## 按键输入

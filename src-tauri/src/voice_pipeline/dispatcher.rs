@@ -28,9 +28,12 @@ pub trait TranscriptionDispatch: Send + Sync + 'static {
 }
 
 /// 生产实现：把转写结果转发给 `process_transcription_result`。
+///
+/// `inject_text` 构造时从配置读入（仅 Windows 实现注入；关闭时仅写剪贴板）。
 pub struct TranscriptionDispatcherImpl {
     pub output: Arc<dyn Output>,
     pub history_store: HistoryStore,
+    pub inject_text: bool,
 }
 
 impl TranscriptionDispatch for TranscriptionDispatcherImpl {
@@ -41,8 +44,16 @@ impl TranscriptionDispatch for TranscriptionDispatcherImpl {
     ) -> Pin<Box<dyn Future<Output = Option<DispatchOutcome>> + Send + 'a>> {
         let output_handle = Arc::clone(&self.output);
         let store = self.history_store.clone();
+        let inject_text = self.inject_text;
         Box::pin(async move {
-            process_transcription_result(output, prefer_polished, &*output_handle, &store).await
+            process_transcription_result(
+                output,
+                prefer_polished,
+                inject_text,
+                &*output_handle,
+                &store,
+            )
+            .await
         })
     }
 }

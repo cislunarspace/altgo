@@ -154,10 +154,13 @@ pub async fn dispatch_history_polish(
 
 /// Process a transcription result: select text, write clipboard, append history.
 ///
+/// `inject_text` 为 `true` 时（仅 Windows 有实现）把选中文本注入到当前
+/// 焦点窗口；为 `false` 时输出动作仅剩剪贴板写入。
 /// Returns `None` if the transcription was empty (no action taken).
 pub async fn process_transcription_result(
     output: &TranscriptionResult,
     prefer_polished: bool,
+    inject_text: bool,
     output_adapter: &dyn Output,
     history_store: &HistoryStore,
 ) -> Option<DispatchOutcome> {
@@ -181,15 +184,17 @@ pub async fn process_transcription_result(
     }
 
     // Windows: 注入到当前焦点窗口；其他平台为 no-op
-    let text_clone = text_to_use.clone();
-    let output_handle = output_adapter.clone_box();
-    let injected = tokio::task::spawn_blocking(move || output_handle.inject_text(&text_clone))
-        .await
-        .ok()
-        .and_then(|r| r.ok())
-        .is_some();
-    if !injected {
-        tracing::warn!("failed to inject text");
+    if inject_text {
+        let text_clone = text_to_use.clone();
+        let output_handle = output_adapter.clone_box();
+        let injected = tokio::task::spawn_blocking(move || output_handle.inject_text(&text_clone))
+            .await
+            .ok()
+            .and_then(|r| r.ok())
+            .is_some();
+        if !injected {
+            tracing::warn!("failed to inject text");
+        }
     }
 
     // Append to history
@@ -268,12 +273,13 @@ mod tests {
         use crate::history::HistoryStore;
 
         let output = test_output("", "", false);
-        let (output_adapter, _) = super::super::test_doubles::FakeOutput::new();
+        let (output_adapter, _, _) = super::super::test_doubles::FakeOutput::new();
         let temp_dir = tempfile::tempdir().unwrap();
         let history_store = HistoryStore::new(temp_dir.path().join("history.json"));
 
         let result =
-            process_transcription_result(&output, true, &output_adapter, &history_store).await;
+            process_transcription_result(&output, true, false, &output_adapter, &history_store)
+                .await;
         assert!(result.is_none());
     }
 
@@ -282,18 +288,61 @@ mod tests {
         use crate::history::HistoryStore;
 
         let output = test_output("raw text", "polished text", false);
-        let (output_adapter, writes) = super::super::test_doubles::FakeOutput::new();
+        let (output_adapter, writes, _) = super::super::test_doubles::FakeOutput::new();
         let temp_dir = tempfile::tempdir().unwrap();
         let history_store = HistoryStore::new(temp_dir.path().join("history.json"));
 
         let result =
-            process_transcription_result(&output, true, &output_adapter, &history_store).await;
+            process_transcription_result(&output, true, false, &output_adapter, &history_store)
+                .await;
         assert!(result.is_some());
         let result = result.unwrap();
         assert_eq!(result.text, "polished text");
         assert!(result.history_appended);
         assert_eq!(writes.lock().unwrap().len(), 1);
         assert_eq!(writes.lock().unwrap()[0], "polished text");
+    }
+
+    #[tokio::test]
+    async fn test_process_transcription_result_inject_disabled_writes_clipboard_only() {
+        use crate::history::HistoryStore;
+
+        let output = test_output("raw text", "polished text", false);
+        let (output_adapter, writes, injections) = super::super::test_doubles::FakeOutput::new();
+        let temp_dir = tempfile::tempdir().unwrap();
+        let history_store = HistoryStore::new(temp_dir.path().join("history.json"));
+
+        let result =
+            process_transcription_result(&output, true, false, &output_adapter, &history_store)
+                .await;
+
+        assert!(result.is_some());
+        assert_eq!(writes.lock().unwrap().len(), 1, "剪贴板照常写入");
+        assert!(
+            injections.lock().unwrap().is_empty(),
+            "inject_text 关闭时不得注入文本"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_process_transcription_result_inject_enabled_injects_selected_text() {
+        use crate::history::HistoryStore;
+
+        let output = test_output("raw text", "polished text", false);
+        let (output_adapter, _, injections) = super::super::test_doubles::FakeOutput::new();
+        let temp_dir = tempfile::tempdir().unwrap();
+        let history_store = HistoryStore::new(temp_dir.path().join("history.json"));
+
+        let result =
+            process_transcription_result(&output, true, true, &output_adapter, &history_store)
+                .await;
+
+        assert!(result.is_some());
+        assert_eq!(
+            injections.lock().unwrap().as_slice(),
+            &["polished text".to_string()],
+            "注入内容应与剪贴板一致（经 select_text 选择后的文本）"
+        );
     }
 
     #[tokio::test]
@@ -317,7 +366,8 @@ mod tests {
         let history_store = HistoryStore::new(temp_dir.path().join("history.json"));
 
         let result =
-            process_transcription_result(&output, true, &FailingOutput, &history_store).await;
+            process_transcription_result(&output, true, false, &FailingOutput, &history_store)
+                .await;
         assert!(result.is_some());
         assert_eq!(result.unwrap().text, "polished text");
     }

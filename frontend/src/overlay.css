@@ -50,9 +50,10 @@
 
 .island {
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 10px;
+  gap: 8px;
   padding: 12px 20px;
   /* Replaced backdrop-filter with solid translucent background for GPU composite performance */
   background: var(--overlay-surface-solid);
@@ -95,25 +96,35 @@
 }
 
 /* ============================================
-   Recording Indicator & Waveform Bars
+   Level Trace — 滚动电平轨迹（录音）与冻结轨迹（处理）
    ============================================ */
 
-.recording-bars {
+/* 最新一帧在右侧；帧数少时整体居中（fit-content + auto margin），
+   帧满后占满可用宽度、旧帧从左侧裁掉。 */
+.level-trace {
   display: flex;
   align-items: center;
-  gap: 3px;
-  height: 16px;
-  padding: 0 1px;
+  justify-content: flex-end;
+  gap: 2px;
+  height: 22px;
+  max-width: 100%;
+  width: fit-content;
+  margin: 0 auto;
+  overflow: hidden;
 }
 
-.recording-bar {
+.trace-bar {
+  flex-shrink: 0;
   width: 3px;
-  height: 14px;
+  min-height: 3px;
+  border-radius: 1px;
   background: var(--color-red);
-  border-radius: var(--radius-full);
-  transform-origin: center center;
-  transition: transform 60ms ease-out;
-  will-change: transform;
+}
+
+/* 处理阶段：轨迹冻结（不再有新帧），换成琥珀色与转圈/进度条一致，
+   表明「这段声音正在被处理」而非「还在录音」。 */
+.level-trace--frozen .trace-bar {
+  background: var(--color-amber);
 }
 
 .recording-indicator {

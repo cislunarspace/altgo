@@ -100,20 +100,47 @@ describe("Overlay 相位转换", () => {
     expect(container.querySelector(".island")).toBeNull();
   });
 
-  it("recording 状态下展示 4 根动态波形条并随 audio-level 缩放", () => {
+  it("recording 状态下电平轨迹随 audio-level 累积，processing 冻结", () => {
     const { container } = render(<Overlay />);
     emitPhase("recording");
+    // 保证「距上次采样」超过采样间隔（fake timers 的起点可能是 0）。
+    act(() => {
+      vi.advanceTimersByTime(1000);
+    });
 
-    const bars = container.querySelectorAll(".recording-bar");
-    expect(bars.length).toBe(4);
-
-    // 默认静音/无电平时保持基础 scale
-    expect((bars[0] as HTMLElement).style.transform).toBe("scaleY(0.2)");
-
-    // 收到 audio-level 事件后动态更新 scale
+    // 第一次事件立即采样为一帧轨迹。
     emitAudioLevel(0.8);
-    const updatedBars = container.querySelectorAll(".recording-bar");
-    expect((updatedBars[1] as HTMLElement).style.transform).not.toBe("scaleY(0.2)");
+    let bars = container.querySelectorAll(".trace-bar");
+    expect(bars.length).toBe(1);
+    expect((bars[0] as HTMLElement).style.height).toBe("16.6px");
+
+    // 采样间隔内的后续事件被节流丢弃。
+    emitAudioLevel(0.5);
+    bars = container.querySelectorAll(".trace-bar");
+    expect(bars.length).toBe(1);
+    expect((bars[0] as HTMLElement).style.height).toBe("16.6px");
+
+    // 超过采样间隔后追加新帧。
+    act(() => {
+      vi.advanceTimersByTime(120);
+    });
+    emitAudioLevel(0.2);
+    bars = container.querySelectorAll(".trace-bar");
+    expect(bars.length).toBe(2);
+    expect((bars[1] as HTMLElement).style.height).toBe("6.4px");
+
+    // 切到 processing：轨迹冻结保留（不再采样新帧），并标记 frozen。
+    act(() => {
+      vi.advanceTimersByTime(120);
+    });
+    emitPhase("processing");
+    emitAudioLevel(0.9);
+    act(() => {
+      vi.advanceTimersByTime(250);
+    });
+    const trace = container.querySelector(".level-trace")!;
+    expect(trace.className).toContain("level-trace--frozen");
+    expect(trace.querySelectorAll(".trace-bar").length).toBe(2);
   });
 
   it("result 先于 done 到达（修复后的顺序）时正常显示结果", () => {

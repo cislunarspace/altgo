@@ -305,21 +305,28 @@ impl PipelineSink for MockSink {
 }
 
 // ---------------------------------------------------------------------------
-// Output fake — 记录剪贴板写入次数
+// Output fake — 记录剪贴板写入与文本注入
 // ---------------------------------------------------------------------------
 
+/// 共享的调用记录句柄（剪贴板写入 / 文本注入）。
+pub(super) type SharedCallLog = Arc<Mutex<Vec<String>>>;
+
 pub(super) struct FakeOutput {
-    pub(super) clipboard_writes: Arc<Mutex<Vec<String>>>,
+    pub(super) clipboard_writes: SharedCallLog,
+    pub(super) injections: SharedCallLog,
 }
 
 impl FakeOutput {
-    pub(super) fn new() -> (Self, Arc<Mutex<Vec<String>>>) {
+    pub(super) fn new() -> (Self, SharedCallLog, SharedCallLog) {
         let writes = Arc::new(Mutex::new(Vec::new()));
+        let injections = Arc::new(Mutex::new(Vec::new()));
         (
             Self {
                 clipboard_writes: Arc::clone(&writes),
+                injections: Arc::clone(&injections),
             },
             writes,
+            injections,
         )
     }
 }
@@ -330,9 +337,15 @@ impl Output for FakeOutput {
         Ok(())
     }
 
+    fn inject_text(&self, text: &str) -> Result<(), OutputError> {
+        self.injections.lock().unwrap().push(text.to_string());
+        Ok(())
+    }
+
     fn clone_box(&self) -> Arc<dyn Output> {
         Arc::new(FakeOutput {
             clipboard_writes: Arc::clone(&self.clipboard_writes),
+            injections: Arc::clone(&self.injections),
         })
     }
 }

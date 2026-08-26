@@ -184,12 +184,15 @@ impl Default for PolisherConfig {
 pub struct OutputConfig {
     /// 注入/复制时是否优先使用润色后的文本
     pub prefer_polished: bool,
+    /// 转写完成后是否把文本注入到当前焦点窗口（仅 Windows 实现注入；默认关闭，仅写剪贴板）
+    pub inject_text: bool,
 }
 
 impl Default for OutputConfig {
     fn default() -> Self {
         Self {
             prefer_polished: true,
+            inject_text: false,
         }
     }
 }
@@ -393,6 +396,7 @@ pub struct ConfigPatch {
     pub gui_language: Option<String>,
     pub overlay_position: Option<String>,
     pub auto_check_update: Option<bool>,
+    pub inject_text: Option<bool>,
 }
 
 impl ConfigPatch {
@@ -436,6 +440,9 @@ impl ConfigPatch {
         if let Some(v) = self.auto_check_update {
             cfg.gui.auto_check_update = v;
         }
+        if let Some(v) = self.inject_text {
+            cfg.output.inject_text = v;
+        }
     }
 }
 
@@ -463,6 +470,10 @@ mod tests {
         assert_eq!(cfg.polisher.level, "none");
         assert_eq!(cfg.polisher.temperature, 0.3);
         assert!(cfg.output.prefer_polished);
+        assert!(
+            !cfg.output.inject_text,
+            "inject_text 应默认关闭（仅写剪贴板）"
+        );
         assert!(cfg.gui.auto_check_update);
     }
 
@@ -495,6 +506,7 @@ level = "heavy"
 
 [output]
 prefer_polished = false
+inject_text = true
 "#
         )
         .unwrap();
@@ -506,6 +518,7 @@ prefer_polished = false
         assert_eq!(cfg.transcriber.language, "en");
         assert_eq!(cfg.polisher.level, "heavy");
         assert!(!cfg.output.prefer_polished);
+        assert!(cfg.output.inject_text);
     }
 
     #[test]
@@ -683,6 +696,19 @@ language = "zh"
         let patch: ConfigPatch = serde_json::from_str(r#"{"linuxEvdevCode":null}"#).unwrap();
         patch.apply_to_config(&mut cfg);
         assert!(cfg.key_listener.linux_evdev_code.is_none());
+    }
+
+    #[test]
+    fn patch_apply_inject_text_updates_field() {
+        let mut cfg = Config::default();
+        let patch: ConfigPatch = serde_json::from_str(r#"{"injectText":true}"#).unwrap();
+        patch.apply_to_config(&mut cfg);
+        assert!(cfg.output.inject_text);
+
+        // 缺省字段不修改
+        let patch: ConfigPatch = serde_json::from_str(r#"{}"#).unwrap();
+        patch.apply_to_config(&mut cfg);
+        assert!(cfg.output.inject_text);
     }
 
     #[test]

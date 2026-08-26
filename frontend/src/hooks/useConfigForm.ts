@@ -15,6 +15,7 @@ export interface AppConfig {
   guiLanguage: string;
   overlayPosition: string;
   autoCheckUpdate: boolean;
+  injectText: boolean;
   polisherApiKey: string;
   hasPolisherApiKey: boolean;
 }
@@ -34,6 +35,7 @@ export function saveRequestBody(c: AppConfig) {
     guiLanguage: c.guiLanguage,
     overlayPosition: c.overlayPosition,
     autoCheckUpdate: c.autoCheckUpdate,
+    injectText: c.injectText,
   };
 }
 
@@ -43,6 +45,7 @@ export function normalizeConfig(c: AppConfig): AppConfig {
     linuxEvdevCode: c.linuxEvdevCode ?? null,
     windowsVkCode: c.windowsVkCode ?? null,
     autoCheckUpdate: c.autoCheckUpdate ?? true,
+    injectText: c.injectText ?? false,
     polisherApiKey: "",
     hasPolisherApiKey: c.hasPolisherApiKey ?? false,
   };
