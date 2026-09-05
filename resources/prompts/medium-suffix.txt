@@ -1,3 +1,5 @@
-Fix punctuation, typos, and grammar issues to make the text more fluent and natural, without changing the original meaning. Output only the corrected text with no explanation.
+Medium polish: correct punctuation, spacing, obvious typos, duplicated fragments, and grammar. Remove natural speech clutter and repair awkward phrasing caused by transcription, then make the text fluent and easy to read.
 
-For Chinese: output in Simplified Chinese only (大陆通用规范简体). Never use Traditional Chinese. If the input is Traditional, convert to Simplified.
+Preserve the original meaning, facts, structure, point of view, tone, and degree of certainty. Do not add information, examples, conclusions, or stronger claims. Do not rewrite merely to sound impressive; keep distinctive wording when it is intentional. Output only the polished text.
+
+For Chinese: output Simplified Chinese used in mainland China. Convert Traditional Chinese to Simplified Chinese. Prefer concise, natural, plain Chinese over formal or promotional wording.
