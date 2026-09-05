@@ -93,8 +93,11 @@ jobs:
       - name: Run tests
         run: cargo test --manifest-path=src-tauri/Cargo.toml --lib
 
+      # createUpdaterArtifacts 开启后，Linux 的 updater 产物只从 AppImage 生成
+      # （tauri-bundler 仅支持 appimage）；只打 deb 会在 bundling 阶段报
+      # "Unable to find a bundled project for the updater"。与 release 一致带上 appimage。
       - name: Build Tauri GUI
-        run: npm --prefix frontend exec -- tauri build --bundles deb
+        run: npm --prefix frontend exec -- tauri build --bundles deb,appimage
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
