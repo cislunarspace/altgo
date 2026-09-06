@@ -833,7 +833,7 @@ mod tests {
             .with_auto_fade(AutoFadePolicy::ActivityAware {
                 clock: Arc::new(clock.clone()),
                 poll_interval: Duration::from_millis(15),
-                fade_delay: Duration::from_millis(40),
+                fade_delay: Duration::from_millis(500),
             });
 
         manager.set_state(OverlayState::done());
@@ -842,16 +842,18 @@ mod tests {
         // The user acts on the computer (idle suddenly shrinks → new input).
         clock.set(200);
         // 倒计时触发后用户又停手（idle 变大）：倒计时不可逆，仍应淡出。
+        // 先等若干个轮询周期，确保观察线程已在新输入上触发倒计时，再拨大 idle。
         // After the countdown arms, the user goes quiet again (idle grows): countdown is irreversible,
-        // still fade out.
-        std::thread::sleep(Duration::from_millis(5));
+        // still fade out. Wait several poll cycles first so the watcher surely arms on the new
+        // input before idle grows again.
+        std::thread::sleep(Duration::from_millis(100));
         clock.set(60_000);
 
         assert!(
             wait_for_call(
                 &window,
                 "emit:hidden",
-                Duration::from_millis(40) + HIDE_DELAY + Duration::from_millis(500)
+                Duration::from_millis(500) + HIDE_DELAY + Duration::from_millis(500)
             ),
             "检测到输入活动后应淡出（不可逆），got {:?}",
             window.calls()
