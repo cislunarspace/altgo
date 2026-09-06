@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Changed
+
+- **移除从未使用的 libnotify 依赖**：deb/rpm/AUR 的依赖清单不再声明通知库（#141），CONTRIBUTING 与 README 同步清理 notify-send / notifications 残留描述。应用行为零变化——系统通知从未实现，结果展示统一走悬浮窗。
+
 ## v2.6.11 (2026-09-06)
 
 ### Changed

@@ -60,7 +60,7 @@ Then:
 
 3. After logging back in, start altgo and complete transcription setup on the Settings page.
 
-The `.deb` and `.rpm` packages declare dependencies covering desktop integration, audio, clipboard, notifications, and `evtest`. On Wayland, make sure `evtest` is installed and your user can read `/dev/input/event*`.
+The `.deb` and `.rpm` packages declare dependencies covering desktop integration, audio, clipboard, and `evtest`. On Wayland, make sure `evtest` is installed and your user can read `/dev/input/event*`.
 
 ### Windows
 
