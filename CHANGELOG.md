@@ -5,7 +5,7 @@
 ### Changed
 
 - **移除从未使用的 libnotify 依赖**：deb/rpm/AUR 的依赖清单不再声明通知库（#141），CONTRIBUTING 与 README 同步清理 notify-send / notifications 残留描述。应用行为零变化——系统通知从未实现，结果展示统一走悬浮窗。
-- **润色供应商预置精简为四家**：预置清单只保留 Kimi、智谱 GLM、DeepSeek、小米 MiMo 及其官方 Anthropic / Coding Plan 变体入口（共 13 条），通义、豆包、文心、MiniMax、OpenAI、Claude、Gemini 与各聚合、中转服务不再预置，需要时可在设置中自行填写 API 地址与模型。同时更新模型目录：智谱主条目从 GLM-4.7-flash / 4.6 更新为 GLM-5.2（默认）与 GLM-5.1，Kimi 主条目为 K2.6 补上 1M 上下文的 K3 备选（K2 系列与 moonshot-v1 已在官方平台下线）。
+- **润色供应商预置精简为四家**：预置清单只保留 Kimi、智谱 GLM、DeepSeek、小米 MiMo 及其官方 Anthropic / Coding Plan 变体入口（共 13 条），通义、豆包、文心、MiniMax、OpenAI、Claude、Gemini 与各聚合、中转服务不再预置，需要时可在设置中自行填写 API 地址与模型。同时更新模型目录：智谱主条目从 GLM-4.7-flash / 4.6 更新为 GLM-5.3 Flash（免费默认，1M 上下文）与 GLM-5.2 / 5.1，两条 Coding Plan 条目同步以 GLM-5.3 Flash 为默认；Kimi 主条目为 K2.6 补上 1M 上下文的 K3 备选（K2 系列与 moonshot-v1 已在官方平台下线）。
 
 ## v2.6.11 (2026-09-06)
 
