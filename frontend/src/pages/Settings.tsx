@@ -1,4 +1,4 @@
-import { Children, isValidElement, useEffect, useState, type ReactNode } from "react";
+import { Children, isValidElement, useEffect, useMemo, useState, type ReactNode } from "react";
 import { getVersion } from "@tauri-apps/api/app";
 import { invoke } from "@tauri-apps/api/core";
 import { useTranslation } from "../i18n";
@@ -29,6 +29,7 @@ import {
   type WindowSizePref,
 } from "../ui-size";
 import { ProviderPresetSelector } from "../components/ProviderPresetSelector";
+import { loadCatalog } from "../config/catalog";
 import { polisherPresets, type ProviderPreset, type ModelCatalogEntry } from "../config/modelPresets";
 
 const KEY_PRESETS: { value: string; labelKey: string }[] = [
@@ -75,6 +76,14 @@ export default function Settings() {
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ ok: boolean; error?: string } | null>(null);
   const [clearingKey, setClearingKey] = useState(false);
+  const [catalogPresets, setCatalogPresets] = useState<ProviderPreset[]>([]);
+  const [catalogLoading, setCatalogLoading] = useState(false);
+  const [catalogError, setCatalogError] = useState<string | null>(null);
+
+  const allPresets = useMemo(
+    () => [...polisherPresets, ...catalogPresets],
+    [catalogPresets],
+  );
 
   const [checkingUpdate, setCheckingUpdate] = useState(false);
   const [installingUpdate, setInstallingUpdate] = useState(false);
@@ -134,6 +143,22 @@ export default function Settings() {
         update("model", "");
       }
     });
+  };
+
+  // 拉取 Oh My Pi 在线供应商目录（去重后并入预设选择器），失败提示可重试。
+  // Fetches the Oh My Pi online provider catalog (merged into the picker after dedup);
+  // failures surface a retryable hint.
+  const loadOnlineCatalog = async () => {
+    if (catalogLoading) return;
+    setCatalogLoading(true);
+    setCatalogError(null);
+    try {
+      setCatalogPresets(await loadCatalog(polisherPresets));
+    } catch (e) {
+      setCatalogError(String(e));
+    } finally {
+      setCatalogLoading(false);
+    }
   };
 
   // 用表单当前值直接测试（密钥留空时后端回落到已存密钥），不必先保存。
@@ -471,7 +496,7 @@ export default function Settings() {
           {polishOpen && (
             <div className="settings-section-body">
               <ProviderPresetSelector
-                presets={polisherPresets}
+                presets={allPresets}
                 modelType="polisher"
                 currentApiBaseUrl={config.polishApiBaseUrl}
                 currentModel={config.polishModel}
@@ -483,6 +508,34 @@ export default function Settings() {
                   update("polishProtocol", preset.apiFormat);
                 }}
               />
+              <div className="settings-field">
+                <span className="settings-field-label-text">{t("settings.online_catalog")}</span>
+                <div className="settings-field-control">
+                  <button
+                    type="button"
+                    className="settings-btn settings-btn-sm settings-btn-secondary"
+                    onClick={() => void loadOnlineCatalog()}
+                    disabled={catalogLoading}
+                  >
+                    {catalogLoading
+                      ? t("settings.catalog_loading")
+                      : t("settings.load_catalog")}
+                  </button>
+                </div>
+                {catalogPresets.length > 0 && (
+                  <p className="settings-hint settings-hint--polish">
+                    {t("settings.catalog_loaded").replace(
+                      "{count}",
+                      String(catalogPresets.length),
+                    )}
+                  </p>
+                )}
+                {catalogError && (
+                  <p className="settings-hint settings-hint--polish settings-test-err">
+                    {catalogError}
+                  </p>
+                )}
+              </div>
               <div className="settings-field">
                 <span className="settings-field-label-text">{t("settings.polish_level")}</span>
                 <div className="settings-field-control">
