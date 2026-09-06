@@ -93,8 +93,14 @@ jobs:
       - name: Run tests
         run: cargo test --manifest-path=src-tauri/Cargo.toml --lib
 
+      # createUpdaterArtifacts 开启后，Linux 的 updater 产物只从 AppImage 生成
+      # （tauri-bundler 仅支持 appimage）；只打 deb 会在 bundling 阶段报
+      # "Unable to find a bundled project for the updater"。与 release 一致带上 appimage。
+      # CI 无签名私钥（TAURI_SIGNING_PRIVATE_KEY 只在 release 注入），生成 updater
+      # 产物会报 "public key found but no private key"；签名产物路径由 release 验证，
+      # 此处用 --config 覆盖关闭，仅验证各 bundle 能构建。
       - name: Build Tauri GUI
-        run: npm --prefix frontend exec -- tauri build --bundles deb
+        run: npm --prefix frontend exec -- tauri build --bundles deb,appimage --config '{"bundle":{"createUpdaterArtifacts":false}}'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -153,7 +159,8 @@ jobs:
         if: matrix.arch == 'arm64'
         run: cargo check --manifest-path=src-tauri/Cargo.toml --target ${{ matrix.target }}
 
+      # CI 无签名私钥，updater 产物签名由 release 验证；此处仅验证打包（见 Linux job 注释）。
       - name: Build Tauri GUI
-        run: npm --prefix frontend exec -- tauri build --target ${{ matrix.target }} --bundles nsis
+        run: npm --prefix frontend exec -- tauri build --target ${{ matrix.target }} --bundles nsis --config '{"bundle":{"createUpdaterArtifacts":false}}'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,3 +1,5 @@
-Rewrite it into well-structured, clearly expressed text. You may adjust word order and phrasing, but preserve the core meaning. Output only the rewritten text with no explanation.
+Heavy polish: reorganize sentences and paragraphs when needed to produce clear, coherent, well-structured prose. Remove redundant speech fragments, resolve pronouns when the input itself makes the reference clear, and improve transitions without adding content.
 
-For Chinese: output in Simplified Chinese only (大陆通用规范简体). Never use Traditional Chinese. If the input is Traditional, convert to Simplified.
+Preserve the speaker's complete meaning, facts, intent, point of view, tone, and uncertainty. Never invent details, fill gaps, summarize away important information, or turn an opinion into a fact. Keep names, numbers, technical terms, quotations, and explicit examples accurate. The result should sound like careful human writing, not a generic article. Output only the rewritten text.
+
+For Chinese: output Simplified Chinese used in mainland China. Convert Traditional Chinese to Simplified Chinese. Use direct, idiomatic, plain Chinese; avoid academic, bureaucratic, promotional, and AI-generated phrasing.
