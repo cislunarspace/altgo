@@ -67,7 +67,6 @@
           "libayatana-appindicator3-1",
           "xclip",
           "pulseaudio-utils",
-          "libnotify-bin",
           "evtest",
           "xinput",
           "x11-xserver-utils"
@@ -80,7 +79,6 @@
           "libayatana-appindicator-gtk3",
           "xclip",
           "pulseaudio-utils",
-          "libnotify",
           "evtest",
           "xorg-x11-xinput",
           "xorg-x11-server-utils"

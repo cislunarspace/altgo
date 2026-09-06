@@ -60,7 +60,7 @@ sudo usermod -aG input "$USER"
 
 3. 重新登录后启动 altgo，在设置页完成转写配置。
 
-`.deb` 和 `.rpm` 会声明桌面、音频、剪贴板、通知和 `evtest` 等依赖；若使用 Wayland，请确认系统已安装 `evtest` 且当前用户能读取 `/dev/input/event*`。
+`.deb` 和 `.rpm` 会声明桌面、音频、剪贴板和 `evtest` 等依赖；若使用 Wayland，请确认系统已安装 `evtest` 且当前用户能读取 `/dev/input/event*`。
 
 ### Windows
 

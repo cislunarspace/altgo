@@ -11,7 +11,6 @@ pkgbase = altgo
 	depends = libayatana-appindicator
 	depends = xclip
 	depends = pulseaudio
-	depends = libnotify
 	depends = evtest
 	depends = xorg-xinput
 	depends = xorg-xmodmap

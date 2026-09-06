@@ -13,7 +13,7 @@
 
 ### 平台特定依赖
 
-- **Linux**：`xinput`、`xmodmap`、`parecord`、`xclip` 或 `wl-copy`、`notify-send`；Wayland 下按键监听还需 `evtest`，且需能读取 `/dev/input/event*`（常见：`sudo usermod -aG input $USER` 后重新登录）。完整 GUI 构建需 GTK/WebKit 等开发库，见 [Tauri 2 前置条件](https://tauri.app/start/prerequisites/)。
+- **Linux**：`xinput`、`xmodmap`、`parecord`、`xclip` 或 `wl-copy`；Wayland 下按键监听还需 `evtest`，且需能读取 `/dev/input/event*`（常见：`sudo usermod -aG input $USER` 后重新登录）。完整 GUI 构建需 GTK/WebKit 等开发库，见 [Tauri 2 前置条件](https://tauri.app/start/prerequisites/)。
 
 ## 开发流程
 
@@ -89,7 +89,7 @@ The project supports **Linux** on **x86_64** and **aarch64**. CI and Release ver
 
 ### Platform-Specific Dependencies
 
-- **Linux**: `xinput`, `xmodmap`, `parecord`, `xclip` or `wl-copy`, `notify-send`; key listening on Wayland additionally needs `evtest` and read access to `/dev/input/event*` (typically: `sudo usermod -aG input $USER`, then re-login). Full GUI builds need GTK/WebKit dev libraries — see the [Tauri 2 prerequisites](https://tauri.app/start/prerequisites/).
+- **Linux**: `xinput`, `xmodmap`, `parecord`, `xclip` or `wl-copy`; key listening on Wayland additionally needs `evtest` and read access to `/dev/input/event*` (typically: `sudo usermod -aG input $USER`, then re-login). Full GUI builds need GTK/WebKit dev libraries — see the [Tauri 2 prerequisites](https://tauri.app/start/prerequisites/).
 
 ## Workflow
 
